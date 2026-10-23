@@ -3,6 +3,17 @@ from ass_font_substitute.core.fontindex.store import open_db, update_index
 from tests.fonts import build_font
 
 
+def _mklib(d, n=2):
+    """建库 helper：n 个文件、每文件 1 字体，建目录并增量索引入库。
+    family 取目录名前缀保证跨目录身份互异（否则版本去重会合并同名字体）。"""
+    d.mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        build_font(d / f"f{i}.ttf", chars="永中木", family=f"{d.name}體{i}")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    conn.close()
+
+
 def test_version_dedup(tmp_path):
     d = tmp_path / "lib"
     d.mkdir()
@@ -103,3 +114,12 @@ def test_removed_file_cleans_fingerprints(tmp_path):
     update_index(d, conn)
     n = conn.execute("SELECT COUNT(*) FROM fingerprints").fetchone()[0]
     assert n == 1
+
+
+def test_stats_counts_files(tmp_path):
+    _mklib(tmp_path / "a", n=1)                    # 既有 helper：1 文件 1 字体
+    _mklib(tmp_path / "b", n=2)
+    lib = LibraryIndex.open([tmp_path / "a", tmp_path / "b"])
+    st = lib.stats()
+    assert st["files"] == 3                        # 文件总数（跨目录）
+    assert st["fonts"] == 3

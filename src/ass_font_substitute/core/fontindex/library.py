@@ -91,6 +91,7 @@ class LibraryIndex:
                 best[key] = item
             else:
                 self._skipped.append(f"{self.dirs[item[0]]}/{item[1]}#{item[2]} 旧版本")
+        self._files_count = len({(item[0], item[1]) for item in raw})
         self._entities = [
             FontEntity(fp, aliases[0], aliases, ps, ver, w, wd, it, script, cat,
                        cmap, str(self.dirs[di]), rel, fi)
@@ -108,7 +109,8 @@ class LibraryIndex:
     def stats(self) -> dict:
         sc = sum(1 for e in self._entities if e.script in ("简", "简繁"))
         tc = sum(1 for e in self._entities if e.script in ("繁", "简繁"))
-        return {"dirs": len(self.dirs), "fonts": len(self._entities),
+        return {"dirs": len(self.dirs), "files": self._files_count,
+                "fonts": len(self._entities),
                 "support_sc": sc, "support_tc": tc, "skipped": len(self._skipped)}
 
     def skipped(self) -> list[str]:
