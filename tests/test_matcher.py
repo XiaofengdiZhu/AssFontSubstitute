@@ -21,6 +21,20 @@ def _lib(tmp_path):
     return LibraryIndex.open([d])
 
 
+def test_twin_under_coverage_falls_back_to_missing(tmp_path):
+    # R14：孪生命中但覆盖不达标 → 库中没有（missing），不得归 twin/replace
+    d = tmp_path / "lib"
+    d.mkdir()
+    # 简体替身：名称恰为繁名 t2s 转换结果（孪生可命中），但 cmap 缺 "中"
+    build_font(d / "sc.ttf", chars="永和的文字", family="华康测试体W5")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    lib = LibraryIndex.open([d])
+    r = classify_usage(_usage("華康測試體W5", "永和的中文字"), lib)
+    assert r.kind == "missing"
+    assert r.twin_hit is None and r.entities == []
+
+
 def test_twin_convert():
     assert twin_convert("華康測試體W5", "t2s") == "华康测试体 W5" or \
            twin_convert("華康測試體W5", "t2s").replace(" ", "") == "华康测试体W5"
