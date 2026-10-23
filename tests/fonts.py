@@ -23,10 +23,10 @@ def _box(pen: TTGlyphPen, k: float = 1.0) -> None:
     pen.closePath()
 
 
-def _circle(pen: TTGlyphPen, k: float = 1.0) -> None:
+def _circle(pen: TTGlyphPen, scale: float = 1.0) -> None:
     # 四段二次贝塞尔近似实心圆（圆心 (300,300)，半径 280；
     # 0.9142r 为二次曲线过 45° 点的控制点系数）
-    cx, cy, r = 300, 300, 280 * k
+    cx, cy, r = 300, 300, 280 * scale
     k = round(r * 0.9142)
     pen.moveTo((cx + r, cy))
     pen.qCurveTo((cx + k, cy + k), (cx, cy + r))

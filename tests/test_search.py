@@ -92,13 +92,11 @@ def test_size_range_gate(tmp_path):
     assert s.exhausted
 
 
-def test_cached_pair_gates_without_render(tmp_path, monkeypatch):
-    # pair 缓存命中 → 相似率/大小门槛零渲染可判；命中率门槛放行
+def test_miss_path_render_failure_skips(tmp_path, monkeypatch):
+    # 未命中路径：候选无缓存 → 需渲染 → 渲染失败 → 跳过；耗尽而非崩溃
     lib = _lib(tmp_path, dict(name="c0", chars=CHARS, family="圓體0"))
     target = next(e for e in lib.entities() if e.psname == "TGT")
     cache = Cache(tmp_path / "cache.db")
-    cache.put_pair(target.fingerprint, "nonexistent-fp", text_version(CHARS),
-                   CompareResult(0.9, 1.0, 8))
 
     def explode(path, face_index, chars):
         raise RuntimeError("不应触发渲染")
@@ -106,10 +104,72 @@ def test_cached_pair_gates_without_render(tmp_path, monkeypatch):
     monkeypatch.setattr(search_mod, "render_bundle", explode)
     s = FontSearcher(target, set("永中木水火土石田"), lib, cache,
                      sample_text=CHARS, cov_threshold=0.98)
-    # c0 无缓存 → 需渲染 → 渲染被禁 → 跳过；耗尽而非崩溃
     found = _drain(s)
     assert found == []
     assert s.exhausted
+
+
+def test_rejected_results_still_cached(tmp_path, monkeypatch):
+    # 门槛拒绝的结果也必须先入缓存：放宽阈值重算时零渲染复用（spec §9 步骤5）
+    lib = _lib(tmp_path,
+               dict(name="cround", chars=CHARS, family="圓形體", shape="circle"))
+    target = next(e for e in lib.entities() if e.psname == "TGT")
+    cache = Cache(tmp_path / "cache.db")
+    s = FontSearcher(target, set("永中木水火土石田"), lib, cache,
+                     sample_text=CHARS, cov_threshold=0.98, min_sim=0.99)
+    assert _drain(s) == []                      # 0.81 < 0.99 被拒，但 pair 已入库
+    assert cache.pair_count >= 1
+
+    def explode(path, face_index, chars):
+        raise RuntimeError("放宽阈值后不应触发渲染")
+
+    monkeypatch.setattr(search_mod, "render_bundle", explode)
+    s2 = FontSearcher(target, set("永中木水火土石田"), lib, cache,
+                      sample_text=CHARS, cov_threshold=0.98, min_sim=0.80)
+    found = _drain(s2)
+    assert [c.fingerprint for c in found] == \
+        [next(e for e in lib.entities() if e.psname == "CROUND").fingerprint]
+
+
+def test_cache_hit_path_coverage_gate(tmp_path, monkeypatch):
+    # 缓存命中路径的覆盖率门槛：pair 达标 + 候选低覆盖 → 仍拒，不因缓存放行
+    lib = _lib(tmp_path)
+    target = next(e for e in lib.entities() if e.psname == "TGT")
+    far = next(e for e in lib.entities() if e.psname == "FAR")
+    cache = Cache(tmp_path / "cache.db")
+    cache.put_pair(target.fingerprint, far.fingerprint, text_version(CHARS),
+                   CompareResult(0.92, 1.05, 5))
+
+    def explode(path, face_index, chars):
+        raise RuntimeError("不应触发渲染")
+
+    monkeypatch.setattr(search_mod, "render_bundle", explode)
+    s = FontSearcher(target, set("永中木水火土石田"), lib, cache,
+                     sample_text=CHARS, cov_threshold=0.98)
+    assert _drain(s) == []                      # 命中路径走到覆盖率门槛被拒
+    assert s.exhausted
+
+
+def test_target_render_failure_flagged(tmp_path, monkeypatch):
+    # 目标渲染失败 → target_error（区别于 exhausted），只解析一次不逐候选重试，
+    # 不伪装成「库里没有相似字体」
+    lib = _lib(tmp_path, dict(name="c0", chars=CHARS, family="圓體0"))
+    target = next(e for e in lib.entities() if e.psname == "TGT")
+    tpath = str(search_mod._entity_path(target))
+    calls: list[str] = []
+
+    def flaky(path, face_index, chars):
+        calls.append(str(path))
+        raise RuntimeError("目标坏了")
+
+    monkeypatch.setattr(search_mod, "render_bundle", flaky)
+    s = FontSearcher(target, set("永中木水火土石田"), lib,
+                     Cache(tmp_path / "cache.db"),
+                     sample_text=CHARS, cov_threshold=0.98)
+    found = _drain(s)
+    assert found == []
+    assert s.target_error and s.exhausted
+    assert calls == [tpath]                     # 恰一次，无重试风暴
 
 
 def test_cache_hit_accepted_without_render(tmp_path, monkeypatch):

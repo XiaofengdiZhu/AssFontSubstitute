@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 from typing import Iterator, Optional
 
-from ass_font_substitute.core.coverage.matcher import coverage_detail
+from ass_font_substitute.core.coverage.matcher import COV_THRESHOLD, coverage_detail
 from ass_font_substitute.core.fontindex.library import FontEntity, LibraryIndex
 from ass_font_substitute.core.fontindex.probes import PROBE_SC, PROBE_TC
 from ass_font_substitute.core.models import Candidate
@@ -46,14 +46,19 @@ class FontSearcher:
     """逐候选严格门槛搜索：候选须连过 相似率 / 相对大小 / 覆盖率 三道门槛
     才算命中并列出，任一不过即跳过（不再垫底展示）；攒够 n_pause 个命中即
     paused，续算置 paused=False；池耗尽置 exhausted（GUI 显「无更多相似字体」）。
+    target 渲染失败置 target_error（区别于 exhausted，GUI 显「原字体无法渲染」；
+    渲染条首次需要时解析一次，pair 全命中则永不解析）；
+    target=None（库中没有）无暂停语义，一次搜穿整池返回覆盖率达标的元数据粗排列表。
     """
 
     def __init__(self, target: Optional[FontEntity], chars: set[str],
                  lib: LibraryIndex, cache: Cache, sample_text: str,
-                 cov_threshold: float = 0.95, n_pause: int = 5,
+                 cov_threshold: float = COV_THRESHOLD, n_pause: int = 5,
                  min_sim: float = MIN_SIM,
                  size_range: tuple[float, float] = SIZE_RANGE,
                  direction: str = "t2s"):
+        if size_range[0] > size_range[1]:
+            raise ValueError("size_range 下限不得大于上限")
         self.target = target
         self.chars = chars
         self.lib = lib
@@ -66,12 +71,15 @@ class FontSearcher:
         self.direction = direction
         self.paused = False
         self.exhausted = False
-        self.high_sim_count = 0
+        self.hit_count = 0
+        self.target_error = False
         self._tver = text_version(sample_text)
         self._tcache: dict[str, object] = {}
         pool = [e for e in lib.entities()
                 if target is None or e.fingerprint != target.fingerprint]
         self._iter: Iterator[FontEntity] = iter(rank_pool(target, pool, direction))
+        self._tgt = None
+        self._tgt_resolved = False
 
     def _bundle(self, e: FontEntity):
         def loader():
@@ -79,12 +87,17 @@ class FontSearcher:
                 _entity_path(e), e.face_index, self.sample_text)
         return self.cache.get_render(e.fingerprint, self._tver, loader)
 
-    def _target_bundle(self):
-        if self.target is None:
-            return None
-        if "tgt" not in self._tcache:
-            self._tcache["tgt"] = self._bundle(self.target)
-        return self._tcache["tgt"]
+    def _target(self):
+        """目标渲染条首次需要时解析一次；失败置 target_error，不逐候选重试。"""
+        if self._tgt_resolved:
+            return self._tgt
+        self._tgt_resolved = True
+        try:
+            self._tgt = self._bundle(self.target)
+        except Exception:
+            self._tgt = None
+            self.target_error = True
+        return self._tgt
 
     def next(self) -> Optional[Candidate]:
         """推进到下一个「过全部门槛」的候选；None = 已暂停或耗尽（看 exhausted）。"""
@@ -112,6 +125,8 @@ class FontSearcher:
             return Candidate(fingerprint=e.fingerprint, display_name=e.display_name,
                              coverage=cov, script=e.script, category=e.category,
                              weight=e.weight, source="recommend")
+        if self.target_error:
+            return None             # 目标渲染失败：不逐候选重试，GUI 显「原字体无法渲染」
         r = self.cache.get_pair(self.target.fingerprint, e.fingerprint, self._tver)
         cov: Optional[float] = None
         if r is None:
@@ -119,9 +134,12 @@ class FontSearcher:
             if cov < self.cov_threshold:
                 return None
             try:
-                r = compare(self._target_bundle(), self._bundle(e))
+                tb = self._target()
+                if tb is None:
+                    return None     # 目标渲染失败：后续候选在顶部短路，不重试
+                r = compare(tb, self._bundle(e))
             except Exception:
-                # spec §11：渲染失败无法证明达标 → 跳过，不中断搜索
+                # spec §11：候选渲染失败无法证明达标 → 跳过，不中断搜索
                 return None
             if r is not None:
                 self.cache.put_pair(self.target.fingerprint, e.fingerprint,
@@ -141,8 +159,8 @@ class FontSearcher:
                          weight=e.weight, source="recommend")
         cand.similarity, cand.size_ratio, cand.n_chars = \
             r.score, r.size_ratio, r.n_chars
-        self.high_sim_count += 1
-        if self.high_sim_count >= self.n_pause:
+        self.hit_count += 1
+        if self.hit_count >= self.n_pause:
             self.paused = True
         return cand
 
