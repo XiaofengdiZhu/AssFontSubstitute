@@ -201,6 +201,80 @@ class SubsVM:
         else:
             card.checked_key = KEEP
 
+    # ---- 搜索层 ----
+    def attach_searcher(self, card: Card, searcher: FontSearcher) -> None:
+        card.searcher = searcher
+        card.searching = True
+        card.search_state = "idle"
+        # 卡片门槛跟随本轮实搜值：放宽重算以此为基准（降 0.10 至下限）
+        card.min_sim = float(searcher.min_sim)
+
+    def add_candidates(self, card: Card, candidates) -> list[OptionItem]:
+        """搜索批次回填：按指纹去重，实体查 ent_by_fp；返回本次新增项。"""
+        added = []
+        for c in candidates:
+            if card.option(c.fingerprint) is not None:
+                continue
+            o = OptionItem(c.fingerprint, c.display_name, coverage=c.coverage,
+                           similarity=c.similarity, size_ratio=c.size_ratio,
+                           meta=self._meta(self.ent_by_fp[c.fingerprint])
+                           if c.fingerprint in self.ent_by_fp else [],
+                           source="search", n_chars=c.n_chars,
+                           entity=self.ent_by_fp.get(c.fingerprint))
+            card.options.append(o)
+            added.append(o)
+        return added
+
+    def finish_search(self, card: Card, searcher: FontSearcher) -> None:
+        """终态：target_error（原字体无法渲染）> paused（可继续）>
+        exhausted（无更多相似字体）。"""
+        card.searching = False
+        if searcher.target_error:
+            card.search_state = "target_error"
+        elif searcher.paused:
+            card.search_state = "paused"
+        else:
+            card.search_state = "exhausted"
+
+    def relax_min_sim(self, card: Card) -> float | None:
+        """放宽重算门槛：降 10 个百分点，下限 50%。新门槛入 card.min_sim，
+        由页面用新值建**新**搜索器（hit 计数清零）；旧结果保留——被拒 pair
+        已入缓存，重算零渲染。已达下限返回 None。"""
+        cur = card.min_sim if card.min_sim is not None \
+            else float(self._settings.get("min_sim"))
+        nxt = round(max(SIM_FLOOR, cur - RELAX_STEP), 2)
+        if nxt >= cur:
+            return None
+        card.min_sim = nxt
+        return nxt
+
+    def _search_target(self, card: Card) -> FontEntity | None:
+        """相似度基准 = 字幕原字体对应的在库实体（优先原名命中，否则覆盖
+        最高者）；孪生体不作 target（已在选项里，指纹会经池排除逻辑互斥）。"""
+        chars = self.chars_by_norm.get(card.norm_name, set())
+        ents = [o.entity for o in card.options if o.entity is not None
+                and "孪生对应" not in o.badges]
+        if not ents:
+            return None
+        orig = next((e for e in ents
+                     if card.norm_name in {normalize_name(a) for a in e.aliases}),
+                    None)
+        if orig is not None:
+            return orig
+        return max(ents, key=lambda e: e.cmap.hit_ratio(chars)) if chars else ents[0]
+
+    def attach_pick(self, card: Card, entity: FontEntity) -> OptionItem:
+        """选择对话框回填：去重后勾选该实体。"""
+        chars = self.chars_by_norm.get(card.norm_name, set())
+        cov, _ = coverage_detail(entity.cmap, chars)
+        o = card.option(entity.fingerprint)
+        if o is None:
+            o = OptionItem(entity.fingerprint, entity.display_name, coverage=cov,
+                           meta=self._meta(entity), source="pick", entity=entity)
+            card.options.append(o)
+        card.checked_key = o.key
+        return o
+
 
 class _LibStub:
     """仅实现 find_by_name 的库替身（按指纹反查别名）。生产路径用真 LibraryIndex。"""

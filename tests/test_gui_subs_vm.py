@@ -4,9 +4,11 @@ from ass_font_substitute.core.coverage.matcher import UsageClass
 from ass_font_substitute.core.decision.store import record_decision
 from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.core.models import CmapRanges
-from ass_font_substitute.gui.jobs import FileParse
+from ass_font_substitute.core.similarity.cache import Cache
+from ass_font_substitute.gui.jobs import FileParse, classify_one, make_searcher, pull_chunk
 from ass_font_substitute.gui.settings_store import Settings
 from ass_font_substitute.gui.subs_vm import KEEP, OptionItem, SubsVM
+from tests.fonts import build_font
 
 
 def _parse(path, name, chars="永宇"):
@@ -162,3 +164,110 @@ def test_rebuild_clears_and_orders(vm_full):
     assert [c.kind for c in vm.cards] == ["keep", "missing"]
     vm.rebuild([_usage("不存在体", "永")], 0.95, "t2s")
     assert len(vm.cards) == 1
+
+
+# ---- 搜索层（Task 13）----
+
+@pytest.fixture()
+def lib_env(tmp_path):
+    """三字体隔离库：目标 TGT（圆）、近亲 NEAR（圆，形状同）、远体 FAR（box）。"""
+    d = tmp_path / "fonts"
+    d.mkdir()
+    build_font(d / "t.ttf", chars="永中木", family="TGT圆", shape="circle")
+    build_font(d / "n.ttf", chars="永中木", family="NEAR圆", shape="circle")
+    build_font(d / "f.ttf", chars="永中木", family="FAR方", shape="box")
+    from ass_font_substitute.core.fontindex.store import update_index, open_db
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    conn.close()
+    from ass_font_substitute.core.fontindex.library import LibraryIndex
+    lib = LibraryIndex.open([d])
+    from types import SimpleNamespace
+    s = Settings(tmp_path / "s.json")
+    ctx = SimpleNamespace(settings=s, cache=Cache(tmp_path / "c.db"),
+                          snapshot=None, lib=lib, lib_dirs=(str(d),))
+    vm = SubsVM(s, tmp_path / "d.db")
+    vm.set_entities(lib.entities())
+    return vm, lib, ctx
+
+
+def _card_for(vm, lib, name):
+    usage = _usage(name, "永中木")
+    cls = classify_one(lib, usage, 0.95, "t2s")
+    card = vm.make_card(usage, cls)
+    vm.apply_default_check(card)
+    return card
+
+
+def test_search_round_appends_and_finishes_paused(lib_env):
+    vm, lib, ctx = lib_env
+    card = _card_for(vm, lib, "TGT圆")
+    s = make_searcher(ctx, target=vm._search_target(card), chars=set("永中木"),
+                      threshold=0.95, n_pause=1, min_sim=0.5,
+                      size_range=(0.5, 2.0), direction="t2s")
+    vm.attach_searcher(card, s)
+    cands, state = pull_chunk(s)
+    vm.add_candidates(card, cands)
+    vm.finish_search(card, s)
+    assert card.search_state == "paused"               # n_pause=1 攒 1 命中即暂停
+    assert {o.display_name for o in card.options} >= {"NEAR圆"}
+    assert any(o.source == "search" for o in card.options)
+    # 续搜：累计 hit_count——再来 1 个命中又暂停
+    cands2, state2 = pull_chunk(s)
+    vm.add_candidates(card, cands2)
+    vm.finish_search(card, s)
+    assert card.search_state in ("paused", "exhausted")
+
+
+def test_exhausted_and_relax(lib_env):
+    vm, lib, ctx = lib_env
+    card = _card_for(vm, lib, "TGT圆")
+    s = make_searcher(ctx, target=vm._search_target(card), chars=set("永中木"),
+                      threshold=0.95, n_pause=99, min_sim=0.99,
+                      size_range=(0.5, 2.0), direction="t2s")
+    vm.attach_searcher(card, s)
+    cands, state = pull_chunk(s)
+    vm.add_candidates(card, cands)
+    vm.finish_search(card, s)
+    assert card.search_state == "exhausted"
+    new_min = vm.relax_min_sim(card)
+    assert new_min == pytest.approx(0.89)
+    s2 = make_searcher(ctx, target=vm._search_target(card), chars=set("永中木"),
+                       threshold=0.95, n_pause=99, min_sim=new_min,
+                       size_range=(0.5, 2.0), direction="t2s")
+    vm.attach_searcher(card, s2)
+    cands2, state2 = pull_chunk(s2)
+    vm.add_candidates(card, cands2)
+    vm.finish_search(card, s2)
+    assert card.search_state == "exhausted"
+    assert any(o.display_name == "NEAR圆" for o in card.options)   # 放宽后捞回
+    # 去重：重复候选不重复进 options
+    n_before = len(card.options)
+    vm.add_candidates(card, cands2)
+    assert len(card.options) == n_before
+
+
+def test_relax_floor(lib_env):
+    vm, lib, ctx = lib_env
+    card = _card_for(vm, lib, "TGT圆")
+    card.min_sim = 0.55
+    assert vm.relax_min_sim(card) == pytest.approx(0.50)
+    card.min_sim = 0.50
+    assert vm.relax_min_sim(card) is None
+
+
+def test_search_target_prefers_original(lib_env):
+    vm, lib, ctx = lib_env
+    card = _card_for(vm, lib, "TGT圆")
+    t = vm._search_target(card)
+    assert t is not None and t.display_name == "TGT圆"
+
+
+def test_attach_pick_dedupes_and_checks(lib_env):
+    vm, lib, ctx = lib_env
+    card = _card_for(vm, lib, "TGT圆")
+    e = next(e for e in lib.entities() if e.display_name == "NEAR圆")
+    o = vm.attach_pick(card, e)
+    assert card.checked_key == e.fingerprint and o.source == "pick"
+    o2 = vm.attach_pick(card, e)
+    assert len([x for x in card.options if x.key == e.fingerprint]) == 1
