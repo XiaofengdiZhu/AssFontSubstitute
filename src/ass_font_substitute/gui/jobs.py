@@ -136,6 +136,7 @@ class FileParse:
     usages: list
     unknown_styles: list[str]
     invalid_styles: list[str]
+    checked: bool = True
 
     @property
     def font_count(self) -> int:

@@ -61,7 +61,9 @@ def _extract(doc: Document) -> ExtractResult:
         if norm not in buckets:
             buckets[norm] = FontUsage(raw_name=raw, norm_name=norm,
                                       style_count=0, inline_count=0, chars=set())
-        return buckets[norm]
+        u = buckets[norm]
+        u.variants.add(raw)
+        return u
 
     for fontname in style_fonts.values():
         if fontname:
@@ -96,17 +98,20 @@ def _extract(doc: Document) -> ExtractResult:
                          invalid_styles=invalid_styles)
 
 
-def merge_usages(results: list[ExtractResult]) -> list[FontUsage]:
+def merge_usages(results: list[ExtractResult | list[FontUsage]]) -> list[FontUsage]:
+    """按规范名合并多来源用字桶。元素可为 ExtractResult，也可直接给
+    FontUsage 列表（GUI 文件层按勾选文件聚合时免去再包一层）。"""
     out: dict[str, FontUsage] = {}
     for r in results:
-        for u in r.usages:
+        for u in (r.usages if isinstance(r, ExtractResult) else r):
             if u.norm_name not in out:
                 out[u.norm_name] = FontUsage(u.raw_name, u.norm_name,
                                              u.style_count, u.inline_count,
-                                             set(u.chars))
+                                             set(u.chars), set(u.variants))
             else:
                 m = out[u.norm_name]
                 m.style_count += u.style_count
                 m.inline_count += u.inline_count
                 m.chars |= u.chars
+                m.variants |= u.variants
     return list(out.values())

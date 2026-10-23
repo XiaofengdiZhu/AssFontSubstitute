@@ -79,6 +79,7 @@ class FontUsage:
     style_count: int
     inline_count: int
     chars: set[str] = field(default_factory=set)
+    variants: set[str] = field(default_factory=set)   # 同桶全部原始拼写（写回映射键全集）
 
 
 @dataclass
