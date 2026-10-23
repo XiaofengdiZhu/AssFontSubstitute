@@ -1,6 +1,7 @@
 import sqlite3
 
-from ass_font_substitute.core.fontindex.store import open_db, stats, update_index
+from ass_font_substitute.core.fontindex.store import (
+    DDL, open_db, stats, update_index)
 from tests.fonts import build_font
 
 
@@ -43,6 +44,30 @@ def test_bad_file_retry(tmp_path):
     build_font(bad, chars="永", family="Fixed體")  # mtime/size 变 → 自动重试
     r2 = update_index(d, conn)
     assert r2.bad_retried == 1 and r2.fonts == 1
+
+
+def test_schema_mismatch_backs_up_and_rebuilds(tmp_path):
+    # spec §5：索引版本不符 → 改名备份旧库（.bak，覆盖旧备份）后全量重建
+    d = tmp_path / "fonts"
+    d.mkdir()
+    db = d / "fontindex.db"
+    old = sqlite3.connect(db)
+    old.executescript(DDL)
+    old.execute("INSERT INTO schema_version VALUES (99)")
+    old.execute("INSERT INTO files VALUES ('old.ttf', 1, 1, 'xx')")
+    old.commit()
+    old.close()
+    (d / "fontindex.db.bak").write_bytes(b"stale backup")   # 既有 .bak 须被覆盖
+    conn = open_db(db)                    # 不得抛 IndexSchemaError
+    assert stats(conn) == {"files": 0, "fonts": 0, "support_sc": 0, "support_tc": 0}
+    assert conn.execute("SELECT v FROM schema_version").fetchone()[0] == 1
+    bak = d / "fontindex.db.bak"
+    assert bak.read_bytes() != b"stale backup"
+    backup = sqlite3.connect(bak)
+    assert backup.execute("SELECT v FROM schema_version").fetchone()[0] == 99
+    assert backup.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 1
+    backup.close()
+    conn.close()
 
 
 def test_whitelist_and_self_exclude(tmp_path):

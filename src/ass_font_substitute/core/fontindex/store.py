@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -40,17 +41,33 @@ class UpdateResult:
     fonts: int = 0
 
 
-def open_db(path: Path) -> sqlite3.Connection:
+def _connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=5)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.executescript(DDL)
+    return conn
+
+
+def open_db(path: Path) -> sqlite3.Connection:
+    conn = _connect(path)
     row = conn.execute("SELECT v FROM schema_version").fetchone()
     if row is None:
         conn.execute("INSERT INTO schema_version VALUES (?)", (SCHEMA_VERSION,))
         conn.commit()
-    elif row[0] != SCHEMA_VERSION:
-        raise IndexSchemaError(f"schema v{row[0]} != v{SCHEMA_VERSION}")
+        return conn
+    if row[0] == SCHEMA_VERSION:
+        return conn
+    # spec §5：版本不符 → 改名备份旧库（覆盖既有 .bak）后全量重建
+    conn.close()  # 干净关闭：WAL 落盘、清掉 -wal/-shm 旁车文件
+    bak = path.parent / (path.name + ".bak")
+    try:
+        os.replace(path, bak)
+    except OSError as e:
+        raise IndexSchemaError(f"备份旧库失败（{bak}）: {e}") from e
+    conn = _connect(path)
+    conn.execute("INSERT INTO schema_version VALUES (?)", (SCHEMA_VERSION,))
+    conn.commit()
     return conn
 
 
