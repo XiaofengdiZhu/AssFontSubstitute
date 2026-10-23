@@ -57,6 +57,30 @@ def test_at_variant(tmp_path):
     assert "Main,@思源黑体," in out.read_text(encoding="utf-8-sig")
 
 
+def test_at_key_symmetric_expand(tmp_path):
+    # 键自带 @（extract 的 raw_name 以 @ 开头的场景）：@舊 → @新 且 舊 → 新，
+    # 竖排标记不得丢；横排引用（无 @）也要被改写
+    p = tmp_path / "v.ass"
+    ass = ("[Script Info]\r\n"
+           "Title: t\r\n"
+           "\r\n"
+           "[V4+ Styles]\r\n"
+           "Format: Name, Fontname, Fontsize\r\n"
+           "Style: V,@舊字體,52\r\n"
+           "Style: H,舊字體,52\r\n"
+           "\r\n"
+           "[Events]\r\n"
+           "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\n"
+           "Dialogue: 0,0:00:00.00,0:00:05.00,V,,0,0,0,,{\\fn@舊字體}甲\r\n")
+    p.write_bytes(ass.encode("utf-8-sig"))
+    out = tmp_path / "out.ass"
+    rewrite_file(p, {"@舊字體": "@新字體"}, out=out)
+    text = out.read_text(encoding="utf-8-sig")
+    assert "Style: V,@新字體,52" in text
+    assert "Style: H,新字體,52" in text
+    assert "{\\fn@新字體}" in text
+
+
 def test_atomic_overwrite(tmp_path):
     p = _mk(tmp_path)
     before = p.read_bytes()

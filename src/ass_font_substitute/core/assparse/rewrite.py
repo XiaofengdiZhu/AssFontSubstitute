@@ -15,9 +15,18 @@ class RewriteResult:
 
 
 def _expand_at(mapping: dict[str, str]) -> dict[str, str]:
+    """展开 @ 变体：对称补齐竖排/横排两个方向。
+
+    - 纯名键 K → V：补 @K → @V（既有行为）。
+    - @ 键 @K → @V：补 K → V（extract 的 raw_name 以 @ 开头时只有这一个键，
+      缺横排方向会导致 Style 里的纯名不被改写）。
+    - 值不带 @ 的 @ 键只按原样保留（无法推知另一方向）。
+    """
     m = dict(mapping)
     for k, v in mapping.items():
         if k.startswith("@"):
+            if v.startswith("@"):
+                m.setdefault(k[1:], v[1:])
             continue
         m.setdefault("@" + k, "@" + v)
     return m
