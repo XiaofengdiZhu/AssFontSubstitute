@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -8,10 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ass_font_substitute.core.fontindex.parser import FontParseError, parse_font_file
+from ass_font_substitute.core.models import CmapRanges
 
 SCHEMA_VERSION = 1
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
+
+# 指纹算法版本：fingerprint_of 的规范化方式变化时递增，旧缓存整批失效重算
+FP_ALGO = 1
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_version(v INTEGER NOT NULL);
@@ -24,7 +29,23 @@ CREATE TABLE IF NOT EXISTS fonts(
   UNIQUE(rel_path, face_index));
 CREATE TABLE IF NOT EXISTS bad(
   rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, reason TEXT);
+CREATE TABLE IF NOT EXISTS fingerprints(
+  rel_path TEXT, face_index INTEGER, xxh TEXT, algo INTEGER, fp TEXT,
+  PRIMARY KEY(rel_path, face_index));
 """
+
+
+def fingerprint_of(aliases: list[str], cmap: CmapRanges, weight: int, width: int,
+                   italic: bool, xxh: str) -> str:
+    """字体指纹 = hash(全部名称别名 + cmap 区间表 + weight/width/italic + 文件 xxh64)。
+    update_index 时预计算入 fingerprints 表（键 rel_path+face_index，xxh+algo
+    双重防陈旧），LibraryIndex 聚合读命中直取、缺失回写——避免每次打开重算。"""
+    canon = json.dumps({
+        "aliases": sorted(aliases),
+        "cmap": [list(r) for r in zip(cmap.starts, cmap.ends)],
+        "weight": weight, "width": width, "italic": int(italic), "xxh": xxh,
+    }, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(canon.encode("utf-8")).hexdigest()
 
 
 class IndexSchemaError(Exception):
@@ -106,6 +127,7 @@ def update_index(dir_path: Path, conn: sqlite3.Connection) -> UpdateResult:
             res.removed += 1
             conn.execute("DELETE FROM files WHERE rel_path=?", (rel,))
             conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
+            conn.execute("DELETE FROM fingerprints WHERE rel_path=?", (rel,))
             conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
         for p in todo:
             rel = p.relative_to(dir_path).as_posix()
@@ -118,6 +140,7 @@ def update_index(dir_path: Path, conn: sqlite3.Connection) -> UpdateResult:
                              (rel, st.st_size, st.st_mtime_ns, str(e)))
                 conn.execute("DELETE FROM files WHERE rel_path=?", (rel,))
                 conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
+                conn.execute("DELETE FROM fingerprints WHERE rel_path=?", (rel,))
                 continue
             st = p.stat()
             conn.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?)",
@@ -133,6 +156,11 @@ def update_index(dir_path: Path, conn: sqlite3.Connection) -> UpdateResult:
                      json.dumps(r.aliases, ensure_ascii=False),
                      r.weight, r.width, int(r.italic),
                      r.cmap.to_bytes(), r.script, r.category))
+                conn.execute(
+                    "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
+                    (rel, r.face_index, recs[0].xxh, FP_ALGO,
+                     fingerprint_of(r.aliases, r.cmap, r.weight, r.width,
+                                    r.italic, recs[0].xxh)))
     res.fonts = stats(conn)["fonts"]
     return res
 
@@ -154,4 +182,5 @@ def load_font_rows(conn: sqlite3.Connection) -> Iterator[tuple]:
 
 
 __all__ = ["open_db", "scan_dir", "update_index", "stats", "load_font_rows",
-           "SCHEMA_VERSION", "IndexSchemaError", "UpdateResult"]
+           "SCHEMA_VERSION", "IndexSchemaError", "UpdateResult",
+           "FP_ALGO", "fingerprint_of"]

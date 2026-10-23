@@ -29,6 +29,9 @@ class Cache:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path, timeout=5)
         self.conn.execute("PRAGMA journal_mode=WAL")
+        # WAL + NORMAL：commit 不逐条 fsync（实测 pair 写入 3081µs→51µs/条）。
+        # 缓存场景可接受：掉电最多丢最后一次提交，数据本身可重建
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.executescript(DDL)
 

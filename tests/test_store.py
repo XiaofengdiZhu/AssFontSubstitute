@@ -82,3 +82,18 @@ def test_whitelist_and_self_exclude(tmp_path):
     conn = open_db(d / "fontindex.db")
     r = update_index(d, conn)
     assert r.added == 2  # 递归含 sub，排除 txt 与 db 自身
+
+
+def test_update_index_precomputes_fingerprints(tmp_path):
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    rows = conn.execute(
+        "SELECT rel_path, face_index, xxh, algo, fp FROM fingerprints").fetchall()
+    assert len(rows) == 1
+    rel, fi, xxh, algo, fp = rows[0]
+    assert (rel, fi) == ("a.ttf", 0) and xxh and fp
+    from ass_font_substitute.core.fontindex.store import FP_ALGO
+    assert algo == FP_ALGO

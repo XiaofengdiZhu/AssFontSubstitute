@@ -1,29 +1,18 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from ass_font_substitute.core.fontindex.store import load_font_rows, open_db
+from ass_font_substitute.core.fontindex.store import (FP_ALGO, fingerprint_of,
+                                                      load_font_rows, open_db)
 from ass_font_substitute.core.models import CmapRanges
 
 
 def normalize_name(name: str) -> str:
     """名称规范化：strip 空白 + 剥 @ 前缀 + casefold。"""
     return name.strip().lstrip("@").casefold()
-
-
-def fingerprint_of(aliases: list[str], cmap: CmapRanges, weight: int, width: int,
-                   italic: bool, xxh: str) -> str:
-    """字体指纹 = hash(全部名称别名 + cmap 区间表 + weight/width/italic + 文件 xxh64)。"""
-    canon = json.dumps({
-        "aliases": sorted(aliases),
-        "cmap": [list(r) for r in zip(cmap.starts, cmap.ends)],
-        "weight": weight, "width": width, "italic": int(italic), "xxh": xxh,
-    }, ensure_ascii=False, sort_keys=True)
-    return hashlib.sha1(canon.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -62,14 +51,31 @@ class LibraryIndex:
         for di, d in enumerate(self.dirs):
             conn = open_db(d / "fontindex.db")
             try:
+                cached = {(r[0], r[1]): (r[2], r[3]) for r in conn.execute(
+                    "SELECT rel_path, face_index, xxh, fp FROM fingerprints "
+                    "WHERE algo=?", (FP_ALGO,))}
+                writeback = []
                 for (rel, fi, ps, ver, al, w, wd, it, cmb, script, cat,
                      xxh, size, mtime) in load_font_rows(conn):
                     aliases = tuple(json.loads(al))
                     version = tuple(json.loads(ver)) if ver else None
                     cmap = CmapRanges.from_bytes(cmb)
-                    fp = fingerprint_of(list(aliases), cmap, w, wd, bool(it), xxh)
+                    hit = cached.get((rel, fi))
+                    if hit is not None and hit[0] == xxh:
+                        fp = hit[1]
+                    else:
+                        # 缓存缺失（旧库/新文件/xxh 变化）→ 现算并回写
+                        fp = fingerprint_of(list(aliases), cmap, w, wd,
+                                            bool(it), xxh)
+                        writeback.append((rel, fi, xxh, fp))
                     raw.append((di, rel, fi, ps, version, aliases, w, wd, bool(it),
                                 script, cat, cmap, fp))
+                if writeback:
+                    with conn:
+                        conn.executemany(
+                            "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
+                            [(rel, fi, xxh, FP_ALGO, fp)
+                             for rel, fi, xxh, fp in writeback])
             finally:
                 conn.close()
         # 身份 = psname，无则别名并集；排序保证平局保留目录顺序靠前、rel_path、face_index

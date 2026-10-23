@@ -33,3 +33,73 @@ def test_find_by_name_normalized(tmp_path):
     assert lib.find_by_name(normalize_name(" 华康测试体 W5 "))
     assert lib.find_by_name(normalize_name("華康測試體W5"))
     assert not lib.find_by_name("nope")
+
+
+def test_fingerprints_precomputed_and_reused(tmp_path, monkeypatch):
+    # 指纹在 update_index 预计算入库；open 全命中缓存不再重算
+    import ass_font_substitute.core.fontindex.library as library_mod
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA")
+    build_font(d / "b.ttf", chars="永中木", family="乙體", psname="YI")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    lib = LibraryIndex.open([d])
+    fps = {e.fingerprint for e in lib.entities()}
+    assert len(fps) == 2
+
+    def boom(*a, **k):
+        raise AssertionError("open 不应重算指纹（缓存应全命中）")
+
+    monkeypatch.setattr(library_mod, "fingerprint_of", boom)
+    lib2 = LibraryIndex.open([d])
+    assert {e.fingerprint for e in lib2.entities()} == fps
+
+
+def test_fingerprint_recomputed_when_file_changes(tmp_path):
+    # 文件内容变化（xxh 变）→ 缓存失效重算
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA",
+               version="Version 1.000")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    fp1 = LibraryIndex.open([d]).entities()[0].fingerprint
+    build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA",
+               version="Version 2.000")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    fp2 = LibraryIndex.open([d]).entities()[0].fingerprint
+    assert fp1 != fp2
+
+
+def test_fingerprint_stale_xxh_recomputed(tmp_path):
+    # 缓存表被篡改（xxh 不匹配）→ 回退重算，结果与现算一致
+    from ass_font_substitute.core.fontindex.store import fingerprint_of
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    conn.execute("UPDATE fingerprints SET xxh='tampered'")
+    conn.commit()
+    lib = LibraryIndex.open([d])
+    e = lib.entities()[0]
+    assert e.fingerprint == fingerprint_of(
+        list(e.aliases), e.cmap, e.weight, e.width, e.italic,
+        next(r[0] for r in open_db(d / "fontindex.db").execute(
+            "SELECT xxh FROM files")))
+
+
+def test_removed_file_cleans_fingerprints(tmp_path):
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA")
+    build_font(d / "b.ttf", chars="永中木", family="乙體", psname="YI")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    (d / "b.ttf").unlink()
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    n = conn.execute("SELECT COUNT(*) FROM fingerprints").fetchone()[0]
+    assert n == 1
