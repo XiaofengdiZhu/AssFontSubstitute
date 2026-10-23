@@ -32,7 +32,7 @@ class OptionItem:
     size_ratio: float | None = None
     meta: list[str] = field(default_factory=list)     # 简/繁/简繁 · W400 · 黑
     badges: list[str] = field(default_factory=list)   # 孪生对应/上次使用/原字体/不改动
-    source: str = "search"                            # original/twin/search/last/pick
+    source: str = "search"                            # original/twin/recommend/search/last/pick
     n_chars: int | None = None
     entity: FontEntity | None = None                  # KEEP 行为 None
 

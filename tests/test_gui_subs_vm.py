@@ -89,6 +89,7 @@ def test_make_card_keep_with_original_badge(vm_full):
     # _ent("fp-song", "宋体", "永宇", "宋")："宋" 落在 category 位，
     # script 保持默认 "简"、weight 默认 400
     assert card.options[1].meta == ["简", "W400", "宋"]
+    assert card.options[1].source == "recommend"      # 在库命中但非原字体
     vm.apply_default_check(card)
     assert card.checked_key == "fp-hei" and card.replaced is False
 
