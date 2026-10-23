@@ -1,3 +1,4 @@
+import ass_font_substitute.core.similarity.search as search_mod
 from ass_font_substitute.core.fontindex.library import LibraryIndex
 from ass_font_substitute.core.fontindex.store import open_db, update_index
 from ass_font_substitute.core.similarity.cache import Cache
@@ -49,3 +50,35 @@ def test_resume_after_pause(tmp_path):
     s.paused = False                            # 用户点继续
     more = s.next()
     assert more is None or more.similarity is not None
+
+
+def test_render_failure_isolated(tmp_path, monkeypatch):
+    # spec §11：单候选渲染失败 → 置灰（similarity=None），不炸整个搜索
+    lib = _lib(tmp_path, n=3)
+    cache = Cache(tmp_path / "cache.db")
+    target = next(e for e in lib.entities() if e.psname == "TGT")
+    broken = next(e for e in lib.entities() if e.psname == "C1")
+    broken_path = str(search_mod._entity_path(broken))
+
+    real_render = search_mod.render_bundle
+
+    def flaky(path, face_index, chars):
+        if str(path) == broken_path:
+            raise RuntimeError("boom: 不可渲染")
+        return real_render(path, face_index, chars)
+
+    monkeypatch.setattr(search_mod, "render_bundle", flaky)
+    s = FontSearcher(target, set("永中木水火土石田"), lib, cache,
+                     sample_text="永中木水火土石田8Aa0?", cov_threshold=0.98)
+    results = {}
+    while not s.paused:
+        c = s.next()
+        if c is None:
+            break
+        results[c.fingerprint] = c
+    assert broken.fingerprint in results
+    bc = results[broken.fingerprint]
+    assert bc.similarity is None                # 置灰
+    assert bc.coverage == 1.0                   # 覆盖率照常填写
+    others = [c for fp, c in results.items() if fp != broken.fingerprint]
+    assert others and all(c.similarity is not None for c in others)

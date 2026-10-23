@@ -93,21 +93,26 @@ class FontSearcher:
         cand = Candidate(fingerprint=e.fingerprint, display_name=e.display_name,
                          coverage=cov, script=e.script, category=e.category,
                          weight=e.weight, source="recommend")
-        tb = self._target_bundle()
-        if tb is not None:
-            cached = self.cache.get_pair(self.target.fingerprint, e.fingerprint,
-                                         self._tver)
-            r = cached if cached else compare(tb, self._bundle(e))
-            if not cached and r is not None:
-                self.cache.put_pair(self.target.fingerprint, e.fingerprint,
-                                    self._tver, r)
-            if r is not None:
-                cand.similarity, cand.size_ratio, cand.n_chars = \
-                    r.score, r.size_ratio, r.n_chars
-                if r.score >= HIGH_SIM:
-                    self.high_sim_count += 1
-                    if self.high_sim_count >= self.n_pause:
-                        self.paused = True
+        try:
+            tb = self._target_bundle()
+            if tb is not None:
+                cached = self.cache.get_pair(self.target.fingerprint, e.fingerprint,
+                                             self._tver)
+                r = cached if cached else compare(tb, self._bundle(e))
+                if not cached and r is not None:
+                    self.cache.put_pair(self.target.fingerprint, e.fingerprint,
+                                        self._tver, r)
+                if r is not None:
+                    cand.similarity, cand.size_ratio, cand.n_chars = \
+                        r.score, r.size_ratio, r.n_chars
+                    if r.score >= HIGH_SIM:
+                        self.high_sim_count += 1
+                        if self.high_sim_count >= self.n_pause:
+                            self.paused = True
+        except Exception:
+            # spec §11：渲染失败的候选置灰（similarity=None），
+            # 不计入高分、不中断搜索；候选照常消耗
+            pass
         return cand
 
 
