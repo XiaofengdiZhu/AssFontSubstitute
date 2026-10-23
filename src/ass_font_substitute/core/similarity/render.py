@@ -39,7 +39,11 @@ def _ink_height(arr: np.ndarray) -> int:
 
 
 def _fit(arr: np.ndarray) -> np.ndarray:
-    """裁墨迹 bbox，等比缩放到高度 TARGET_INK，居中 pad 到 TILE×TILE。"""
+    """裁墨迹 bbox，等比缩放到高度 TARGET_INK，居中 pad 到 TILE×TILE。
+
+    宽字形（等比后宽/高超 TILE）整体再等比钳制到 TILE×TILE 内：
+    绝不溢出、绝不变形，仍居中。
+    """
     cols = np.where(arr.any(axis=0))[0]
     rows = np.where(arr.any(axis=1))[0]
     crop = arr[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
@@ -47,6 +51,10 @@ def _fit(arr: np.ndarray) -> np.ndarray:
     scale = TARGET_INK / h
     nw = max(1, round(w * scale))
     nh = TARGET_INK
+    if nw > TILE or nh > TILE:  # 宽字形钳制（R12）：等比缩回 TILE 界内
+        k = min(TILE / nw, TILE / nh)
+        nw = max(1, round(nw * k))
+        nh = max(1, round(nh * k))
     # 最近邻缩放（numpy 索引）
     ys = (np.arange(nh) * h // nh)
     xs = (np.arange(nw) * w // nw)
@@ -80,8 +88,6 @@ def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
         px = max(8, round(BASE_PX * TARGET_INK / median)) if median else BASE_PX
         arr = _render_char(face, ch, px)
         if arr is None:
-            if ch in heights:
-                heights.pop(ch)
             continue
         tiles[ch] = _fit(arr)
     return RenderBundle(tiles, median, frozenset(tiles))

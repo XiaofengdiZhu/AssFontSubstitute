@@ -1,5 +1,6 @@
 import numpy as np
 
+from ass_font_substitute.core.similarity import render
 from ass_font_substitute.core.similarity.render import render_bundle
 from tests.fonts import build_font
 
@@ -23,3 +24,16 @@ def test_two_fonts_different_tiles(tmp_path):
     b = render_bundle(tmp_path / "b.ttf", 0, "永")
     # 工厂字体同形，仅验证流水线；自比在 metrics 任务验证
     assert a.tiles["永"].shape == b.tiles["永"].shape
+
+
+def test_fit_wide_glyph_no_overflow():
+    # R12 回归：宽墨迹（10×280，等比放大后宽 1008 > TILE=48），
+    # 旧实现 pad 赋值广播崩溃（ValueError: could not broadcast）
+    crop = np.zeros((10, 280), np.uint8)
+    crop[2:8, :] = 255                          # 满宽横条墨迹
+    t = render._fit(crop)                       # 不得 raise
+    assert t.shape == (48, 48)
+    ys, xs = np.where(t > 0)
+    assert ys.size > 0                          # 墨迹保留
+    assert ys.min() >= 0 and ys.max() < 48      # 墨迹全在 tile 界内
+    assert xs.min() >= 0 and xs.max() < 48
