@@ -27,7 +27,12 @@ class CoreWorker(QThread):
         from ass_font_substitute.core.similarity.cache import Cache
         from ass_font_substitute.gui.paths import default_cache_path
         p = self._settings.get("cache_path") or str(default_cache_path())
-        ctx = SimpleNamespace(settings=self._settings, cache=Cache(Path(p)),
+        try:
+            cache = Cache(Path(p))
+        except Exception as e:  # noqa: BLE001  启动失败可观察：线程存活，缓存类任务逐个 failed
+            cache = None
+            self.failed.emit("worker:init", f"{type(e).__name__}: {e}")
+        ctx = SimpleNamespace(settings=self._settings, cache=cache,
                               snapshot=None, lib=None, lib_dirs=None)
         while not self._stop:
             item = self._q.get()
