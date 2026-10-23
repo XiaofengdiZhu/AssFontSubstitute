@@ -1,0 +1,86 @@
+"""测试字体工厂：用 fontBuilder 生成方块字形的最小 TTF/TTC，供各测试模块复用。"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from fontTools.fontBuilder import FontBuilder
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTCollection
+
+DEFAULT_FAMILY = "測試體"
+
+# zh-CN / zh-TW 别名写入 Windows 平台（platformID=3, UTF-16）的对应 langID
+_EXTRA_LANGS = (("zh-CN", 0x804), ("zh-TW", 0x404))
+
+
+def _box(pen: TTGlyphPen) -> None:
+    pen.moveTo((100, 0))
+    pen.lineTo((100, 600))
+    pen.lineTo((500, 600))
+    pen.lineTo((500, 0))
+    pen.closePath()
+
+
+def _new_box() -> object:
+    pen = TTGlyphPen(None)
+    _box(pen)
+    return pen.glyph()
+
+
+def _make(spec: dict):
+    chars = spec.get("chars", "")
+    family = spec.get("family", DEFAULT_FAMILY)
+    weight = spec.get("weight", 400)
+    width = spec.get("width", 5)
+    italic = spec.get("italic", False)
+    psname = spec.get("psname") or (family + "-" + str(weight))
+    version = spec.get("version", "Version 1.000")
+    extra_aliases = spec.get("extra_aliases") or {}
+
+    glyph_order = [".notdef", "space"] + [f"g{i}" for i in range(len(chars))]
+    cmap = {0x20: "space"}
+    cmap.update({ord(d): "space" for d in "0123456789Aa"})
+    for i, c in enumerate(chars):
+        cmap[ord(c)] = f"g{i}"
+
+    glyphs = {".notdef": _new_box(), "space": TTGlyphPen(None).glyph()}
+    for i in range(len(chars)):
+        glyphs[f"g{i}"] = _new_box()
+
+    fb = FontBuilder(1000, isTTF=True)
+    fb.setupGlyphOrder(glyph_order)
+    fb.setupCharacterMap(cmap)
+    fb.setupGlyf(glyphs)
+    fb.setupHorizontalMetrics({g: (500, 0) for g in glyph_order})
+    fb.setupHorizontalHeader(ascent=800, descent=-200)
+    fb.setupOS2(sTypoAscender=800, sTypoDescender=-200, usWeightClass=weight,
+                usWidthClass=width, fsSelection=(1 if italic else 64))
+    fb.setupNameTable({
+        1: family, 2: "Regular", 4: family, 6: psname, 5: version,
+        3: "TestFont;" + version + ";AFS", 8: "AFS Test",
+    })
+    nt = fb.font["name"]
+    for lang_key, lang_id in _EXTRA_LANGS:
+        value = extra_aliases.get(lang_key)
+        if not value:
+            continue
+        for nid in (1, 4):
+            nt.setName(value, nid, 3, 1, lang_id)
+    fb.setupPost()
+    return fb.font
+
+
+def build_font(path: Path, chars: str, family: str = DEFAULT_FAMILY,
+               extra_aliases: dict | None = None, psname: str | None = None,
+               version: str = "Version 1.000", weight: int = 400,
+               width: int = 5, italic: bool = False) -> None:
+    spec = dict(chars=chars, family=family, extra_aliases=extra_aliases,
+                psname=psname, version=version, weight=weight, width=width,
+                italic=italic)
+    _make(spec).save(path)
+
+
+def build_ttc(path: Path, specs: list[dict]) -> None:
+    coll = TTCollection()
+    coll.fonts = [_make(s) for s in specs]
+    coll.save(path)
