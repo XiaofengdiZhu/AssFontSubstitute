@@ -13,18 +13,20 @@ DEFAULT_FAMILY = "測試體"
 _EXTRA_LANGS = (("zh-CN", 0x804), ("zh-TW", 0x404))
 
 
-def _box(pen: TTGlyphPen) -> None:
-    pen.moveTo((100, 0))
-    pen.lineTo((100, 600))
-    pen.lineTo((500, 600))
-    pen.lineTo((500, 0))
+def _box(pen: TTGlyphPen, k: float = 1.0) -> None:
+    def p(x, y):
+        return (300 + (x - 300) * k, 300 + (y - 300) * k)
+    pen.moveTo(p(100, 0))
+    pen.lineTo(p(100, 600))
+    pen.lineTo(p(500, 600))
+    pen.lineTo(p(500, 0))
     pen.closePath()
 
 
-def _circle(pen: TTGlyphPen) -> None:
+def _circle(pen: TTGlyphPen, k: float = 1.0) -> None:
     # 四段二次贝塞尔近似实心圆（圆心 (300,300)，半径 280；
     # 0.9142r 为二次曲线过 45° 点的控制点系数）
-    cx, cy, r = 300, 300, 280
+    cx, cy, r = 300, 300, 280 * k
     k = round(r * 0.9142)
     pen.moveTo((cx + r, cy))
     pen.qCurveTo((cx + k, cy + k), (cx, cy + r))
@@ -34,12 +36,12 @@ def _circle(pen: TTGlyphPen) -> None:
     pen.closePath()
 
 
-def _new_glyph(shape: str) -> object:
+def _new_glyph(shape: str, scale: float = 1.0) -> object:
     pen = TTGlyphPen(None)
     if shape == "circle":
-        _circle(pen)
+        _circle(pen, scale)
     else:
-        _box(pen)
+        _box(pen, scale)
     return pen.glyph()
 
 
@@ -53,6 +55,7 @@ def _make(spec: dict):
     version = spec.get("version", "Version 1.000")
     extra_aliases = spec.get("extra_aliases") or {}
     shape = spec.get("shape", "box")
+    scale = spec.get("scale", 1.0)
 
     glyph_order = [".notdef", "space"] + [f"g{i}" for i in range(len(chars))]
     cmap = {0x20: "space"}
@@ -60,9 +63,9 @@ def _make(spec: dict):
     for i, c in enumerate(chars):
         cmap[ord(c)] = f"g{i}"
 
-    glyphs = {".notdef": _new_glyph(shape), "space": TTGlyphPen(None).glyph()}
+    glyphs = {".notdef": _new_glyph(shape, scale), "space": TTGlyphPen(None).glyph()}
     for i in range(len(chars)):
-        glyphs[f"g{i}"] = _new_glyph(shape)
+        glyphs[f"g{i}"] = _new_glyph(shape, scale)
 
     fb = FontBuilder(1000, isTTF=True)
     fb.setupGlyphOrder(glyph_order)
@@ -90,10 +93,11 @@ def _make(spec: dict):
 def build_font(path: Path, chars: str, family: str = DEFAULT_FAMILY,
                extra_aliases: dict | None = None, psname: str | None = None,
                version: str = "Version 1.000", weight: int = 400,
-               width: int = 5, italic: bool = False, shape: str = "box") -> None:
+               width: int = 5, italic: bool = False, shape: str = "box",
+               scale: float = 1.0) -> None:
     spec = dict(chars=chars, family=family, extra_aliases=extra_aliases,
                 psname=psname, version=version, weight=weight, width=width,
-                italic=italic, shape=shape)
+                italic=italic, shape=shape, scale=scale)
     _make(spec).save(path)
 
 

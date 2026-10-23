@@ -86,3 +86,22 @@ def test_classify(tmp_path):
     # 零用字 → 保留
     r5 = classify_usage(_usage("不存在體", ""), lib)
     assert r5.kind == "keep"
+
+
+def test_default_threshold_is_95(tmp_path):
+    # 设置默认值钉死：24/25 = 96% 达默认 95%（keep），不达旧默认 98%（replace）
+    import inspect
+    from ass_font_substitute.core.coverage.matcher import COV_THRESHOLD
+    assert COV_THRESHOLD == 0.95
+    assert inspect.signature(classify_usage).parameters["threshold"].default == 0.95
+    d = tmp_path / "lib"
+    d.mkdir()
+    chars = "永和的文字春夏秋冬山川田石目心手白木水火土金竹米"   # 24 字
+    assert len(chars) == 24
+    build_font(d / "f.ttf", chars=chars, family="覆蓋體")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    lib = LibraryIndex.open([d])
+    u = _usage("覆蓋體", chars + "中")            # 24/25 = 96%
+    assert classify_usage(u, lib).kind == "keep"
+    assert classify_usage(u, lib, threshold=0.98).kind == "replace"

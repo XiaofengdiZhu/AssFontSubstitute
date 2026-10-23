@@ -12,7 +12,8 @@ from ass_font_substitute.core.similarity.cache import Cache
 from ass_font_substitute.core.similarity.metrics import compare
 from ass_font_substitute.core.similarity.render import render_bundle
 
-HIGH_SIM = 0.70
+MIN_SIM = 0.85              # 最低相似率（默认设置，GUI 可调）
+SIZE_RANGE = (0.90, 1.10)   # 相对大小区间（默认设置，GUI 可调）
 # 内置 v1：简繁同形字（spec §9 词表）+ 数字字母标点
 SAMPLE_TEXT = ("永 中 木 水 火 山 田 石 目 心 手 白 的 我 你 他 它 好 行 生 "
                "同 尖 思 明 上 下 左 右 外 大 小 不 了 在 是 有 和 也 8 A a 0 ?")
@@ -42,11 +43,16 @@ def rank_pool(target: Optional[FontEntity], pool: list[FontEntity],
 
 
 class FontSearcher:
-    """可暂停续算的逐候选搜索：攒够 n_pause 个高相似即 paused，续算置 paused=False。"""
+    """逐候选严格门槛搜索：候选须连过 相似率 / 相对大小 / 覆盖率 三道门槛
+    才算命中并列出，任一不过即跳过（不再垫底展示）；攒够 n_pause 个命中即
+    paused，续算置 paused=False；池耗尽置 exhausted（GUI 显「无更多相似字体」）。
+    """
 
     def __init__(self, target: Optional[FontEntity], chars: set[str],
                  lib: LibraryIndex, cache: Cache, sample_text: str,
-                 cov_threshold: float, n_pause: int = 5,
+                 cov_threshold: float = 0.95, n_pause: int = 5,
+                 min_sim: float = MIN_SIM,
+                 size_range: tuple[float, float] = SIZE_RANGE,
                  direction: str = "t2s"):
         self.target = target
         self.chars = chars
@@ -55,21 +61,17 @@ class FontSearcher:
         self.sample_text = sample_text
         self.cov_threshold = cov_threshold
         self.n_pause = n_pause
+        self.min_sim = min_sim
+        self.size_range = size_range
         self.direction = direction
         self.paused = False
+        self.exhausted = False
         self.high_sim_count = 0
-        tver = text_version(sample_text)
+        self._tver = text_version(sample_text)
+        self._tcache: dict[str, object] = {}
         pool = [e for e in lib.entities()
                 if target is None or e.fingerprint != target.fingerprint]
-        pool = rank_pool(target, pool, direction)
-        # 覆盖率 < 阈值的候选垫底（stable partition，不剔除；布尔掩码保持 O(n)，
-        # 17k+ 实体库上 `e not in low` 的成员测试是平方级，实测每次构造拖到 60s）
-        flags = [coverage_detail(e.cmap, chars)[0] >= cov_threshold for e in pool]
-        low = [e for e, ok in zip(pool, flags) if not ok]
-        high = [e for e, ok in zip(pool, flags) if ok]
-        self._iter: Iterator[FontEntity] = iter(high + low)
-        self._tver = tver
-        self._tcache: dict[str, object] = {}
+        self._iter: Iterator[FontEntity] = iter(rank_pool(target, pool, direction))
 
     def _bundle(self, e: FontEntity):
         def loader():
@@ -85,36 +87,63 @@ class FontSearcher:
         return self._tcache["tgt"]
 
     def next(self) -> Optional[Candidate]:
-        """推进一个候选；None = 已暂停或搜索耗尽。"""
+        """推进到下一个「过全部门槛」的候选；None = 已暂停或耗尽（看 exhausted）。"""
         if self.paused:
             return None
-        e = next(self._iter, None)
-        if e is None:
+        while True:
+            e = next(self._iter, None)
+            if e is None:
+                self.exhausted = True
+                return None
+            cand = self._evaluate(e)
+            if cand is not None:
+                return cand
+
+    def _evaluate(self, e: FontEntity) -> Optional[Candidate]:
+        # 门槛按成本升序（实测：pair 缓存读取 ~5µs、coverage ~15µs、渲染+评分 ~57ms）：
+        # 缓存命中 → 相似率/大小（纯比较）→ 覆盖率 → 未命中才渲染评分。
+        # 命中路径全程零渲染。
+        if self.target is None:
+            # 无 target（库中没有的字体找替身）：无相似度可评，元数据粗排 +
+            # 覆盖率严格门槛
+            cov, _missing = coverage_detail(e.cmap, self.chars)
+            if cov < self.cov_threshold:
+                return None
+            return Candidate(fingerprint=e.fingerprint, display_name=e.display_name,
+                             coverage=cov, script=e.script, category=e.category,
+                             weight=e.weight, source="recommend")
+        r = self.cache.get_pair(self.target.fingerprint, e.fingerprint, self._tver)
+        cov: Optional[float] = None
+        if r is None:
+            cov, _missing = coverage_detail(e.cmap, self.chars)
+            if cov < self.cov_threshold:
+                return None
+            try:
+                r = compare(self._target_bundle(), self._bundle(e))
+            except Exception:
+                # spec §11：渲染失败无法证明达标 → 跳过，不中断搜索
+                return None
+            if r is not None:
+                self.cache.put_pair(self.target.fingerprint, e.fingerprint,
+                                    self._tver, r)
+        if r is None:
+            return None             # 交集为空，无法比较 → 跳过
+        if r.score < self.min_sim:
             return None
-        cov, _missing = coverage_detail(e.cmap, self.chars)
+        if not (self.size_range[0] <= r.size_ratio <= self.size_range[1]):
+            return None
+        if cov is None:
+            cov, _missing = coverage_detail(e.cmap, self.chars)
+            if cov < self.cov_threshold:
+                return None
         cand = Candidate(fingerprint=e.fingerprint, display_name=e.display_name,
                          coverage=cov, script=e.script, category=e.category,
                          weight=e.weight, source="recommend")
-        try:
-            tb = self._target_bundle()
-            if tb is not None:
-                cached = self.cache.get_pair(self.target.fingerprint, e.fingerprint,
-                                             self._tver)
-                r = cached if cached else compare(tb, self._bundle(e))
-                if not cached and r is not None:
-                    self.cache.put_pair(self.target.fingerprint, e.fingerprint,
-                                        self._tver, r)
-                if r is not None:
-                    cand.similarity, cand.size_ratio, cand.n_chars = \
-                        r.score, r.size_ratio, r.n_chars
-                    if r.score >= HIGH_SIM:
-                        self.high_sim_count += 1
-                        if self.high_sim_count >= self.n_pause:
-                            self.paused = True
-        except Exception:
-            # spec §11：渲染失败的候选置灰（similarity=None），
-            # 不计入高分、不中断搜索；候选照常消耗
-            pass
+        cand.similarity, cand.size_ratio, cand.n_chars = \
+            r.score, r.size_ratio, r.n_chars
+        self.high_sim_count += 1
+        if self.high_sim_count >= self.n_pause:
+            self.paused = True
         return cand
 
 

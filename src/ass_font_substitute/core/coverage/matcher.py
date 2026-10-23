@@ -42,7 +42,10 @@ class UsageClass:
     twin_hit: FontEntity | None = None
 
 
-def classify_usage(usage: FontUsage, lib: LibraryIndex, threshold: float = 0.98,
+COV_THRESHOLD = 0.95       # 覆盖率阈值（默认设置，GUI 可调，范围 90–100%）
+
+
+def classify_usage(usage: FontUsage, lib: LibraryIndex, threshold: float = COV_THRESHOLD,
                    direction: str = "t2s") -> UsageClass:
     """用字分类：零用字 keep；在库按覆盖率 keep；覆盖不足先试孪生再 replace；不在库走孪生。"""
     if not usage.chars:
