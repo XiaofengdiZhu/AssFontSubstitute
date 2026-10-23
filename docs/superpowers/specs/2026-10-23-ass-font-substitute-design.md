@@ -247,7 +247,8 @@ ass_font_substitute/
   - 记忆：键 = 名 + 方向、双方向不串扰
 - 金标准：黑体对黑体 > 黑体对圆体，权重校准
 - 渲染：逐字独立位图、tile 尺寸一致、归一化系数稳定、LRU 淘汰
-- GUI 手测；核心逻辑全部在 core 层可测
+- GUI 逻辑层（gui/jobs、gui/*_vm、gui/settings_store）零 Qt，pytest 全覆盖；
+  视图层薄壳：offscreen 冒烟（主窗口四页、库操作）+ docs/gui-manual-tests.md 手测清单
 
 ## 13. 技术栈与工具链
 
