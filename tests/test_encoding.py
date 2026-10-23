@@ -21,6 +21,10 @@ def test_gb18030():
     assert detect_encoding(SAMPLE.encode("gb18030")) == "gb18030"
 
 
+def test_pure_ascii_utf8():
+    assert detect_encoding(b"[Script Info]\r\nTitle: hello\r\n") == "utf-8"
+
+
 def test_big5_beats_gb18030_misread():
     # 繁体高频文本：big5 解码命中高频字，gb18030 硬解必产生低频怪字
     big5_text = "這是繁體字幕的一句話，我們在這裡說話。" * 3
