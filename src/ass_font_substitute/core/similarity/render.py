@@ -70,24 +70,27 @@ def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
     """两遍渲染：96px 测墨迹高度中位数 → 按 TARGET_INK/中位数 定尺寸重渲。
 
     缺字（cmap 无映射）直接跳过，绝不渲染 .notdef tofu。
+    以文件对象打开：Windows 上 FreeType 按 ANSI 码页解释路径字符串，
+    非 ASCII 路径会打不开；传文件对象则由 Python 负责读文件，不受编码影响。
     """
-    face = freetype.Face(str(path), face_index)
-    # 反 tofu：cmap 缺字先剔除（F3），避免 load_char 落到 .notdef 方块
-    wanted = [ch for ch in chars if face.get_char_index(ord(ch)) != 0]
-    # pass 1: 基准尺寸墨迹高度中位数
-    heights = {}
-    for ch in wanted:
-        arr = _render_char(face, ch, BASE_PX)
-        if arr is not None:
-            heights[ch] = _ink_height(arr)
-    if not heights:
-        return RenderBundle({}, 0.0, frozenset())
-    median = float(np.median(sorted(heights.values())))
-    tiles: dict[str, np.ndarray] = {}
-    for ch in wanted:
-        px = max(8, round(BASE_PX * TARGET_INK / median)) if median else BASE_PX
-        arr = _render_char(face, ch, px)
-        if arr is None:
-            continue
-        tiles[ch] = _fit(arr)
-    return RenderBundle(tiles, median, frozenset(tiles))
+    with open(path, "rb") as fh:
+        face = freetype.Face(fh, face_index)
+        # 反 tofu：cmap 缺字先剔除（F3），避免 load_char 落到 .notdef 方块
+        wanted = [ch for ch in chars if face.get_char_index(ord(ch)) != 0]
+        # pass 1: 基准尺寸墨迹高度中位数
+        heights = {}
+        for ch in wanted:
+            arr = _render_char(face, ch, BASE_PX)
+            if arr is not None:
+                heights[ch] = _ink_height(arr)
+        if not heights:
+            return RenderBundle({}, 0.0, frozenset())
+        median = float(np.median(sorted(heights.values())))
+        tiles: dict[str, np.ndarray] = {}
+        for ch in wanted:
+            px = max(8, round(BASE_PX * TARGET_INK / median)) if median else BASE_PX
+            arr = _render_char(face, ch, px)
+            if arr is None:
+                continue
+            tiles[ch] = _fit(arr)
+        return RenderBundle(tiles, median, frozenset(tiles))

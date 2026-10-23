@@ -26,6 +26,17 @@ def test_two_fonts_different_tiles(tmp_path):
     assert a.tiles["永"].shape == b.tiles["永"].shape
 
 
+def test_render_non_ascii_path(tmp_path):
+    # Windows：freetype.Face(str) 对非 ASCII 路径以 ANSI 码页解释 → 打不开；
+    # 以文件对象打开则不受路径编码影响（CJK 目录 + 文件名回归）
+    p = tmp_path / "字体库" / "華康測試.ttf"
+    p.parent.mkdir()
+    build_font(p, chars="永中木", family="X體")
+    b = render_bundle(p, 0, "永中木")
+    assert set(b.tiles) == {"永", "中", "木"}
+    assert all(t.max() > 0 for t in b.tiles.values())
+
+
 def test_fit_wide_glyph_no_overflow():
     # R12 回归：宽墨迹（10×280，等比放大后宽 1008 > TILE=48），
     # 旧实现 pad 赋值广播崩溃（ValueError: could not broadcast）
