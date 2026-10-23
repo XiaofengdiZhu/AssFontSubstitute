@@ -1,0 +1,677 @@
+<div id="afs-wf-root">
+<style>
+  #afs-wf .afs-app{
+    color-scheme: light dark;
+    --bg: light-dark(#f3f3f3, #202020);
+    --layer: light-dark(#ffffff, #2b2b2b);
+    --layer-2: light-dark(#fbfbfb, #323232);
+    --stroke: light-dark(#e5e5e5, #3f3f3f);
+    --text-1: light-dark(#1b1b1b, #ffffff);
+    --text-2: light-dark(#5c5c5c, #c8c8c8);
+    --text-3: light-dark(#8a8a8a, #9a9a9a);
+    --accent: light-dark(#005fb8, #4cc2ff);
+    --accent-fg: light-dark(#ffffff, #00243d);
+    --accent-soft: light-dark(#e8f1fb, #0d334e);
+    --good: light-dark(#0f7b0f, #6ccb5f);
+    --good-soft: light-dark(#e7f2e7, #1d3a1d);
+    --warn: light-dark(#9d5d00, #ffce5c);
+    --warn-soft: light-dark(#fdf3e0, #443413);
+    --bad: light-dark(#c42b1c, #ff99a4);
+    --bad-fg: light-dark(#ffffff, #3a0d0d);
+    --bad-soft: light-dark(#fdecea, #472222);
+    font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.5; color: var(--text-1);
+    background: var(--bg); border: 1px solid var(--stroke); border-radius: 8px;
+    min-height: 780px; display: flex; flex-direction: column; overflow: hidden; position: relative;
+  }
+  #afs-wf [hidden]{ display:none !important; }
+  #afs-wf .afs-spin{ width:14px;height:14px;border-radius:50%;border:2px solid var(--stroke);border-top-color:var(--accent);animation:afs-rot .9s linear infinite;flex:none; }
+  @keyframes afs-rot{ to{ transform:rotate(360deg); } }
+  @media (prefers-reduced-motion:reduce){ #afs-wf .afs-spin{ animation:none; } }
+  #afs-wf .afs-titlebar{ display:flex; align-items:center; gap:10px; padding:10px 14px;
+    border-bottom:1px solid var(--stroke); background:var(--layer); }
+  #afs-wf .afs-titlebar .dot{ width:14px;height:14px;border-radius:4px;background:var(--accent); }
+  #afs-wf .afs-titlebar b{ font-size:12px;font-weight:600; }
+  #afs-wf .afs-winctl{ margin-left:auto;display:flex;gap:4px; }
+  #afs-wf .afs-winctl i{ width:28px;height:24px;display:grid;place-items:center;border-radius:4px;color:var(--text-2); }
+  #afs-wf .afs-body{ display:flex; flex:1; min-height:0; }
+  #afs-wf .afs-nav{ width:220px; flex:none; padding:10px 8px; border-right:1px solid var(--stroke); display:flex; flex-direction:column; gap:2px; }
+  #afs-wf .afs-nav-item{ display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:6px;border:0;background:none;
+    color:var(--text-1);font:inherit;cursor:pointer;text-align:left;position:relative; }
+  #afs-wf .afs-nav-item i{ color:var(--text-2); }
+  #afs-wf .afs-nav-item:hover{ background:var(--layer-2); }
+  #afs-wf .afs-nav-item.active{ background:var(--layer-2); }
+  #afs-wf .afs-nav-item.active::before{ content:"";position:absolute;left:0;top:25%;bottom:25%;width:3px;border-radius:2px;background:var(--accent); }
+  #afs-wf .afs-nav-item.active i{ color:var(--accent); }
+  #afs-wf .afs-nav-foot{ margin-top:auto;padding:10px 12px;color:var(--text-3);font-size:12px; }
+  #afs-wf .afs-main{ flex:1; min-width:0; padding:20px 24px 24px; display:flex; flex-direction:column; gap:14px; }
+  #afs-wf h2.afs-h{ font-size:20px;font-weight:600;margin:0; }
+  #afs-wf .afs-toolbar{ display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
+  #afs-wf .afs-btn{ display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:4px;border:1px solid var(--stroke);
+    background:var(--layer);color:var(--text-1);font:inherit;font-size:13px;cursor:pointer; }
+  #afs-wf .afs-btn:hover{ background:var(--layer-2); }
+  #afs-wf .afs-btn.primary{ background:var(--accent);border-color:transparent;color:var(--accent-fg);font-weight:600; }
+  #afs-wf .afs-btn.primary:hover{ filter:brightness(1.08); }
+  #afs-wf .afs-btn.danger{ background:var(--bad);border-color:transparent;color:var(--bad-fg);font-weight:600; }
+  #afs-wf .afs-btn.ghost{ background:none;border-color:transparent;color:var(--accent); }
+  #afs-wf .afs-btn.ghost:hover{ background:var(--accent-soft); }
+  #afs-wf .afs-btn.sm{ padding:3px 10px;font-size:12px; }
+  #afs-wf .afs-card{ background:var(--layer);border:1px solid var(--stroke);border-radius:8px;padding:14px 16px; }
+  #afs-wf .afs-stats{ display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px; }
+  #afs-wf .afs-stat{ text-align:center; }
+  #afs-wf .afs-stat b{ display:block;font-size:20px;font-weight:600; }
+  #afs-wf .afs-stat span{ color:var(--text-2);font-size:12px; }
+  #afs-wf .afs-dir{ display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--stroke); }
+  #afs-wf .afs-dir:last-child{ border-bottom:0; }
+  #afs-wf .afs-dir .path{ font-weight:600; }
+  #afs-wf .afs-dir .meta{ color:var(--text-2);font-size:12px; }
+  #afs-wf .afs-badge{ display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600; }
+  #afs-wf .afs-badge.ok{ background:var(--good-soft);color:var(--good); }
+  #afs-wf .afs-badge.warn{ background:var(--warn-soft);color:var(--warn); }
+  #afs-wf .afs-badge.err{ background:var(--bad-soft);color:var(--bad); }
+  #afs-wf .afs-badge.info{ background:var(--accent-soft);color:var(--accent); }
+  #afs-wf .afs-tag{ display:inline-flex;align-items:center;padding:1px 7px;border:1px solid var(--stroke);border-radius:4px;
+    font-size:11px;color:var(--text-2);background:var(--layer-2);font-weight:500;line-height:1.6; }
+  #afs-wf .afs-tag.hot{ border-color:var(--accent);color:var(--accent);background:none; }
+  #afs-wf .afs-progress{ flex:1;height:3px;border-radius:2px;background:var(--stroke);overflow:hidden;min-width:120px; }
+  #afs-wf .afs-progress>i{ display:block;height:100%;background:var(--accent);border-radius:2px; }
+  #afs-wf .afs-infobar{ display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:6px;
+    background:var(--accent-soft);color:var(--text-1);font-size:12.5px;flex-wrap:wrap; }
+  #afs-wf .afs-infobar i{ color:var(--accent);flex:none; }
+  #afs-wf .afs-infobar.warn{ background:var(--warn-soft); }
+  #afs-wf .afs-infobar.warn i{ color:var(--warn); }
+  #afs-wf .afs-seg{ display:inline-flex;border:1px solid var(--stroke);border-radius:6px;overflow:hidden;background:var(--layer); }
+  #afs-wf .afs-seg button{ border:0;background:none;padding:6px 16px;font:inherit;font-size:13px;color:var(--text-2);cursor:pointer; }
+  #afs-wf .afs-seg button.active{ background:var(--accent);color:var(--accent-fg);font-weight:600; }
+  #afs-wf .afs-field{ display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2);flex-wrap:wrap; }
+  #afs-wf .afs-field b{ color:var(--text-1);font-variant-numeric:tabular-nums; }
+  #afs-wf .afs-stepper{ display:inline-flex;border:1px solid var(--stroke);border-radius:4px;overflow:hidden; }
+  #afs-wf .afs-stepper button{ border:0;background:var(--layer);width:26px;cursor:pointer;color:var(--text-1); }
+  #afs-wf .afs-stepper span{ padding:3px 10px;background:var(--layer-2);font-variant-numeric:tabular-nums;font-size:12.5px; }
+  #afs-wf .afs-fchip{ display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border:1px solid var(--stroke);border-radius:6px;
+    background:var(--layer);font-size:12px;color:var(--text-1);cursor:pointer; }
+  #afs-wf .afs-fchip i{ color:var(--text-3);width:13px;height:13px; }
+  #afs-wf .afs-input{ border:1px solid var(--stroke);border-radius:4px;background:var(--layer);color:var(--text-1);
+    padding:6px 10px;font:inherit;font-size:13px;min-width:0; }
+  #afs-wf .afs-input.lg{ font-size:15px;padding:9px 12px; }
+  #afs-wf .afs-vsep{ width:1px;align-self:stretch;background:var(--stroke);margin:2px 4px;flex:none; }
+  #afs-wf .afs-filelist{ display:flex;flex-direction:column;gap:6px;margin-top:10px; }
+  #afs-wf .afs-filerow{ display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--stroke);border-radius:6px;
+    background:var(--layer-2);cursor:pointer; }
+  #afs-wf .afs-filerow i{ color:var(--text-3);width:14px;height:14px;flex:none; }
+  #afs-wf .afs-filerow .nm{ flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  #afs-wf .afs-filerow .cnt{ color:var(--text-2);font-size:12px;flex:none; }
+  #afs-wf .afs-filerow input{ accent-color:var(--accent);width:15px;height:15px;margin:0;flex:none; }
+  #afs-wf .afs-glyph{ display:inline-grid;place-items:center;width:30px;height:30px;border:1px solid var(--stroke);
+    border-radius:4px;background:var(--layer-2);font-size:17px;overflow:hidden;flex:none; }
+  #afs-wf .afs-strip{ display:flex;gap:4px; }
+  #afs-wf .afs-tofu{ display:flex;gap:3px;overflow:hidden;padding:6px 8px;border:1px dashed var(--stroke);border-radius:6px;
+    background:var(--layer-2);color:var(--bad);font-size:15px;max-width:100%; }
+  #afs-wf .afs-opt{ display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto auto;
+    column-gap:12px;row-gap:3px;align-items:center;padding:10px 12px;border:1px solid var(--stroke);border-radius:6px;
+    background:var(--layer);cursor:pointer; }
+  #afs-wf .afs-opt:hover{ background:var(--layer-2); }
+  #afs-wf .afs-opt.on{ border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent); }
+  #afs-wf .afs-opt > input[type=checkbox]{ grid-row:1 / span 2;align-self:center; }
+  #afs-wf .afs-opt > .afs-strip{ grid-column:3;grid-row:1 / span 2;align-self:center; }
+  #afs-wf .afs-opt > .afs-tail{ grid-column:3;grid-row:1 / span 2;align-self:center;color:var(--text-3);display:flex; }
+  #afs-wf .afs-opt .nm{ font-weight:600; }
+  #afs-wf .afs-opt .m{ color:var(--text-2);font-size:12px;font-variant-numeric:tabular-nums; }
+  #afs-wf .afs-optlist{ display:flex;flex-direction:column;gap:8px; }
+  #afs-wf .afs-cb{ width:16px;height:16px;flex:none;accent-color:var(--accent);margin:0;cursor:pointer; }
+  #afs-wf .afs-fcard-h{ display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
+  #afs-wf .afs-fcard-h .fname{ font-size:16px;font-weight:600; }
+  #afs-wf .afs-fcard-h .alias{ color:var(--text-3);font-size:12px; }
+  #afs-wf .afs-actionbar{ margin-top:auto;display:flex;align-items:center;gap:14px;padding:12px 16px;
+    border:1px solid var(--stroke);border-radius:8px;background:var(--layer);flex-wrap:wrap; }
+  #afs-wf .afs-check{ display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-1);cursor:pointer; }
+  #afs-wf .afs-check input{ accent-color:var(--accent);width:16px;height:16px; }
+  #afs-wf .afs-switch{ position:relative;width:36px;height:18px;border-radius:9px;border:1px solid var(--text-3);flex:none;display:inline-block; }
+  #afs-wf .afs-switch::after{ content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text-2); }
+  #afs-wf .afs-chars{ padding:8px 10px;border:1px dashed var(--stroke);border-radius:6px;background:var(--layer-2);
+    font-size:16px;letter-spacing:2px;line-height:1.9;word-break:break-all; }
+  #afs-wf .afs-plist{ display:flex;flex-direction:column;gap:6px; }
+  #afs-wf .afs-prow{ display:flex;align-items:center;gap:14px;padding:9px 12px;border:1px solid var(--stroke);border-radius:6px;
+    background:var(--layer);cursor:pointer; }
+  #afs-wf .afs-prow:hover{ background:var(--layer-2); }
+  #afs-wf .afs-prow.sel{ border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent); }
+  #afs-wf .afs-prow .p-info{ width:230px;flex:none;display:flex;flex-direction:column;gap:3px;min-width:0; }
+  #afs-wf .afs-prow .p-info .nm{ font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  #afs-wf .afs-prow .pv{ flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px; }
+  #afs-wf .afs-dialog-backdrop{ position:absolute;inset:0;background:rgba(0,0,0,.32);display:grid;place-items:center;z-index:10; }
+  #afs-wf .afs-dialog{ width:min(520px,90%);background:var(--layer);border:1px solid var(--stroke);border-radius:8px;
+    box-shadow:0 16px 40px rgba(0,0,0,.22);padding:20px;display:flex;flex-direction:column;gap:12px; }
+  #afs-wf .afs-dialog h3{ margin:0;font-size:16px;font-weight:600; }
+  #afs-wf .afs-dialog p{ margin:0;color:var(--text-2);font-size:12.5px; }
+  #afs-wf .afs-dialog textarea{ width:100%;box-sizing:border-box;min-height:96px;resize:vertical;border:1px solid var(--stroke);
+    border-radius:6px;background:var(--layer-2);color:var(--text-1);font:inherit;font-size:17px;letter-spacing:2px;padding:10px; }
+  #afs-wf .afs-dialog .ft{ display:flex;justify-content:flex-end;gap:8px; }
+  #afs-wf .fs-yh{ font-family:"Microsoft YaHei",sans-serif; }
+  #afs-wf .fs-song{ font-family:SimSun,serif; }
+  #afs-wf .fs-hei{ font-family:SimHei,sans-serif; }
+  #afs-wf .fs-kai{ font-family:KaiTi,serif; }
+  #afs-wf .fs-fs{ font-family:FangSong,serif; }
+  #afs-wf .fs-round{ font-family:"Yuanti SC","Microsoft YaHei UI",sans-serif; }
+  @media (max-width: 900px){
+    #afs-wf .afs-nav{ width:56px; }
+    #afs-wf .afs-nav-item span{ display:none; }
+    #afs-wf .afs-prow .p-info{ width:150px; }
+  }
+</style>
+
+<div class="afs-app" id="afs-wf">
+  <div class="afs-titlebar"><span class="dot"></span><b>AssFontSubstitute — ASS 字体替换</b>
+    <span class="afs-winctl"><i data-lucide="minus"></i><i data-lucide="square"></i><i data-lucide="x"></i></span>
+  </div>
+  <div class="afs-body">
+    <nav class="afs-nav">
+      <button class="afs-nav-item" data-nav="lib"><i data-lucide="database"></i><span>字体库管理</span></button>
+      <button class="afs-nav-item" data-nav="preview"><i data-lucide="eye"></i><span>字体库预览</span></button>
+      <button class="afs-nav-item active" data-nav="analyze"><i data-lucide="file-text"></i><span>处理字幕</span></button>
+      <button class="afs-nav-item" data-nav="settings"><i data-lucide="settings"></i><span>设置</span></button>
+      <div class="afs-nav-foot">v0.1.0 · 索引就绪</div>
+    </nav>
+
+    <main class="afs-pane afs-main" data-pane="lib" hidden>
+      <div><h2 class="afs-h">字体库管理</h2></div>
+      <div class="afs-toolbar">
+        <button class="afs-btn primary"><i data-lucide="folder-plus"></i>添加字体目录</button>
+        <button class="afs-btn"><i data-lucide="refresh-cw"></i>更新全部索引</button>
+      </div>
+      <div class="afs-stats">
+        <div class="afs-card afs-stat"><b>3</b><span>字体目录</span></div>
+        <div class="afs-card afs-stat"><b>6,210</b><span>文件总数</span></div>
+        <div class="afs-card afs-stat"><b>4,872</b><span>字体总数</span></div>
+        <div class="afs-card afs-stat"><b>3,120</b><span>支持简体</span></div>
+        <div class="afs-card afs-stat"><b>2,905</b><span>支持繁体</span></div>
+      </div>
+      <div class="afs-card" style="padding:4px 0;">
+        <div class="afs-dir">
+          <i data-lucide="folder"></i>
+          <div style="flex:1;"><div class="path">D:\Fonts\华康TC</div><div class="meta">1,243 款字体 · 2 分钟前更新过</div></div>
+          <span class="afs-badge ok"><i data-lucide="circle-check"></i>已更新</span>
+        </div>
+        <div class="afs-dir">
+          <i data-lucide="folder"></i>
+          <div style="flex:1;"><div class="path">E:\FontLib\思源系</div><div class="meta">2,106 款字体 · 有变动：新增 12 · 修改 3</div></div>
+          <span class="afs-badge warn"><i data-lucide="circle-alert"></i>需更新</span>
+          <button class="afs-btn sm">更新索引</button>
+        </div>
+        <div class="afs-dir">
+          <i data-lucide="folder"></i>
+          <div style="flex:1;min-width:0;">
+            <div class="path">F:\下载\圆体系</div>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+              <span class="afs-spin" role="status" aria-label="读取中"></span>
+              <div class="afs-progress"><i style="width:34%"></i></div>
+              <span class="meta">518 / 1,523</span>
+            </div>
+          </div>
+          <button class="afs-btn sm ghost">取消</button>
+        </div>
+      </div>
+      <div class="afs-infobar"><i data-lucide="info"></i>读取失败的文件会记在失败清单里，下次不再反复尝试；已删除的文件会自动移出索引。</div>
+    </main>
+
+    <main class="afs-pane afs-main" data-pane="preview" hidden>
+      <div><h2 class="afs-h">字体库预览</h2></div>
+      <div class="afs-card" style="display:flex;flex-direction:column;gap:10px;">
+        <input class="afs-input lg" style="width:100%;box-sizing:border-box;" value="永远相信美好的事情即将发生 0123 ABC" aria-label="预览字体">
+        <div class="afs-toolbar">
+          <input class="afs-input" style="width:200px;" placeholder="搜索字体名" aria-label="搜索字体名">
+          <select class="afs-input" aria-label="分类筛选">
+            <option>全部分类</option><option>黑</option><option>宋</option><option>圆</option><option>楷</option><option>仿</option><option>未分类</option>
+          </select>
+          <select class="afs-input" aria-label="简繁筛选">
+            <option>全部简繁</option><option>简</option><option>繁</option><option>简繁</option>
+          </select>
+          <select class="afs-input" aria-label="字重筛选">
+            <option>全部字重</option><option>W300</option><option>W400</option><option>W500</option><option>W600</option><option>W700</option><option>W800</option><option>W900</option>
+          </select>
+          <span style="margin-left:auto;color:var(--text-2);font-size:12px;">4,872 款字体</span>
+        </div>
+      </div>
+      <div class="afs-card">
+        <div class="afs-plist">
+          <div class="afs-prow sel">
+            <div class="p-info"><div class="nm fs-yh">華康中黑體</div><div><span class="afs-tag">简繁</span> <span class="afs-tag">黑</span> <span class="afs-tag">W700</span></div></div>
+            <div class="pv fs-yh">永远相信美好的事情即将发生 0123 ABC</div>
+          </div>
+          <div class="afs-prow">
+            <div class="p-info"><div class="nm fs-hei">思源黑体 CN</div><div><span class="afs-tag">简</span> <span class="afs-tag">黑</span> <span class="afs-tag">W400</span></div></div>
+            <div class="pv fs-hei">永远相信美好的事情即将发生 0123 ABC</div>
+          </div>
+          <div class="afs-prow">
+            <div class="p-info"><div class="nm fs-song">华康华综体 W5</div><div><span class="afs-tag">简繁</span> <span class="afs-tag">W500</span></div></div>
+            <div class="pv fs-song">永远相信美好的事情即将发生 0123 ABC</div>
+          </div>
+          <div class="afs-prow">
+            <div class="p-info"><div class="nm fs-round">汉仪旗圆</div><div><span class="afs-tag">简繁</span> <span class="afs-tag">圆</span> <span class="afs-tag">W700</span></div></div>
+            <div class="pv fs-round">永远相信美好的事情即将发生 0123 ABC</div>
+          </div>
+          <div class="afs-prow">
+            <div class="p-info"><div class="nm fs-kai">华文楷体</div><div><span class="afs-tag">简繁</span> <span class="afs-tag">楷</span> <span class="afs-tag">W400</span></div></div>
+            <div class="pv fs-kai">永远相信美好的事情即将发生 0123 ABC</div>
+          </div>
+          <div class="afs-prow">
+            <div class="p-info"><div class="nm fs-fs">仿宋 GB2312</div><div><span class="afs-tag">简</span> <span class="afs-tag">仿</span> <span class="afs-tag">W400</span></div></div>
+            <div class="pv fs-fs">永远相信美好的事情即将发生 0123 ABC</div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <main class="afs-pane afs-main" data-pane="analyze">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <h2 class="afs-h">处理字幕</h2>
+        <span style="margin-left:auto;display:flex;gap:8px;">
+          <span class="afs-badge ok">保留 1</span>
+          <span class="afs-badge info">孪生对应 1</span>
+          <span class="afs-badge warn">需替换 2</span>
+          <span class="afs-badge err">库中没有 1</span>
+        </span>
+      </div>
+
+      <div class="afs-card">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <b>字幕文件</b>
+          <span style="color:var(--text-2);font-size:12px;"><span id="afs-filecount">3 / 3 个文件</span> · 5 种字体</span>
+          <span style="margin-left:auto;display:flex;gap:8px;">
+            <span class="afs-fchip"><i data-lucide="plus"></i>添加文件</span>
+            <span class="afs-fchip"><i data-lucide="refresh-cw"></i>重新载入</span>
+          </span>
+        </div>
+        <div class="afs-filelist">
+          <label class="afs-filerow"><input type="checkbox" checked><i data-lucide="file-text"></i><span class="nm">EP01.ass</span><span class="cnt">4 种字体</span></label>
+          <label class="afs-filerow"><input type="checkbox" checked><i data-lucide="file-text"></i><span class="nm">EP02.ass</span><span class="cnt">3 种字体</span></label>
+          <label class="afs-filerow"><input type="checkbox" checked><i data-lucide="file-text"></i><span class="nm">EP03.ass</span><span class="cnt">3 种字体</span></label>
+        </div>
+      </div>
+
+      <div class="afs-toolbar">
+        <div class="afs-field">孪生检测方向
+          <div class="afs-seg" role="group" aria-label="孪生检测方向">
+            <button class="active" aria-pressed="true">繁 → 简</button>
+            <button aria-pressed="false">简 → 繁</button>
+          </div>
+        </div>
+        <div class="afs-field">覆盖率阈值
+          <div class="afs-stepper"><button aria-label="降低">−</button><span><b>98</b>%</span><button aria-label="提高">+</button></div>
+        </div>
+        <span class="afs-vsep"></span>
+        <input class="afs-input" style="margin-left:auto;flex:0 1 300px;" placeholder="预览字体：输入任意文字" aria-label="预览字体">
+      </div>
+
+      <div class="afs-card" style="display:flex;flex-direction:column;gap:10px;">
+        <div class="afs-fcard-h">
+          <i data-lucide="circle-check" style="color:var(--good)"></i>
+          <span class="fname fs-yh">華康中黑體</span>
+          <span class="alias">4 样式 · 2 行内 · 2,304 字</span>
+          <span class="afs-badge ok" style="margin-left:auto;">库中有 · 覆盖足够</span>
+        </div>
+        <div class="afs-optlist">
+          <label class="afs-opt on">
+            <input type="checkbox" class="afs-cb" checked>
+            <div>
+              <div class="nm fs-yh">華康中黑體
+                <span class="afs-tag">原字体</span><span class="afs-tag">简繁</span><span class="afs-tag">黑</span><span class="afs-tag">W700</span>
+              </div>
+              <div class="m">覆盖 100% · 无需替换</div>
+            </div>
+            <div class="afs-strip"><span class="afs-glyph fs-yh">永</span><span class="afs-glyph fs-yh">汉</span><span class="afs-glyph fs-yh">思</span><span class="afs-glyph fs-yh">国</span><span class="afs-glyph fs-yh">8</span><span class="afs-glyph fs-yh">a</span></div>
+          </label>
+        </div>
+        <div><button class="afs-btn sm ghost">继续找其他相似字体</button></div>
+      </div>
+
+      <div class="afs-card" style="display:flex;flex-direction:column;gap:10px;">
+        <div class="afs-fcard-h">
+          <i data-lucide="circle-check" style="color:var(--good)"></i>
+          <span class="fname fs-song">華康華綜體W5</span>
+          <span class="alias">2 样式 · 1 行内 · 876 字</span>
+          <span class="afs-badge info" style="margin-left:auto;">找到孪生对应的简体字体</span>
+        </div>
+        <div class="afs-optlist">
+          <label class="afs-opt">
+            <input type="checkbox" class="afs-cb">
+            <div>
+              <div class="nm fs-song">華康華綜體W5
+                <span class="afs-tag">原字体</span><span class="afs-tag">繁</span><span class="afs-tag">W500</span>
+              </div>
+              <div class="m">覆盖 91.0% · 有 79 字未覆盖</div>
+            </div>
+            <div class="afs-strip"><span class="afs-glyph fs-song">永</span><span class="afs-glyph fs-song">汉</span><span class="afs-glyph fs-song">思</span><span class="afs-glyph fs-song">国</span><span class="afs-glyph fs-song">8</span></div>
+          </label>
+          <label class="afs-opt on">
+            <input type="checkbox" class="afs-cb" checked>
+            <div>
+              <div class="nm fs-song">华康华综体 W5
+                <span class="afs-tag hot">孪生对应</span><span class="afs-tag">简繁</span><span class="afs-tag">W500</span>
+              </div>
+              <div class="m">覆盖 100% · 相对大小 100% · 与原字体同款设计</div>
+            </div>
+            <div class="afs-strip"><span class="afs-glyph fs-song">永</span><span class="afs-glyph fs-song">汉</span><span class="afs-glyph fs-song">思</span><span class="afs-glyph fs-song">国</span><span class="afs-glyph fs-song">8</span></div>
+          </label>
+        </div>
+        <div><button class="afs-btn sm ghost">继续找其他相似字体</button></div>
+      </div>
+
+      <div class="afs-card" style="display:flex;flex-direction:column;gap:10px;">
+        <div class="afs-fcard-h">
+          <i data-lucide="circle-alert" style="color:var(--warn)"></i>
+          <span class="fname fs-round">華康圓體</span>
+          <span class="alias">1 样式 · 0 行内 · 1,102 字</span>
+          <span class="afs-badge warn" style="margin-left:auto;">需替换</span>
+        </div>
+        <div class="afs-field">缺 42 个字
+          <div class="afs-tofu">呒 呣 喆 峃 㙟 䁖 这 为 开 关 门 闹 丽 举 …</div>
+        </div>
+        <div class="afs-optlist">
+          <label class="afs-opt">
+            <input type="checkbox" class="afs-cb">
+            <div>
+              <div class="nm fs-round">華康圓體
+                <span class="afs-tag">原字体</span><span class="afs-tag">繁</span><span class="afs-tag">圆</span><span class="afs-tag">W400</span>
+              </div>
+              <div class="m">覆盖 96.2%</div>
+            </div>
+            <div class="afs-strip"><span class="afs-glyph fs-round">永</span><span class="afs-glyph fs-round">汉</span><span class="afs-glyph fs-round">思</span><span class="afs-glyph fs-round">国</span></div>
+          </label>
+          <label class="afs-opt on">
+            <input type="checkbox" class="afs-cb" checked>
+            <div>
+              <div class="nm fs-round">汉仪旗圆
+                <span class="afs-tag hot">上次使用</span><span class="afs-tag">简繁</span><span class="afs-tag">圆</span><span class="afs-tag">W700</span>
+              </div>
+              <div class="m" data-tooltip="比原字体大 8%">相似 91.0% · 覆盖 99.6% · 相对大小 108%</div>
+            </div>
+            <div class="afs-strip"><span class="afs-glyph fs-round">永</span><span class="afs-glyph fs-round">汉</span><span class="afs-glyph fs-round">思</span><span class="afs-glyph fs-round">国</span></div>
+          </label>
+          <label class="afs-opt">
+            <input type="checkbox" class="afs-cb">
+            <div>
+              <div class="nm fs-yh">资源圆体 M
+                <span class="afs-tag">简</span><span class="afs-tag">圆</span><span class="afs-tag">W500</span>
+              </div>
+              <div class="m" data-tooltip="比原字体大 12%">相似 88.0% · 覆盖 99.9% · 相对大小 112%</div>
+            </div>
+            <div class="afs-strip"><span class="afs-glyph fs-yh">永</span><span class="afs-glyph fs-yh">汉</span><span class="afs-glyph fs-yh">思</span><span class="afs-glyph fs-yh">国</span></div>
+          </label>
+          <label class="afs-opt">
+            <input type="checkbox" class="afs-cb">
+            <div>
+              <div class="nm fs-kai">华文楷体
+                <span class="afs-tag">简繁</span><span class="afs-tag">楷</span><span class="afs-tag">W400</span>
+              </div>
+              <div class="m" data-tooltip="比原字体小 5%">相似 62.0% · 覆盖 100% · 相对大小 95%</div>
+            </div>
+            <div class="afs-strip"><span class="afs-glyph fs-kai">永</span><span class="afs-glyph fs-kai">汉</span><span class="afs-glyph fs-kai">思</span><span class="afs-glyph fs-kai">国</span></div>
+          </label>
+          <label class="afs-opt">
+            <input type="checkbox" class="afs-cb">
+            <div>
+              <div class="nm fs-round">冬青圆体
+                <span class="afs-tag">繁</span><span class="afs-tag">圆</span><span class="afs-tag">W400</span>
+              </div>
+              <div class="m" data-tooltip="比原字体大 3%">相似 84.0% · 覆盖 99.2% · 相对大小 103%</div>
+            </div>
+            <div class="afs-strip"><span class="afs-glyph fs-round">永</span><span class="afs-glyph fs-round">汉</span><span class="afs-glyph fs-round">思</span><span class="afs-glyph fs-round">国</span></div>
+          </label>
+          <label class="afs-opt">
+            <input type="checkbox" class="afs-cb">
+            <div>
+              <div class="nm fs-yh">幼圆
+                <span class="afs-tag">简</span><span class="afs-tag">圆</span><span class="afs-tag">W400</span>
+              </div>
+              <div class="m" data-tooltip="比原字体大 1%">相似 79.5% · 覆盖 99.8% · 相对大小 101%</div>
+            </div>
+            <div class="afs-strip"><span class="afs-glyph fs-yh">永</span><span class="afs-glyph fs-yh">汉</span><span class="afs-glyph fs-yh">思</span><span class="afs-glyph fs-yh">国</span></div>
+          </label>
+        </div>
+        <div class="afs-infobar"><i data-lucide="info"></i>已找到 5 个相似字体，暂停搜索。<button class="afs-btn sm ghost">继续找更多</button></div>
+      </div>
+
+      <div class="afs-card" style="display:flex;flex-direction:column;gap:10px;">
+        <div class="afs-fcard-h">
+          <i data-lucide="circle-alert" style="color:var(--warn)"></i>
+          <span class="fname fs-kai">華康楷書W7</span>
+          <span class="alias">2 样式 · 0 行内 · 643 字</span>
+          <span class="afs-badge warn" style="margin-left:auto;">需替换</span>
+        </div>
+        <div class="afs-optlist">
+          <label class="afs-opt">
+            <input type="checkbox" class="afs-cb">
+            <div>
+              <div class="nm fs-kai">華康楷書W7
+                <span class="afs-tag">原字体</span><span class="afs-tag">繁</span><span class="afs-tag">楷</span><span class="afs-tag">W700</span>
+              </div>
+              <div class="m">覆盖 89.5%</div>
+            </div>
+            <div class="afs-strip"><span class="afs-glyph fs-kai">永</span><span class="afs-glyph fs-kai">汉</span><span class="afs-glyph fs-kai">思</span><span class="afs-glyph fs-kai">国</span></div>
+          </label>
+          <label class="afs-opt on">
+            <input type="checkbox" class="afs-cb" checked>
+            <div>
+              <div class="nm fs-kai">方正楷体
+                <span class="afs-tag hot">上次使用</span><span class="afs-tag">简</span><span class="afs-tag">楷</span><span class="afs-tag">W700</span>
+              </div>
+              <div class="m" data-tooltip="比原字体小 3%">相似 89.2% · 覆盖 100% · 相对大小 97%</div>
+            </div>
+            <div class="afs-strip"><span class="afs-glyph fs-kai">永</span><span class="afs-glyph fs-kai">汉</span><span class="afs-glyph fs-kai">思</span><span class="afs-glyph fs-kai">国</span></div>
+          </label>
+        </div>
+        <div class="afs-infobar"><span class="afs-spin" role="status" aria-label="搜索中"></span>正在搜索相似字体…</div>
+      </div>
+
+      <div class="afs-card" style="display:flex;flex-direction:column;gap:10px;">
+        <div class="afs-fcard-h">
+          <i data-lucide="circle-x" style="color:var(--bad)"></i>
+          <span class="fname fs-song">新細明體</span>
+          <span class="alias">1 样式 · 0 行内 · 65 字</span>
+          <span class="afs-badge err" style="margin-left:auto;">库中没有</span>
+        </div>
+        <div class="afs-optlist">
+          <label class="afs-opt on">
+            <input type="checkbox" class="afs-cb" checked>
+            <div>
+              <div class="nm fs-song">保留原字体名
+                <span class="afs-tag">不改动</span>
+              </div>
+              <div class="m">播放时由播放器自行回退处理</div>
+            </div>
+          </label>
+          <label class="afs-opt" data-picker="afs-picker-dialog">
+            <input type="checkbox" class="afs-cb">
+            <div>
+              <div class="nm">从字体库选择</div>
+              <div class="m">点击从字体库挑选任意字体</div>
+            </div>
+            <span class="afs-tail"><i data-lucide="chevron-right"></i></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="afs-actionbar">
+        <label class="afs-check"><input type="checkbox" checked>另存为 &lt;原名&gt;.substituted.ass</label>
+        <label class="afs-check"><span class="afs-switch" role="switch" aria-checked="false"></span>覆盖原文件</label>
+        <span style="margin-left:auto;color:var(--text-2);font-size:12.5px;">将替换 3 / 5 种字体</span>
+        <button class="afs-btn primary"><i data-lucide="save"></i>应用替换</button>
+      </div>
+    </main>
+
+    <main class="afs-pane afs-main" data-pane="settings" hidden>
+      <div><h2 class="afs-h">设置</h2></div>
+      <div class="afs-card" style="display:flex;flex-direction:column;gap:12px;">
+        <div class="afs-field">默认覆盖率阈值
+          <div class="afs-stepper"><button>−</button><span><b>98</b>%</span><button>+</button></div>
+        </div>
+        <div class="afs-field">找到几个相似字体后暂停
+          <div class="afs-stepper"><button>−</button><span><b>5</b></span><button>+</button></div>
+        </div>
+        <div class="afs-field">另存后缀
+          <input class="afs-input" style="width:180px;" value=".substituted.ass" aria-label="另存后缀">
+        </div>
+      </div>
+      <div class="afs-card" style="display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <b>相似度对比文字</b>
+          <span style="color:var(--text-2);font-size:12px;">用于渲染对比不同字体字形</span>
+          <button class="afs-btn sm" style="margin-left:auto;" data-dialog-open="afs-sample-dialog">编辑…</button>
+        </div>
+        <div class="afs-chars">永 中 木 水 火 山 田 石 目 心 手 白 的 我 你 他 它 好 行 生 同 尖 思 明 上 下 左 右 外 大 小 不 了 在 是 有 和 也 8 A a 0 ?</div>
+        <div class="afs-infobar warn"><i data-lucide="circle-alert"></i>修改相似度对比文字后，之前算好的相似度结果不再命中，下次使用时自动按新文字重新计算。</div>
+      </div>
+      <div class="afs-card" style="display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <b>相似度缓存</b>
+          <span style="margin-left:auto;display:flex;gap:8px;">
+            <button class="afs-btn sm" data-dialog-open="afs-move-dialog">更改位置…</button>
+            <button class="afs-btn sm" data-dialog-open="afs-clear-dialog">清除</button>
+          </span>
+        </div>
+        <div style="color:var(--text-2);font-size:12px;">位置：%APPDATA%\afs\cache.db · 12,482 对 · 渲染条 4,872 条</div>
+      </div>
+    </main>
+  </div>
+
+  <div class="afs-dialog-backdrop" id="afs-sample-dialog" hidden>
+    <div class="afs-dialog" role="dialog" aria-label="编辑相似度对比文字">
+      <h3>编辑相似度对比文字</h3>
+      <p>这些字会分别用原字体和候选字体渲染出来比较字形。建议保留各种结构和笔画都有的字。</p>
+      <textarea aria-label="相似度对比文字">永 中 木 水 火 山 田 石 目 心 手 白 的 我 你 他 它 好 行 生 同 尖 思 明 上 下 左 右 外 大 小 不 了 在 是 有 和 也 8 A a 0 ?</textarea>
+      <div class="afs-infobar warn"><i data-lucide="circle-alert"></i>保存后已有的相似度结果将全部失效，下次使用时自动按新文字重新计算。</div>
+      <div class="ft">
+        <button class="afs-btn" data-dialog-close>取消</button>
+        <button class="afs-btn primary" data-dialog-close>保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="afs-dialog-backdrop" id="afs-clear-dialog" hidden>
+    <div class="afs-dialog" role="dialog" aria-label="清除相似度缓存">
+      <h3>清除相似度缓存</h3>
+      <p>将删除全部已算好的字体相似度和渲染结果，下次使用时需要重新计算。此操作无法撤销。</p>
+      <div class="ft">
+        <button class="afs-btn" data-dialog-close>取消</button>
+        <button class="afs-btn danger" data-dialog-close>清除</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="afs-dialog-backdrop" id="afs-move-dialog" hidden>
+    <div class="afs-dialog" role="dialog" aria-label="更改缓存位置">
+      <h3>更改缓存位置</h3>
+      <p>选择新的缓存位置。可把现有缓存迁移过去，或在新位置从空缓存开始。</p>
+      <label class="afs-check"><input type="radio" name="afs-move" checked>迁移现有缓存（后台复制，不阻塞使用）</label>
+      <label class="afs-check"><input type="radio" name="afs-move">在新位置从空缓存开始</label>
+      <div class="ft">
+        <button class="afs-btn" data-dialog-close>取消</button>
+        <button class="afs-btn primary" data-dialog-close>选择文件夹…</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="afs-dialog-backdrop" id="afs-picker-dialog" hidden>
+    <div class="afs-dialog" role="dialog" aria-label="从字体库选择" style="width:min(640px,92%);">
+      <h3>从字体库选择</h3>
+      <div class="afs-toolbar">
+        <input class="afs-input" style="flex:1 1 180px;" placeholder="搜索字体名" aria-label="搜索字体名">
+        <select class="afs-input" aria-label="分类筛选">
+          <option>全部分类</option><option>黑</option><option>宋</option><option>圆</option><option>楷</option><option>仿</option><option>未分类</option>
+        </select>
+        <select class="afs-input" aria-label="简繁筛选">
+          <option>全部简繁</option><option>简</option><option>繁</option><option>简繁</option>
+        </select>
+        <select class="afs-input" aria-label="字重筛选">
+          <option>全部字重</option><option>W300</option><option>W400</option><option>W500</option><option>W600</option><option>W700</option><option>W800</option><option>W900</option>
+        </select>
+      </div>
+      <div class="afs-plist">
+        <div class="afs-prow sel">
+          <div class="p-info"><div class="nm fs-song">细明体 PMingLiU</div><div><span class="afs-tag">繁</span> <span class="afs-tag">宋</span> <span class="afs-tag">W400</span></div></div>
+          <div class="pv fs-song">永远相信美好的事情即将发生 0123 ABC</div>
+        </div>
+        <div class="afs-prow">
+          <div class="p-info"><div class="nm fs-fs">仿宋 GB2312</div><div><span class="afs-tag">简</span> <span class="afs-tag">仿</span> <span class="afs-tag">W400</span></div></div>
+          <div class="pv fs-fs">永远相信美好的事情即将发生 0123 ABC</div>
+        </div>
+        <div class="afs-prow">
+          <div class="p-info"><div class="nm fs-song">华康华综体 W5</div><div><span class="afs-tag">简繁</span> <span class="afs-tag">W500</span></div></div>
+          <div class="pv fs-song">永远相信美好的事情即将发生 0123 ABC</div>
+        </div>
+        <div class="afs-prow">
+          <div class="p-info"><div class="nm fs-yh">微軟正黑體</div><div><span class="afs-tag">简繁</span> <span class="afs-tag">黑</span> <span class="afs-tag">W400</span></div></div>
+          <div class="pv fs-yh">永远相信美好的事情即将发生 0123 ABC</div>
+        </div>
+      </div>
+      <div class="ft">
+        <button class="afs-btn" data-dialog-close>取消</button>
+        <button class="afs-btn primary" data-dialog-close>确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+(function(){
+  var root = document.getElementById('afs-wf');
+  if(!root) return;
+  function openDialog(id){
+    var dlg = document.getElementById(id);
+    if(dlg){ dlg.removeAttribute('hidden'); }
+  }
+  root.addEventListener('click', function(e){
+    var nav = e.target.closest('[data-nav]');
+    if(nav){
+      var app = nav.closest('.afs-app');
+      var target = nav.getAttribute('data-nav');
+      app.querySelectorAll('.afs-nav-item').forEach(function(n){ n.classList.toggle('active', n === nav); });
+      app.querySelectorAll('.afs-pane').forEach(function(p){
+        if(p.getAttribute('data-pane') !== target){ p.setAttribute('hidden',''); }
+        else{ p.removeAttribute('hidden'); }
+      });
+      return;
+    }
+    var seg = e.target.closest('.afs-seg button');
+    if(seg){
+      seg.parentElement.querySelectorAll('button').forEach(function(b){
+        b.classList.toggle('active', b === seg);
+        b.setAttribute('aria-pressed', b === seg ? 'true' : 'false');
+      });
+      return;
+    }
+    var opener = e.target.closest('[data-dialog-open]');
+    if(opener){ openDialog(opener.getAttribute('data-dialog-open')); return; }
+    if(e.target.closest('[data-dialog-close]') || e.target.classList.contains('afs-dialog-backdrop')){
+      var open = root.querySelector('.afs-dialog-backdrop:not([hidden])');
+      if(open){ open.setAttribute('hidden',''); }
+      return;
+    }
+    var opt = e.target.closest('.afs-opt');
+    if(opt){
+      if(opt.hasAttribute('data-picker')){ openDialog(opt.getAttribute('data-picker')); return; }
+      var box = opt.querySelector('input[type=checkbox]');
+      var list = opt.closest('.afs-optlist');
+      list.querySelectorAll('.afs-opt').forEach(function(o){ o.classList.remove('on'); });
+      list.querySelectorAll('.afs-opt input[type=checkbox]').forEach(function(b){ b.checked = false; });
+      box.checked = true;
+      opt.classList.add('on');
+      return;
+    }
+    var prow = e.target.closest('.afs-prow');
+    if(prow){
+      var plist = prow.closest('.afs-plist');
+      plist.querySelectorAll('.afs-prow').forEach(function(r){ r.classList.toggle('sel', r === prow); });
+      return;
+    }
+  });
+  root.addEventListener('change', function(e){
+    if(e.target.matches('.afs-filerow input[type=checkbox]')){
+      var n = root.querySelectorAll('.afs-filerow input[type=checkbox]:checked').length;
+      var el = document.getElementById('afs-filecount');
+      if(el){ el.textContent = n + ' / 3 个文件'; }
+    }
+  });
+})();
+</script>
