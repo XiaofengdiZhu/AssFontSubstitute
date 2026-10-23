@@ -50,3 +50,39 @@ class CoreWorker(QThread):
     def shutdown(self):
         self._stop = True
         self._q.put(None)
+
+
+class IndexWorker(QThread):
+    """逐目录跑 update_dir；progress 回调转发为信号，cancel() 经标志
+    同时作用于回调返回值（停止当前目录剩余文件）与目录间循环。"""
+
+    progress = Signal(str, int, int, object)     # (dir, done, total, UpdateResult)
+    finished_dir = Signal(str, object)           # (dir, UpdateResult)
+    failed = Signal(str, str)
+
+    def __init__(self, dirs, parent=None):
+        super().__init__(parent)
+        self._dirs = list(dirs)
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        from ass_font_substitute.gui.jobs import update_dir
+        for d in self._dirs:
+            if self._cancel:
+                break
+            try:
+                r = update_dir(
+                    d, progress=lambda done, total, res, d=d:
+                    self._on_progress(d, done, total, res))
+                self.finished_dir.emit(d, r)
+            except Exception as e:  # noqa: BLE001
+                self.failed.emit(d, f"{type(e).__name__}: {e}")
+
+    def _on_progress(self, d, done, total, res) -> bool:
+        if self._cancel:
+            return False
+        self.progress.emit(d, done, total, res)
+        return True

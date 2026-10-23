@@ -1,17 +1,263 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, ScrollArea
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog,
+                               QHBoxLayout, QTextEdit, QVBoxLayout, QWidget)
+from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget,
+                            IndeterminateProgressRing, InfoBar, PrimaryPushButton,
+                            PushButton, ScrollArea, StrongBodyLabel, ToolButton)
+from qfluentwidgets import FluentIcon as FIF
+
+from ass_font_substitute.gui.jobs import (ensure_library, probe_dir_status,
+                                          read_failures, retry_bad)
+from ass_font_substitute.gui.library_vm import LibraryVM
+from ass_font_substitute.gui.workers import IndexWorker
+
+_STAT_KEYS = [("dirs", "字体目录"), ("files", "文件总数"), ("fonts", "字体总数"),
+              ("support_sc", "支持简体"), ("support_tc", "支持繁体")]
 
 
 class LibraryPage(ScrollArea):
-    """字体库管理页（Task 6 填充）。"""
-
     def __init__(self, settings, worker, parent=None):
         super().__init__(parent)
         self.settings, self.worker = settings, worker
         self.setObjectName("libraryPage")
+        self.vm = LibraryVM(settings)
+        self._index_worker: IndexWorker | None = None
+        self._pending_failures = None       # "failures" 任务结果到达后的弹窗回调
+
         self.view = QWidget(self)
-        QVBoxLayout(self.view).addWidget(BodyLabel("字体库管理（开发中）"))
+        v = QVBoxLayout(self.view)
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+
+        head = QHBoxLayout()
+        self.btn_add = PushButton(FIF.FOLDER_ADD, "添加字体目录")
+        self.btn_refresh = PushButton(FIF.SYNC, "刷新状态")
+        self.btn_update = PrimaryPushButton(FIF.UPDATE, "更新全部索引")
+        self.btn_cancel = PushButton("取消更新")
+        self.btn_cancel.hide()
+        self.ring = IndeterminateProgressRing()
+        self.ring.hide()
+        for w in (self.btn_add, self.btn_refresh, self.btn_update,
+                  self.btn_cancel, self.ring):
+            head.addWidget(w)
+        head.addStretch(1)
+        v.addLayout(head)
+
+        self.btn_failures = PushButton(FIF.INFO, "查看失败清单")
+        v.addWidget(self.btn_failures, 0, Qt.AlignLeft)
+
+        self.stat_cards: dict[str, BodyLabel] = {}
+        stat_row = QHBoxLayout()
+        for key, label in _STAT_KEYS:
+            card = CardWidget()
+            cv = QVBoxLayout(card)
+            title = CaptionLabel(label)
+            val = BodyLabel("—")
+            val.setAlignment(Qt.AlignCenter)
+            self.stat_cards[key] = val
+            cv.addWidget(title)
+            cv.addWidget(val)
+            stat_row.addWidget(card)
+        v.addLayout(stat_row)
+
+        self.dirs_box = QVBoxLayout()
+        v.addLayout(self.dirs_box)
+        v.addStretch(1)
+
+        self.btn_add.clicked.connect(self._add_dir)
+        self.btn_refresh.clicked.connect(self.refresh_status)
+        self.btn_update.clicked.connect(self._start_update)
+        self.btn_cancel.clicked.connect(self._cancel_update)
+        self.btn_failures.clicked.connect(self._show_failures)
+        self.worker.result.connect(self._on_result)
+        self.worker.failed.connect(self._on_failed)
+        self.refresh_status()
+
+    # ---- 目录列表 ----
+    def _rebuild_dir_rows(self):
+        while self.dirs_box.count():
+            item = self.dirs_box.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for d in self.vm.dirs:
+            card = CardWidget()
+            h = QHBoxLayout(card)
+            h.addWidget(StrongBodyLabel(d.path), 1)
+            badge = BodyLabel(d.badge)
+            badge.setObjectName("dirBadge")
+            h.addWidget(badge)
+            rm = ToolButton(FIF.DELETE)
+            rm.clicked.connect(lambda _=False, p=d.path: self._remove_dir(p))
+            h.addWidget(rm)
+            self.dirs_box.addWidget(card)
+
+    def _add_dir(self):
+        d = QFileDialog.getExistingDirectory(self, "选择字体目录")
+        if not d:
+            return
+        if not self.vm.add_dir(d):
+            InfoBar.warning("提示", "该目录已在列表中", parent=self)
+            return
+        self._rebuild_dir_rows()
+        self.refresh_status()
+
+    def _remove_dir(self, path):
+        self.vm.remove_dir(path)
+        self._rebuild_dir_rows()
+        self.refresh_status()
+
+    # ---- 状态刷新（探测是只读 stat 快扫，毫秒级，直接在 UI 线程做，
+    #      避免先 probe 后 lib 的顺序竞态）----
+    def refresh_status(self):
+        dirs = [d.path for d in self.vm.dirs]
+        self._rebuild_dir_rows()
+        if not dirs:
+            self._apply_stats({})
+            return
+        self.worker.submit("lib", _lib_job, dirs)
+
+    def _on_result(self, tag, payload):
+        if tag == "lib":
+            snap = payload
+            statuses = [probe_dir_status(d.path) for d in self.vm.dirs]
+            self.vm.refresh(statuses, snap.lib.stats(),
+                            snap.lib.dir_overlaps(), snap.offline_dirs)
+            self._apply_stats(snap.lib.stats())
+            self._rebuild_dir_rows()
+            self._warn_overlaps()
+        elif tag == "failures":
+            if self._pending_failures is not None:
+                show, self._pending_failures = self._pending_failures, None
+                show(payload)
+        elif isinstance(tag, str) and tag.startswith("retry:"):
+            self.refresh_status()
+
+    def _on_failed(self, tag, err):
+        if tag == "lib":
+            InfoBar.error("字体库加载失败", err, parent=self)
+        elif tag == "failures":
+            self._pending_failures = None      # 允许再次点开失败清单
+            InfoBar.error("失败清单读取失败", err, parent=self)
+        elif isinstance(tag, str) and tag.startswith("retry:"):
+            InfoBar.error("重试失败", err, parent=self)
+
+    def _apply_stats(self, stats):
+        for key, _ in _STAT_KEYS:
+            self.stat_cards[key].setText(str(stats.get(key, "—")))
+
+    def _warn_overlaps(self):
+        if self.vm.overlaps:
+            InfoBar.warning("目录重叠", "；".join(self.vm.overlaps), parent=self)
+        if self.vm.failed_dirs:
+            InfoBar.warning("目录不可用", "；".join(self.vm.failed_dirs), parent=self)
+
+    # ---- 索引更新 ----
+    def _start_update(self):
+        dirs = [d.path for d in self.vm.dirs]
+        if not dirs or self._index_worker is not None:
+            return
+        for d in dirs:
+            self.vm.mark_indexing(d)
+        self._rebuild_dir_rows()
+        self.btn_update.hide()
+        self.btn_cancel.show()
+        self.ring.show()
+        self._index_worker = IndexWorker(dirs)
+        self._index_worker.progress.connect(self._on_index_progress)
+        self._index_worker.finished_dir.connect(self._on_index_done)
+        self._index_worker.failed.connect(self._on_index_failed)
+        self._index_worker.finished.connect(self._on_index_all_done)
+        self._index_worker.start()
+
+    def _on_index_progress(self, d, done, total, res):
+        self.btn_cancel.setText(f"取消更新（{done}/{total}）")
+
+    def _on_index_done(self, d, res):
+        self.vm.mark_done(d)
+        self._rebuild_dir_rows()
+
+    def _on_index_failed(self, d, err):
+        InfoBar.error("索引更新失败", f"{d}: {err}", parent=self)
+
+    def _on_index_all_done(self):
+        self._index_worker = None
+        self.btn_update.show()
+        self.btn_cancel.hide()
+        self.ring.hide()
+        self.btn_cancel.setText("取消更新")
+        self.refresh_status()
+
+    def _cancel_update(self):
+        if self._index_worker is not None:
+            self._index_worker.cancel()
+
+    # ---- 失败清单 ----
+    def _show_failures(self):
+        if self._pending_failures is not None:   # 已有清单任务在途，防重复弹窗
+            return
+        dirs = [d.path for d in self.vm.dirs]
+
+        def show(payload):
+            dlg = _FailuresDialog(payload, [d.path for d in self.vm.dirs],
+                                  retry=lambda dr, rel: self.worker.submit(
+                                      f"retry:{dr}:{rel}", _retry_job, dr, rel),
+                                  parent=self)
+            dlg.exec()
+
+        self._pending_failures = show
+        self.worker.submit("failures", _failures_job, dirs)
+
+
+class _FailuresDialog(QDialog):
+    def __init__(self, data, dirs, retry, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("失败清单")
+        self.resize(640, 480)
+        self._retry = retry
+        self._bad = data.get("bad", {}) or {}
+        v = QVBoxLayout(self)
+        text = QTextEdit()
+        text.setReadOnly(True)
+        lines = []
+        if not self._bad:
+            lines.append("各目录暂无解析失败文件。")
+        for d, rows in self._bad.items():
+            lines.append(f"【{d}】")
+            for rel, reason in rows:
+                lines.append(f"  {rel} —— {reason}")
+                lines.append("    （点击「重试全部」或重新索引可重试）")
+        skipped = data.get("skipped", [])
+        if skipped:
+            lines.append("【跳过的旧版本】")
+            lines.extend(f"  {s}" for s in skipped)
+        text.setPlainText("\n".join(lines))
+        v.addWidget(text)
+        if self._bad:
+            btn = PushButton("重试全部")
+            btn.clicked.connect(self._retry_all)
+            v.addWidget(btn)
+        box = QDialogButtonBox(QDialogButtonBox.Close)
+        box.rejected.connect(self.reject)
+        box.clicked.connect(self.accept)
+        v.addWidget(box)
+
+    def _retry_all(self):
+        for d, rows in self._bad.items():
+            for rel, _reason in rows:
+                self._retry(d, rel)
+        self.accept()
+
+
+def _lib_job(ctx, dirs):
+    return ensure_library(ctx, dirs)
+
+
+def _failures_job(ctx, dirs):
+    ensure_library(ctx, dirs)
+    return read_failures(ctx)
+
+
+def _retry_job(ctx, d, rel):
+    return retry_bad(ctx, d, rel)
