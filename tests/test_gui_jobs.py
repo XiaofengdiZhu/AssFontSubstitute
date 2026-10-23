@@ -5,7 +5,7 @@ import pytest
 
 from ass_font_substitute.gui.jobs import (DirStatus, apply_to_file, ensure_library,
                                           load_library, parse_subtitle, probe_dir_status,
-                                          pull_chunk, render_preview)
+                                          pull_chunk, render_preview, update_dir)
 from tests.fonts import build_font
 
 
@@ -36,7 +36,6 @@ def test_probe_dir_status_states(tmp_path, font_dir):
     st = probe_dir_status(str(font_dir))
     assert st.state == "stale" and st.added == 1 and st.indexed_files == 0
     # 建索引后：ok
-    from ass_font_substitute.gui.jobs import update_dir
     update_dir(str(font_dir))
     st = probe_dir_status(str(font_dir))
     assert st.state == "ok" and st.indexed_files == 1
@@ -54,6 +53,7 @@ def test_probe_does_not_create_db(tmp_path):
 
 
 def test_load_library_filters_offline(tmp_path, font_dir):
+    update_dir(str(font_dir))       # 建索引归「更新全部索引」流程，此处显式建
     snap = load_library([str(font_dir), str(tmp_path / "ghost")])
     assert len(snap.lib.entities()) == 1
     assert snap.offline_dirs == [str(tmp_path / "ghost")]
@@ -78,6 +78,7 @@ def test_parse_subtitle(tmp_path, sub_file):
 
 def test_pull_chunk_states(ctx_stub, font_dir):
     from ass_font_substitute.gui.jobs import make_searcher
+    update_dir(str(font_dir))       # 建索引归「更新全部索引」流程，此处显式建
     snap = ensure_library(ctx_stub, [str(font_dir)])
     lib = snap.lib
     chars = set("永宇")
@@ -94,6 +95,7 @@ def test_render_preview_skips_missing(font_dir):
     class C:
         pass
     ctx = C()
+    update_dir(str(font_dir))       # 建索引归「更新全部索引」流程，此处显式建
     snap = load_library([str(font_dir)])
     ctx.snapshot, ctx.lib, ctx.lib_dirs = snap, snap.lib, tuple([str(font_dir)])
     e = snap.lib.entities()[0]

@@ -72,16 +72,12 @@ class LibrarySnapshot:
 
 def load_library(dirs: list[str]) -> LibrarySnapshot:
     """聚合打开库；打不开的目录（离线/只读）剔除并报告，不拖垮整体。
-    尚无索引的目录先就地建库（打开即建）；索引损坏/只读盘 → offline。"""
+    尚无索引的目录建空库骨架，实体为 0；建索引进「更新全部索引」流程。"""
     usable, offline = [], []
     for d in dirs:
-        p = Path(d)
         try:
-            if not (p / "fontindex.db").exists():
-                update_dir(d)
-            else:
-                open_db(p / "fontindex.db").close()
-            usable.append(p)
+            open_db(Path(d) / "fontindex.db").close()
+            usable.append(Path(d))
         except sqlite3.Error:
             offline.append(d)
     return LibrarySnapshot(lib=LibraryIndex.open(usable), offline_dirs=offline)
