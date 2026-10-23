@@ -1,0 +1,212 @@
+"""处理字幕页功能冒烟（offscreen）：假 worker 不起线程，parse/classify/
+searcher/pull/apply 载荷经 _on_result 直喂，走真实 vm + UI 装配路径。"""
+import os
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from PySide6.QtCore import QObject, Signal
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+pytest.importorskip("PySide6")
+pytest.importorskip("qfluentwidgets")
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    yield app
+
+
+def _ent(fp, name, chars="永宇"):
+    from ass_font_substitute.core.fontindex.library import FontEntity
+    from ass_font_substitute.core.models import CmapRanges
+    return FontEntity(fingerprint=fp, display_name=name, aliases=(name,),
+                      psname=name, version=(1,), weight=400, width=5,
+                      italic=False, script="简", category="黑",
+                      cmap=CmapRanges.from_chars([ord(c) for c in chars]),
+                      dir_path="d", rel_path="r.ttf", face_index=0)
+
+
+class _FakeWorker(QObject):
+    """submit 只记账不执行；result/failed 由测试手动发射。"""
+
+    result = Signal(object, object)
+    failed = Signal(object, str)
+
+    def __init__(self):
+        super().__init__()
+        self.submits = []
+
+    def submit(self, tag, fn, *args, **kw):
+        self.submits.append((tag, fn, args, kw))
+
+
+def _make_page(qapp, tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))    # 决策库/设置隔离到 tmp
+    from ass_font_substitute.gui.pages.subs_page import SubsPage
+    from ass_font_substitute.gui.settings_store import Settings
+    s = Settings(tmp_path / "settings.json")        # cov .95 / sim .85 / size .9–1.1
+    page = SubsPage(s, _FakeWorker())
+    return page
+
+
+def _feed_replace_card(page, ent_a, ent_b, chars="永宇"):
+    """parse + classify 各喂一发，返回 (usage, card, norm)。"""
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=2,
+                      inline_count=5, chars=set(chars), variants={"甲字体"})
+    page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    cls = UsageClass(kind="replace", entities=[ent_a, ent_b], coverage=0.6,
+                     missing_chars=["阿", "八"])
+    page._on_result(f"classify:{page._gen}:0", (usage, cls))
+    return usage, page.vm.cards[0], "甲字体"
+
+
+def test_parse_classify_cards_and_check_roundtrip(qapp, tmp_path, monkeypatch):
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    assert not page.btn_apply.isEnabled()           # 空态禁用
+
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
+    assert len(page.vm.files) == 1 and page.files_box.count() == 1
+    assert page._cards_ui[norm] is not None and card.kind == "replace"
+    assert card.checked_key == "fp1"                # 默认勾选链落在原字体行
+    assert "需替换 1" in page.summary.text()
+    assert "将替换 0 / 1" in page.replace_label.text()
+    assert page.btn_apply.isEnabled()
+
+    fc = page._cards_ui[norm]
+    fc.option_checked.emit(norm, "fp2")             # 勾推荐行 → UI 回写 + 计数
+    assert card.checked_key == "fp2"
+    assert fc._boxes["fp2"].isChecked() and not fc._boxes["fp2"].isEnabled()
+    assert fc._boxes["fp1"].isEnabled() and not fc._boxes["fp1"].isChecked()
+    assert "将替换 1 / 1" in page.replace_label.text()
+    fc.option_checked.emit(norm, "fp1")             # 切回原字体 → 不计替换
+    assert card.checked_key == "fp1" and "将替换 0 / 1" in page.replace_label.text()
+
+    page._on_file_checked("p.ass", False)           # 取消勾选 → 卡清空 + 禁用
+    assert not page.vm.cards and not page._cards_ui
+    assert not page.btn_apply.isEnabled()
+    stale_gen = page._gen
+    page._on_file_checked("p.ass", True)
+    assert page._gen == stale_gen + 1
+    page._on_result(f"classify:{stale_gen}:0",
+                    (_usage, SimpleNamespace(kind="keep")))   # 旧代结果弃置
+    assert not page.vm.cards
+    page._on_result(f"classify:{page._gen}:0",
+                    (_usage, SimpleNamespace(kind="zero")))   # 零用字卡
+    assert page.vm.cards[0].kind == "zero"
+    assert page.vm.cards[0].checked_key == "__keep__"
+    assert "需替换 0" in page.summary.text()        # 汇总只计保留/孪生/需替换/缺失
+
+
+def test_search_chain_pause_resume_exhaust_and_relax(qapp, tmp_path, monkeypatch):
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.gui.jobs import FileParse
+    from ass_font_substitute.core.models import FontUsage
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=2, chars={"永"}, variants={"甲字体"})
+    page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0",
+                    (usage, UsageClass(kind="replace", entities=[ent_a, ent_b])))
+    card, norm = page.vm.cards[0], "甲字体"
+
+    page._continue_search(norm)                     # 建新搜索器（参数来自页面）
+    assert card.searching
+    sub = [s for s in page.worker.submits if s[0] == f"newsearcher:{norm}"][-1]
+    target, chars, cov, n_pause, min_sim, size_range, direction = sub[2]
+    assert target is ent_a and chars == {"永"}      # 原名命中作相似度基准
+    assert (cov, n_pause, min_sim) == (0.95, 5, 0.85)
+    assert size_range == (0.9, 1.1) and direction == "t2s"
+
+    searcher = SimpleNamespace(min_sim=0.85, paused=True, target_error=False)
+    page._on_result(f"searcher:{norm}", searcher)   # 挂接后立即拉第一批
+    assert card.searcher is searcher and card.min_sim == 0.85
+    assert page.worker.submits[-1][0] == f"pull:{norm}"
+
+    page._on_result(f"pull:{norm}", ([], "paused"))  # 暂停：可续搜
+    assert card.search_state == "paused" and not card.searching
+    page._continue_search(norm)                      # 续用同一搜索器
+    assert page.worker.submits[-1][0] == f"pull:{norm}"
+    assert page.worker.submits[-1][2][0] is searcher
+
+    searcher.paused = False                          # 搜索器走完剩余池 → 耗尽
+    cands = [SimpleNamespace(fingerprint=f"c{i}", display_name=f"候选{i}",
+                             coverage=0.99, similarity=0.9, size_ratio=1.0,
+                             n_chars=3) for i in range(2)]
+    page._on_result(f"pull:{norm}", (cands, "exhausted"))   # 渐进回填后耗尽
+    assert card.search_state == "exhausted" and len(card.options) == 4
+    assert page.worker.submits[-1][0] != f"pull:{norm}"      # 不再续拉
+
+    page._cards_ui[norm].relax_clicked.emit(norm)    # 放宽 0.85 → 0.75 重算
+    assert card.min_sim == 0.75
+    sub = [s for s in page.worker.submits if s[0] == f"newsearcher:{norm}"][-1]
+    assert sub[2][4] == 0.75                         # 新门槛建新搜索器
+    page._on_result(f"searcher:{norm}",
+                    SimpleNamespace(min_sim=0.75, paused=False,
+                                    target_error=False))
+    page._on_result(f"pull:{norm}", ([], "cancelled"))   # 重算弃旧拉取不挂死
+    assert not card.searching
+
+
+def test_apply_confirm_mapping_and_record(qapp, tmp_path, monkeypatch):
+    from ass_font_substitute.core.decision.store import latest_decision
+    from ass_font_substitute.gui.jobs import ApplyFileResult, FileParse
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    src = tmp_path / "a.ass"
+    src.write_text("[Script Info]", "utf-8")
+    out = tmp_path / "a.substituted.ass"
+    out.write_text("old", "utf-8")                  # 另存目标已存在 → 冲突
+
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=1, chars={"永"}, variants={"甲字体"})
+    page._on_result(f"parse:{src}", FileParse(str(src), None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0",
+                    (usage, UsageClass(kind="replace", entities=[ent_a, ent_b])))
+    page._cards_ui["甲字体"].option_checked.emit("甲字体", "fp2")
+
+    page._apply()                                   # 首击：只警告不执行
+    assert not [s for s in page.worker.submits if s[0] == "apply"]
+    page._apply()                                   # 再击确认 → 派工
+    assert page.worker.submits[-1][0] == "apply"
+    path, mapping, suffix, overwrite = page.worker.submits[-1][2]
+    assert path == str(src) and mapping == {"甲字体": "乙字体"}
+    assert suffix == ".substituted.ass" and overwrite is False
+
+    page._on_result("apply", ApplyFileResult(str(src), str(out), 1))
+    d = latest_decision(Path(page.vm.decisions_db), "甲字体", "t2s")
+    assert d == ("fp2", False)                      # record_all 已落库
+
+    # 解析失败文件：勾了也不计入替换、应用保持可用性由剩余文件决定
+    page._on_result(f"parse:{tmp_path / 'bad.ass'}",
+                    FileParse(str(tmp_path / "bad.ass"), "ParseError: x", [], [], []))
+    assert page.vm.checked_parses() == [page.vm.files[0]]
+
+
+def test_preview_text_and_mutually_exclusive_switches(qapp, tmp_path, monkeypatch):
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, _card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    old = page._cards_ui["甲字体"]
+    page.preview_edit.setText("永宇")               # 防抖后整卡重建
+    page._preview_debounce.timeout.emit()
+    assert page._cards_ui["甲字体"] is not old       # 旧卡弃置、新卡持同一 vm 卡
+    assert page._cards_ui["甲字体"].card is page.vm.cards[0]
+
+    assert page.sw_save.isChecked() and not page.sw_overwrite.isChecked()
+    page.sw_overwrite.setChecked(True)              # 开覆盖 → 另存自动关
+    assert page.sw_save.isChecked() is False
+    assert page.settings.get("overwrite_default") is True
+    page.sw_save.setChecked(True)                   # 开另存 → 覆盖自动关
+    assert page.sw_overwrite.isChecked() is False
+    assert page.settings.get("overwrite_default") is False
