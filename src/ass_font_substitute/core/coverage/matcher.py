@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 
 import opencc
 
-from ass_font_substitute.core.fontindex.library import FontEntity, LibraryIndex
+from ass_font_substitute.core.fontindex.library import (FontEntity, LibraryIndex,
+                                                        normalize_name)
 from ass_font_substitute.core.models import CmapRanges, FontUsage
 
 _CC = {"t2s": opencc.OpenCC("t2s"), "s2t": opencc.OpenCC("s2t")}
@@ -58,7 +59,9 @@ def classify_usage(usage: FontUsage, lib: LibraryIndex, threshold: float = COV_T
         if ratio >= threshold:
             return UsageClass("keep", entities, ratio, missing)
         # 在库但覆盖不足（如繁体原名在库、简体版同库）：先跑孪生检测
-        twin = _first_adequate_twin(lib, usage, threshold, direction)
+        # （查找源含命中实体自身的全部别名——字幕常写 PostScript 名，转换要靠别名里的中文名）
+        twin = _first_adequate_twin(lib, usage, threshold, direction,
+                                    entities=entities)
         if twin is not None:
             tratio, tmissing = coverage_detail(twin.cmap, usage.chars)
             return UsageClass("twin", [twin], tratio, tmissing, twin_hit=twin)
@@ -72,9 +75,27 @@ def classify_usage(usage: FontUsage, lib: LibraryIndex, threshold: float = COV_T
 
 
 def _first_adequate_twin(lib: LibraryIndex, usage: FontUsage, threshold: float,
-                         direction: str) -> FontEntity | None:
-    for t in twin_candidates(lib, usage, direction):
-        ratio, _ = coverage_detail(t.cmap, usage.chars)
-        if ratio >= threshold:
-            return t
+                         direction: str,
+                         entities: list[FontEntity] | None = None) -> FontEntity | None:
+    """孪生查找名 = 字幕名转换优先，其后在库实体自身别名逐个转换。
+    PostScript 名（纯 ASCII）OpenCC 转不动，但同实体别名常带中文名——
+    如字幕写 DFHuaZongW5-B5，其别名 華康華綜體W5 转换后命中简版 华康华综体W5。
+    entities 非空时排除这些自身指纹（别名原样查回自己不算孪生，自身覆盖
+    必然同样不达标）。"""
+    exclude = {e.fingerprint for e in entities} if entities else set()
+    seen: set[str] = set()
+    names = [usage.norm_name]
+    for e in entities or []:
+        names.extend(a for a in e.aliases)
+    for name in names:
+        converted = twin_convert(normalize_name(name), direction)
+        if converted in seen:
+            continue
+        seen.add(converted)
+        for t in lib.find_by_name(converted):
+            if t.fingerprint in exclude:
+                continue
+            ratio, _ = coverage_detail(t.cmap, usage.chars)
+            if ratio >= threshold:
+                return t
     return None

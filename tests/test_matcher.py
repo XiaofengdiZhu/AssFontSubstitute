@@ -64,6 +64,41 @@ def test_in_library_low_coverage_twin_under_coverage_still_replace(tmp_path):
     assert r.entities and r.twin_hit is None
 
 
+def test_twin_via_in_library_alias_expansion(tmp_path):
+    # 字幕写 PostScript 名（纯 ASCII，OpenCC 转不动），但在库实体自身别名
+    # 带中文名 → 别名扩展转换后命中简版孪生（真实案例：DFHuaZongW5-B5 → 华康华综体W5）
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "tc.ttf", chars="永和的文字", family="華康原體W5",
+               psname="DFYuanTi-B5")      # 别名 = {DFYuanTi-B5, 華康原體W5}，缺 "中"
+    build_font(d / "sc.ttf", chars="永和的中文字", family="华康原体W5",
+               psname="DFYuanTi-GB")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    lib = LibraryIndex.open([d])
+    r = classify_usage(_usage("DFYuanTi-B5", "永和的中文字"), lib)
+    assert r.kind == "twin"
+    assert r.twin_hit is not None
+    assert "华康原体W5" in r.twin_hit.aliases
+    assert r.coverage == 1.0
+
+
+def test_alias_expansion_excludes_self(tmp_path):
+    # 别名转换回自身（繁名实体的中文名别名经 t2s 命中简名实体、或 ASCII 别名原样
+    # 查回自己）不得算孪生：自身覆盖必然不达标路径里的实体要排除
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "tc.ttf", chars="永和的文字", family="華康原體W5",
+               psname="DFYuanTi-B5")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    lib = LibraryIndex.open([d])
+    r = classify_usage(_usage("DFYuanTi-B5", "永和的中文字"), lib)
+    assert r.kind == "replace"                # 没有简版 → 孪生失败回落 replace
+    assert r.twin_hit is None
+    assert any(e.psname == "DFYuanTi-B5" for e in r.entities)
+
+
 def test_twin_convert():
     assert twin_convert("華康測試體W5", "t2s") == "华康测试体 W5" or \
            twin_convert("華康測試體W5", "t2s").replace(" ", "") == "华康测试体W5"
