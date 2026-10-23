@@ -41,28 +41,33 @@ def _load_fonts(path: Path) -> list[TTFont]:
 
 def parse_font_file(path: Path) -> list[FontRecord]:
     fonts = _load_fonts(path)
-    data = path.read_bytes()
-    xxh = xxhash.xxh64(data).hexdigest()
-    st = path.stat()
-    out: list[FontRecord] = []
-    for idx, tt in enumerate(fonts):
-        try:
-            name = tt["name"]
-            aliases = sorted({r.toUnicode() for r in name.names
-                              if r.nameID in NAME_IDS and r.toUnicode()})
-            psname = next((r.toUnicode() for r in name.names if r.nameID == 6), None)
-            version = parse_version(next((r.toUnicode() for r in name.names
-                                          if r.nameID == 5), None))
-            os2 = tt["OS/2"]
-            cmap = CmapRanges.from_cmap_subtables(tt["cmap"].tables)
-            out.append(FontRecord(
-                dir_path=str(path.parent), rel_path=path.name, face_index=idx,
-                psname=psname, version=version, aliases=aliases,
-                weight=os2.usWeightClass, width=os2.usWidthClass,
-                italic=bool(os2.fsSelection & 1),
-                cmap=cmap, xxh=xxh, size=st.st_size, mtime_ns=st.st_mtime_ns,
-                script=classify_script(cmap), category=classify_category(aliases),
-            ))
-        except Exception as e:
-            raise FontParseError(f"{path.name}#{idx}: {e}") from e
-    return out
+    try:
+        data = path.read_bytes()
+        xxh = xxhash.xxh64(data).hexdigest()
+        st = path.stat()
+        out: list[FontRecord] = []
+        for idx, tt in enumerate(fonts):
+            try:
+                name = tt["name"]
+                aliases = sorted({r.toUnicode() for r in name.names
+                                  if r.nameID in NAME_IDS and r.toUnicode()})
+                psname = next((r.toUnicode() for r in name.names if r.nameID == 6), None)
+                version = parse_version(next((r.toUnicode() for r in name.names
+                                              if r.nameID == 5), None))
+                os2 = tt["OS/2"]
+                cmap = CmapRanges.from_cmap_subtables(tt["cmap"].tables)
+                out.append(FontRecord(
+                    dir_path=str(path.parent), rel_path=path.name, face_index=idx,
+                    psname=psname, version=version, aliases=aliases,
+                    weight=os2.usWeightClass, width=os2.usWidthClass,
+                    italic=bool(os2.fsSelection & 1),
+                    cmap=cmap, xxh=xxh, size=st.st_size, mtime_ns=st.st_mtime_ns,
+                    script=classify_script(cmap), category=classify_category(aliases),
+                ))
+            except Exception as e:
+                raise FontParseError(f"{path.name}#{idx}: {e}") from e
+        return out
+    finally:
+        # lazy 加载会持有文件句柄，Windows 上不关闭会阻塞后续删除/覆盖
+        for tt in fonts:
+            tt.close()
