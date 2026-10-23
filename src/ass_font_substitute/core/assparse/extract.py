@@ -21,13 +21,19 @@ class ExtractResult:
 
 
 def _fn_name(tag: FontNameTag) -> str:
+    # \fn0 / \fn 空参是还原样式字体的重置信号：value 解析为 None，与原始串写法无关，
+    # 故先看 value 再做原始串恢复，避免把 "0" 误判为字体名。
+    value = tag.value
+    if not value:
+        return ""
     # light_ass 会把 \fn名字(...) 中 "(...)" 当作标签参数，value 截断为括号内容；
     # 从原始串恢复完整写法（与 rewrite 的行级全等匹配口径一致），无 _raw 时退回 value。
     raw = getattr(tag, "_raw", None)
     if raw is not None and raw.raw_str.startswith("\\fn"):
-        return raw.raw_str[len("\\fn"):].strip(" \t")
-    value = tag.value
-    return value.strip(" \t") if value else ""
+        name = raw.raw_str[len("\\fn"):].strip(" \t")
+    else:
+        name = value.strip(" \t")
+    return "" if name == "0" else name  # 模板原有 value != "0" 守卫
 
 
 def extract_usages(path: Path) -> ExtractResult:

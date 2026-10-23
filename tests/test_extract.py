@@ -51,3 +51,25 @@ def test_merge(tmp_path):
     m = {u.norm_name: u for u in merged}
     assert m["華康主體w5"].style_count == 2
     assert {"永", "另"} <= set(m["華康主體w5"].chars)
+
+
+def test_fn0_reset_no_phantom_bucket(tmp_path):
+    # \fn0 = 还原样式字体：不得产生名为 "0" 的幽灵桶，重置后的字归样式字体
+    line = "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,永和的中文字"
+    ass = ASS.replace(line, "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,{\\fn華康主體W5}甲{\\fn0}乙")
+    r = extract_usages(_write(tmp_path, ass))
+    by = {u.norm_name: u for u in r.usages}
+    assert "0" not in by
+    assert by["華康主體w5"].inline_count == 1
+    assert {"甲", "乙"} <= by["華康主體w5"].chars
+
+
+def test_fn_paren_name_full(tmp_path):
+    # 行内 \fn 名含括号：light_ass 会把 "(...)" 当参数截断 value，须恢复完整写法
+    line = "Dialogue: 0,0:00:05.00,0:00:09.00,Alt,,0,0,0,,{\\fn華康行內體}行內字體{text"
+    ass = ASS.replace(line, "Dialogue: 0,0:00:05.00,0:00:09.00,Alt,,0,0,0,,{\\fn華康行內體(P)}行內字體")
+    r = extract_usages(_write(tmp_path, ass))
+    by = {u.norm_name: u for u in r.usages}
+    assert "華康行內體(p)" in by
+    assert by["華康行內體(p)"].inline_count == 1
+    assert "行" in by["華康行內體(p)"].chars
