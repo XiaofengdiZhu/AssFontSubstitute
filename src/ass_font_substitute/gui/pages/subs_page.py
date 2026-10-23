@@ -221,7 +221,7 @@ class SubsPage(ScrollArea):
             self._apply_results = []
             self._apply_total = 0
             self._apply_dispatching = False
-            self.btn_apply.setEnabled(True)
+            self._update_summary()         # 按当前状态恢复（全关时保持禁用）
         InfoBar.error("任务失败", f"{tag}: {err}", parent=self)
 
     # ---- 分类 ----
@@ -353,6 +353,8 @@ class SubsPage(ScrollArea):
 
     # ---- 应用 ----
     def _apply(self):
+        if getattr(self, "_apply_dispatching", False):
+            return                        # 派工在途：忽略重复点击（防重入）
         conflicts = self.vm.pending_out_conflicts()
         if conflicts and not self._confirmed_once:
             InfoBar.warning("另存文件已存在",
@@ -365,6 +367,10 @@ class SubsPage(ScrollArea):
         overwrite = bool(self.settings.get("overwrite_default"))
         self._apply_total = len(self.vm.checked_parses())
         self._apply_results = []
+        if not self._apply_total:
+            return                        # 无勾选文件：不派工、不禁用
+        self._apply_dispatching = True
+        self.btn_apply.setEnabled(False)   # 派工期禁用：防连点重复写文件
         for f in self.vm.checked_parses():
             self.worker.submit("apply", _apply_job, f.path, mapping,
                                self.settings.get("save_suffix"), overwrite)

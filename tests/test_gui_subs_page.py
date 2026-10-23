@@ -193,6 +193,37 @@ def test_apply_confirm_mapping_and_record(qapp, tmp_path, monkeypatch):
     assert page.vm.checked_parses() == [page.vm.files[0]]
 
 
+def test_apply_reentry_guard_disables_during_dispatch(qapp, tmp_path, monkeypatch):
+    # 回归：_apply 派工在途时入口守卫忽略重复点击，且派工前禁用按钮；
+    # 收尾（_on_apply_done）经 _update_summary 恢复
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import ApplyFileResult, FileParse
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    src = tmp_path / "a.ass"
+    src.write_text("[Script Info]", "utf-8")        # 另存目标不存在 → 无冲突确认
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=1, chars={"永"}, variants={"甲字体"})
+    page._on_result(f"parse:{src}", FileParse(str(src), None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0",
+                    (usage, UsageClass(kind="replace",
+                                       entities=[_ent("fp1", "甲字体"),
+                                                 _ent("fp2", "乙字体")])))
+    assert page.btn_apply.isEnabled()
+
+    page._apply()                                   # 首击即派工（无冲突路径）
+    assert len([s for s in page.worker.submits if s[0] == "apply"]) == 1
+    assert page._apply_dispatching is True
+    assert not page.btn_apply.isEnabled()           # 派工期禁用：防连点重复写
+    page._apply()                                   # 在途重复点击：忽略
+    assert len([s for s in page.worker.submits if s[0] == "apply"]) == 1
+
+    page._on_result("apply", ApplyFileResult(str(src),
+                                             str(src) + ".substituted.ass", 1))
+    assert page._apply_dispatching is False
+    assert page.btn_apply.isEnabled()               # 收尾经 _update_summary 恢复
+
+
 def test_preview_text_and_mutually_exclusive_switches(qapp, tmp_path, monkeypatch):
     page = _make_page(qapp, tmp_path, monkeypatch)
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
