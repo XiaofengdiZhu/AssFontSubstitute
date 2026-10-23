@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,6 +60,7 @@ class UpdateResult:
     bad: int = 0
     bad_retried: int = 0
     fonts: int = 0
+    cancelled: bool = False
 
 
 def _connect(path: Path) -> sqlite3.Connection:
@@ -98,7 +99,11 @@ def scan_dir(root: Path) -> list[Path]:
                   and p.name != DB_NAME)
 
 
-def update_index(dir_path: Path, conn: sqlite3.Connection) -> UpdateResult:
+def update_index(dir_path: Path, conn: sqlite3.Connection,
+                 progress: "Callable[[int, int, UpdateResult], bool] | None" = None) -> UpdateResult:
+    """progress(done, total, res) -> bool 在每解析完一个文件后回调；
+    返回 False 停止剩余文件并置 res.cancelled=True。逐文件事务提交，
+    取消/中断保留已解析前缀，重跑按增量续（GUI 进度/取消依赖此语义）。"""
     res = UpdateResult()
     known = {r[0]: (r[1], r[2]) for r in
              conn.execute("SELECT rel_path, size, mtime_ns FROM files")}
@@ -129,8 +134,12 @@ def update_index(dir_path: Path, conn: sqlite3.Connection) -> UpdateResult:
             conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
             conn.execute("DELETE FROM fingerprints WHERE rel_path=?", (rel,))
             conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
-        for p in todo:
-            rel = p.relative_to(dir_path).as_posix()
+
+    total = len(todo)
+    for done, p in enumerate(todo, 1):
+        rel = p.relative_to(dir_path).as_posix()
+        with conn:
+            recs = None
             try:
                 recs = parse_font_file(p)
             except FontParseError as e:
@@ -141,26 +150,29 @@ def update_index(dir_path: Path, conn: sqlite3.Connection) -> UpdateResult:
                 conn.execute("DELETE FROM files WHERE rel_path=?", (rel,))
                 conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
                 conn.execute("DELETE FROM fingerprints WHERE rel_path=?", (rel,))
-                continue
-            st = p.stat()
-            conn.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?)",
-                         (rel, st.st_size, st.st_mtime_ns, recs[0].xxh))
-            conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
-            conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
-            for r in recs:
-                conn.execute(
-                    "INSERT INTO fonts(rel_path,face_index,psname,version,aliases,"
-                    "weight,width,italic,cmap,script,category) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                    (rel, r.face_index, r.psname,
-                     json.dumps(r.version) if r.version else None,
-                     json.dumps(r.aliases, ensure_ascii=False),
-                     r.weight, r.width, int(r.italic),
-                     r.cmap.to_bytes(), r.script, r.category))
-                conn.execute(
-                    "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
-                    (rel, r.face_index, recs[0].xxh, FP_ALGO,
-                     fingerprint_of(r.aliases, r.cmap, r.weight, r.width,
-                                    r.italic, recs[0].xxh)))
+            if recs is not None:
+                st = p.stat()
+                conn.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?)",
+                             (rel, st.st_size, st.st_mtime_ns, recs[0].xxh))
+                conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
+                conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
+                for r in recs:
+                    conn.execute(
+                        "INSERT INTO fonts(rel_path,face_index,psname,version,aliases,"
+                        "weight,width,italic,cmap,script,category) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                        (rel, r.face_index, r.psname,
+                         json.dumps(r.version) if r.version else None,
+                         json.dumps(r.aliases, ensure_ascii=False),
+                         r.weight, r.width, int(r.italic),
+                         r.cmap.to_bytes(), r.script, r.category))
+                    conn.execute(
+                        "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
+                        (rel, r.face_index, recs[0].xxh, FP_ALGO,
+                         fingerprint_of(r.aliases, r.cmap, r.weight, r.width,
+                                        r.italic, recs[0].xxh)))
+        if progress is not None and not progress(done, total, res):
+            res.cancelled = True
+            break
     res.fonts = stats(conn)["fonts"]
     return res
 
