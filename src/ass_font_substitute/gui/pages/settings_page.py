@@ -36,14 +36,14 @@ class SettingsPage(ScrollArea):
         self.setWidgetResizable(True)
 
         v.addWidget(StrongBodyLabel("默认参数（处理字幕页初始值）"))
-        self.spin_cov = _stepper(int(COV_BOUNDS[0] * 100), int(COV_BOUNDS[1] * 100),
-                                 1, int(settings.get("cov_threshold") * 100), "%")
-        self.spin_sim = _stepper(int(SIM_BOUNDS[0] * 100), int(SIM_BOUNDS[1] * 100),
-                                 5, int(settings.get("min_sim") * 100), "%")
-        self.spin_smin = _stepper(int(SIZE_BOUNDS[0] * 100), int(SIZE_BOUNDS[1] * 100),
-                                  1, int(settings.get("size_min") * 100), "%")
-        self.spin_smax = _stepper(int(SIZE_BOUNDS[0] * 100), int(SIZE_BOUNDS[1] * 100),
-                                  1, int(settings.get("size_max") * 100), "%")
+        self.spin_cov = _stepper(round(COV_BOUNDS[0] * 100), round(COV_BOUNDS[1] * 100),
+                                 1, round(settings.get("cov_threshold") * 100), "%")
+        self.spin_sim = _stepper(round(SIM_BOUNDS[0] * 100), round(SIM_BOUNDS[1] * 100),
+                                 5, round(settings.get("min_sim") * 100), "%")
+        self.spin_smin = _stepper(round(SIZE_BOUNDS[0] * 100), round(SIZE_BOUNDS[1] * 100),
+                                  1, round(settings.get("size_min") * 100), "%")
+        self.spin_smax = _stepper(round(SIZE_BOUNDS[0] * 100), round(SIZE_BOUNDS[1] * 100),
+                                  1, round(settings.get("size_max") * 100), "%")
         self.spin_pause = _stepper(1, 50, 1, int(settings.get("n_pause")))
         self.spin_threads = _stepper(1, max(1, os.cpu_count() or 4), 1,
                                      int(settings.get("max_threads")))
@@ -107,6 +107,7 @@ class SettingsPage(ScrollArea):
         v.addStretch(1)
 
         self.worker.result.connect(self._on_result)
+        self.worker.failed.connect(self._on_failed)
         self._refresh_cache_stats()
 
     def _save_suffix(self):
@@ -146,7 +147,7 @@ class SettingsPage(ScrollArea):
         if tag == "cachestat":
             mb = payload["render_bytes"] / 1024 / 1024
             self.cache_label.setText(
-                f"位置 {payload['path']} · 渲染条 {mb:.1f} MB · 相似度记录 {payload['pair_count']} 条")
+                f"位置 {payload['path']} · 字形预览 {mb:.1f} MB · 相似度记录 {payload['pair_count']} 条")
         elif tag == "cacheclear":
             InfoBar.success("缓存已清除", "", parent=self)
             self._refresh_cache_stats()
@@ -154,8 +155,14 @@ class SettingsPage(ScrollArea):
             InfoBar.success("缓存位置已更改", payload, parent=self)
             self._refresh_cache_stats()
 
+    def _on_failed(self, tag, err):
+        # 缓存类任务失败浮泡（初始化/统计/清除/迁移）；其它页签的任务由
+        # 各自页面的 failed 处理器负责，这里不重复弹
+        if tag in ("worker:init", "cachestat", "cacheclear", "cachemove"):
+            InfoBar.error("缓存操作失败", f"{tag}: {err}", parent=self)
+
     def _clear_cache(self):
-        w = Dialog("清除相似度缓存", "将删除全部渲染条与相似度记录，下次搜索重新计算。确定？",
+        w = Dialog("清除相似度缓存", "将删除全部字形预览与相似度记录，下次搜索重新计算。确定？",
                    self)
         if w.exec():
             self.worker.submit("cacheclear", _clear_job)

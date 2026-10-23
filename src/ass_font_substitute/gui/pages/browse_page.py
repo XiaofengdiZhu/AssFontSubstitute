@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout
 from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, ScrollArea,
                             SearchLineEdit)
 
-from ass_font_substitute.gui.jobs import ensure_library
+from ass_font_substitute.gui.jobs import ensure_library, lib_key
 from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.widgets.font_list import FontListWidget
 
@@ -52,8 +52,14 @@ class BrowsePage(ScrollArea):
         self.name_edit.textChanged.connect(lambda _: self._debounce.start())
         self.preview_edit.textChanged.connect(self._on_preview_text)
         self.worker.result.connect(self._on_result)
-        self._loaded_dirs: tuple | None = None
+        self._lib_key: tuple | None = None  # 上次装载对应 快照失效键（jobs.lib_key）
         self.reload_library()
+
+    def showEvent(self, e):
+        # 页面缓存不永久化：再次显示时键变（目录增删 / 索引更新）即重拉
+        super().showEvent(e)
+        if lib_key(list(self.settings.get("font_dirs"))) != self._lib_key:
+            self.reload_library()
 
     def reload_library(self):
         dirs = tuple(self.settings.get("font_dirs"))
@@ -66,6 +72,7 @@ class BrowsePage(ScrollArea):
         if tag != "blib":
             return
         self.hint.hide()
+        self._lib_key = lib_key(list(self.settings.get("font_dirs")))
         snap = payload
         self.pvm.set_entities(snap.lib.entities())
         self._fill_filters()

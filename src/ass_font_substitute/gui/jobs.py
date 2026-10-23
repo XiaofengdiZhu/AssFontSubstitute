@@ -83,13 +83,30 @@ def load_library(dirs: list[str]) -> LibrarySnapshot:
     return LibrarySnapshot(lib=LibraryIndex.open(usable), offline_dirs=offline)
 
 
+def lib_key(dirs) -> tuple:
+    """聚合库快照失效键：目录串 + 各目录 fontindex.db 的 st_mtime_ns
+    （缺库为 None）。IndexWorker 重建/更新索引后 mtime 变化 → 键变，
+    ensure_library 弃旧快照，聚合库即时反映新字体。"""
+    out = []
+    for d in dirs:
+        try:
+            mtime = (Path(d) / "fontindex.db").stat().st_mtime_ns
+        except OSError:                     # 缺库/不可达 → None
+            mtime = None
+        out.append((d, mtime))
+    return tuple(out)
+
+
 def ensure_library(ctx, dirs: list[str]) -> LibrarySnapshot:
-    """聚合库按需（重）建：目录集不变则复用 ctx 上缓存。"""
-    key = tuple(dirs)
-    if getattr(ctx, "snapshot", None) is not None and getattr(ctx, "lib_dirs", None) == key:
+    """聚合库按需（重）建：目录集与各索引 mtime 不变则复用 ctx 上缓存；
+    目录增删或索引更新（fontindex.db mtime 变）都触发重建。"""
+    key = lib_key(dirs)
+    if getattr(ctx, "snapshot", None) is not None and getattr(ctx, "lib_key", None) == key:
         return ctx.snapshot
     snap = load_library(dirs)
-    ctx.snapshot, ctx.lib, ctx.lib_dirs = snap, snap.lib, key
+    # 缓存键取装载后的实况：load_library 会为尚无索引的目录建空库骨架
+    # （fontindex.db 由无到有），骨架创建本身不算索引更新
+    ctx.snapshot, ctx.lib, ctx.lib_key = snap, snap.lib, lib_key(dirs)
     return snap
 
 

@@ -66,8 +66,10 @@ def _update_dirs_job(ctx, dirs):
 
 
 def _ensure_lib_job(ctx, dirs):
-    from ass_font_substitute.gui.jobs import ensure_library
-    return ensure_library(ctx, dirs)
+    # 复用页面真实任务：probe 已随 lib 在 worker 线程完成，载荷为
+    # (snapshot, [DirStatus...])（payload 形状与生产 _lib_job 保持一致）
+    from ass_font_substitute.gui.pages.library_page import _lib_job
+    return _lib_job(ctx, dirs)
 
 
 def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):

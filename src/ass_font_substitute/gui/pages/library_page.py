@@ -108,8 +108,8 @@ class LibraryPage(ScrollArea):
         self._rebuild_dir_rows()
         self.refresh_status()
 
-    # ---- 状态刷新（探测是只读 stat 快扫，毫秒级，直接在 UI 线程做，
-    #      避免先 probe 后 lib 的顺序竞态）----
+    # ---- 状态刷新（lib 构建与逐目录探测在 worker 线程同一任务内串行完成，
+    #      UI 线程只消费纯数据，无先 probe 后 lib 的顺序竞态）----
     def refresh_status(self):
         dirs = [d.path for d in self.vm.dirs]
         self._rebuild_dir_rows()
@@ -120,8 +120,7 @@ class LibraryPage(ScrollArea):
 
     def _on_result(self, tag, payload):
         if tag == "lib":
-            snap = payload
-            statuses = [probe_dir_status(d.path) for d in self.vm.dirs]
+            snap, statuses = payload
             self.vm.refresh(statuses, snap.lib.stats(),
                             snap.lib.dir_overlaps(), snap.offline_dirs)
             self._apply_stats(snap.lib.stats())
@@ -175,7 +174,8 @@ class LibraryPage(ScrollArea):
         self.btn_cancel.setText(f"取消更新（{done}/{total}）")
 
     def _on_index_done(self, d, res):
-        self.vm.mark_done(d)
+        if not getattr(res, "cancelled", False):
+            self.vm.mark_done(d)           # 取消的目录不标「已更新」
         self._rebuild_dir_rows()
 
     def _on_index_failed(self, d, err):
@@ -192,6 +192,14 @@ class LibraryPage(ScrollArea):
     def _cancel_update(self):
         if self._index_worker is not None:
             self._index_worker.cancel()
+
+    def shutdown(self):
+        """退出汇合：取消在途索引更新并等待线程收尾（窗口关闭时先于
+        worker.shutdown 调用，避免索引线程写库时进程直接退出）。"""
+        w = self._index_worker
+        if w is not None and w.isRunning():
+            w.cancel()
+            w.wait(5000)
 
     # ---- 失败清单 ----
     def _show_failures(self):
@@ -251,7 +259,10 @@ class _FailuresDialog(QDialog):
 
 
 def _lib_job(ctx, dirs):
-    return ensure_library(ctx, dirs)
+    """worker 线程：聚合库快照 + 逐目录只读探测（probe 含逐文件 stat，
+    移出 UI 线程；与 lib 构建同任务串行，无顺序竞态）。"""
+    snap = ensure_library(ctx, dirs)
+    return snap, [probe_dir_status(d) for d in dirs]
 
 
 def _failures_job(ctx, dirs):

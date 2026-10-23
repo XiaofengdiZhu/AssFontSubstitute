@@ -141,6 +141,24 @@ def test_default_check_last_decision_wins(vm_full, tmp_path):
     assert "上次使用" in card.option("fp-song").badges
 
 
+def test_default_check_replay_keeps_original_source(vm_full, tmp_path):
+    # 回归：记忆指向原字体行时只加「上次使用」徽标，不改写 source——
+    # 勾原字体行 = 不替换（Card.replaced 语义）不得被回放破坏
+    vm, ents = _vm_full(vm_full)
+    usage = _usage("黑体", FULL)
+    cls = UsageClass("keep", [ents[0], ents[1]], 1.0, [])
+    card = vm.make_card(usage, cls)
+    record_decision(vm.decisions_db, "黑体", "t2s", "fp-hei")
+    vm.apply_default_check(card)
+    o = card.option("fp-hei")
+    assert card.checked_key == "fp-hei"
+    assert o.source == "original"
+    assert "上次使用" in o.badges
+    assert card.replaced is False
+    vm.apply_default_check(card)                       # 回放去重：徽标不叠加
+    assert o.badges.count("上次使用") == 1
+
+
 def test_default_check_keep_decision_targets_keep_option(vm_full, tmp_path):
     vm, ents = _vm_full(vm_full)
     card = vm.make_card(_usage("不存在体", FULL), UsageClass("missing"))
@@ -185,7 +203,7 @@ def lib_env(tmp_path):
     from types import SimpleNamespace
     s = Settings(tmp_path / "s.json")
     ctx = SimpleNamespace(settings=s, cache=Cache(tmp_path / "c.db"),
-                          snapshot=None, lib=lib, lib_dirs=(str(d),))
+                          snapshot=None, lib=lib, lib_key=(str(d), None))
     vm = SubsVM(s, tmp_path / "d.db")
     vm.set_entities(lib.entities())
     return vm, lib, ctx

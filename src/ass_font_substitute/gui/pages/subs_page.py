@@ -41,6 +41,7 @@ class SubsPage(ScrollArea):
         self._gen = 0                              # 分类代次：弃置旧代结果
         self._apply_total = 0
         self._apply_results: list = []
+        self._apply_dispatching = False     # 派工在途标志（防重入）
         self._confirmed_once = False
 
         self.view = QWidget(self)
@@ -216,6 +217,11 @@ class SubsPage(ScrollArea):
             if card is not None and card.searching:
                 card.searching = False
                 self._refresh_card(card)
+        if tag == "apply":                 # 派工链中断：复位防重入状态
+            self._apply_results = []
+            self._apply_total = 0
+            self._apply_dispatching = False
+            self.btn_apply.setEnabled(True)
         InfoBar.error("任务失败", f"{tag}: {err}", parent=self)
 
     # ---- 分类 ----
@@ -375,7 +381,8 @@ class SubsPage(ScrollArea):
         if ok:
             InfoBar.success("替换完成", f"{len(ok)} 个文件已写入", parent=self)
         self.vm.record_all()
-        self._update_summary()
+        self._apply_dispatching = False
+        self._update_summary()             # 按当前状态恢复按钮可用性
 
     def _update_summary(self):
         kinds = {"keep": 0, "twin": 0, "replace": 0, "missing": 0}
@@ -388,7 +395,9 @@ class SubsPage(ScrollArea):
         n, total = self.vm.replacement_counts()
         self.replace_label.setText(f"将替换 {n} / {total} 种字体")
         self.btn_apply.setEnabled(bool(self.vm.checked_parses())
-                                  and bool(self.vm.cards))
+                                  and bool(self.vm.cards)
+                                  and (self.sw_save.isChecked()
+                                       or self.sw_overwrite.isChecked()))
 
     # ---- 开关/联动 ----
     def _on_save_toggle(self, checked):
@@ -397,6 +406,7 @@ class SubsPage(ScrollArea):
             self.sw_overwrite.setChecked(False)
             self.sw_overwrite.blockSignals(False)
         self.settings.set("overwrite_default", False)
+        self._update_summary()            # 全关时禁用应用条（spec §7）
 
     def _on_overwrite_toggle(self, checked):
         if checked:
@@ -404,6 +414,7 @@ class SubsPage(ScrollArea):
             self.sw_save.setChecked(False)
             self.sw_save.blockSignals(False)
         self.settings.set("overwrite_default", checked)
+        self._update_summary()
 
     def _clamp_size(self, _value=0):
         """大小区间联动：下限不得超过上限（上限随之抬升）。"""

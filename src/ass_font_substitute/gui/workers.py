@@ -33,7 +33,7 @@ class CoreWorker(QThread):
             cache = None
             self.failed.emit("worker:init", f"{type(e).__name__}: {e}")
         ctx = SimpleNamespace(settings=self._settings, cache=cache,
-                              snapshot=None, lib=None, lib_dirs=None)
+                              snapshot=None, lib=None, lib_key=None)
         while not self._stop:
             item = self._q.get()
             if item is None:

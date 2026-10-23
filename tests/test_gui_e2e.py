@@ -54,7 +54,7 @@ def world(tmp_path):
     # make_searcher 经 ctx.lib 建搜索器
     ctx = SimpleNamespace(settings=s, cache=Cache(tmp_path / "cache.db"),
                           snapshot=None, lib=LibraryIndex.open([d]),
-                          lib_dirs=(str(d),))
+                          lib_key=(str(d), None))
     vm = SubsVM(s, tmp_path / "decisions.db")
     lib = ctx.lib
     vm.set_entities(lib.entities())

@@ -4,8 +4,9 @@ import numpy as np
 import pytest
 
 from ass_font_substitute.gui.jobs import (DirStatus, apply_to_file, ensure_library,
-                                          load_library, parse_subtitle, probe_dir_status,
-                                          pull_chunk, render_preview, update_dir)
+                                          lib_key, load_library, parse_subtitle,
+                                          probe_dir_status, pull_chunk,
+                                          render_preview, update_dir)
 from tests.fonts import build_font
 
 
@@ -67,6 +68,20 @@ def test_ensure_library_caches_snapshot(ctx_stub, font_dir):
     assert s3 is not s2
 
 
+def test_ensure_library_invalidated_by_index_update(ctx_stub, font_dir):
+    # 回归：IndexWorker 更新索引（fontindex.db mtime 变）后必须弃旧快照，
+    # 否则聚合库永远看不到新字体
+    update_dir(str(font_dir))                            # 先建索引：1 款字体
+    s1 = ensure_library(ctx_stub, [str(font_dir)])
+    n1 = len(s1.lib.entities())
+    assert n1 == 1
+    build_font(font_dir / "new.ttf", chars="永中", family="乙字体")
+    update_dir(str(font_dir))                            # 索引纳入新字体
+    s2 = ensure_library(ctx_stub, [str(font_dir)])
+    assert s2 is not s1
+    assert len(s2.lib.entities()) == n1 + 1
+
+
 def test_parse_subtitle(tmp_path, sub_file):
     r = parse_subtitle(str(sub_file))
     assert r.error is None and r.font_count == 1
@@ -97,7 +112,7 @@ def test_render_preview_skips_missing(font_dir):
     ctx = C()
     update_dir(str(font_dir))       # 建索引归「更新全部索引」流程，此处显式建
     snap = load_library([str(font_dir)])
-    ctx.snapshot, ctx.lib, ctx.lib_dirs = snap, snap.lib, tuple([str(font_dir)])
+    ctx.snapshot, ctx.lib, ctx.lib_key = snap, snap.lib, lib_key([str(font_dir)])
     e = snap.lib.entities()[0]
     rb = render_preview(e, "永X")                  # X 不在 cmap → 跳过
     assert set(rb.tiles) == {"永"}
@@ -140,4 +155,4 @@ def ctx_stub(tmp_path, monkeypatch):
     from ass_font_substitute.gui.settings_store import Settings
     s = Settings(tmp_path / "settings.json")
     return SimpleNamespace(settings=s, cache=Cache(tmp_path / "cache.db"),
-                           snapshot=None, lib=None, lib_dirs=None)
+                           snapshot=None, lib=None, lib_key=None)

@@ -32,8 +32,9 @@ class AFSWindow(FluentWindow):
         self.resize(1100, 750)
 
     def closeEvent(self, e):
+        self.library_page.shutdown()        # 先汇合在途索引线程（写库中不能退）
         self.worker.shutdown()
-        self.worker.wait(2000)
+        self.worker.wait(10000)
         super().closeEvent(e)
 
 

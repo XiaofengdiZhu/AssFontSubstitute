@@ -210,3 +210,7 @@ def test_preview_text_and_mutually_exclusive_switches(qapp, tmp_path, monkeypatc
     page.sw_save.setChecked(True)                   # 开另存 → 覆盖自动关
     assert page.sw_overwrite.isChecked() is False
     assert page.settings.get("overwrite_default") is False
+    page.sw_save.setChecked(False)                  # §7：全关 → 应用条禁用
+    assert not page.btn_apply.isEnabled()
+    page.sw_save.setChecked(True)                   # 恢复另存 → 重新可用
+    assert page.btn_apply.isEnabled()

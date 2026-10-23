@@ -188,7 +188,12 @@ class SubsVM:
                 return
             o = card.option(fp) if not keep else None
             if o is not None:
-                o.source, o.badges = "last", list(o.badges) + ["上次使用"]
+                # 回放只加「上次使用」徽标，不改写 source：记忆落在原字体行
+                # 时保持 source=original，Card.replaced 语义（勾原字体=不替换）
+                if o.source != "original":
+                    o.source = "last"
+                if "上次使用" not in o.badges:
+                    o.badges = [*o.badges, "上次使用"]
                 card.checked_key = fp
                 return
         if card.kind == "twin":
