@@ -46,6 +46,7 @@ def parse_font_file(path: Path) -> list[FontRecord]:
         xxh = xxhash.xxh64(data).hexdigest()
         st = path.stat()
         out: list[FontRecord] = []
+        errors: list[str] = []
         for idx, tt in enumerate(fonts):
             try:
                 name = tt["name"]
@@ -65,7 +66,11 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                     script=classify_script(cmap), category=classify_category(aliases),
                 ))
             except Exception as e:
-                raise FontParseError(f"{path.name}#{idx}: {e}") from e
+                # spec §11：TTC 个别子字体解析失败 → 跳过该子字体，其余照常
+                # （face_index 保留原始枚举下标，允许空洞）
+                errors.append(f"{path.name}#{idx}: {e}")
+        if not out:
+            raise FontParseError("; ".join(errors) or f"{path.name}: no face parsed")
         return out
     finally:
         # lazy 加载会持有文件句柄，Windows 上不关闭会阻塞后续删除/覆盖
