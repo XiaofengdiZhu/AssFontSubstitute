@@ -62,6 +62,48 @@ def _hamming_sim(a: int, b: int) -> float:
     return 1 - bin(a ^ b).count("1") / 64
 
 
+def _resize12_batch(tiles: np.ndarray) -> np.ndarray:
+    # (n,48,48) -> (n,32,32)（3/2 缩小，与单字版同索引）
+    ys = np.arange(32) * 48 // 32
+    return tiles[:, ys][:, :, ys]
+
+
+def _phash_batch(tiles: np.ndarray) -> np.ndarray:
+    """(n,48,48) float64 → (n,) uint64 pHash；与单字 phash 逐位一致。"""
+    x = _resize12_batch(tiles)
+    for _ in range(2):
+        h, w = x.shape[1], x.shape[2]
+        x = x[:, : h // 2 * 2, : w // 2 * 2]
+        x = (x[:, 0::2, 0::2] + x[:, 0::2, 1::2]
+             + x[:, 1::2, 0::2] + x[:, 1::2, 1::2]) / 4
+    flat = x.reshape(len(tiles), 64)
+    med = np.median(flat, axis=1, keepdims=True)
+    bits = (flat > med).astype(np.uint64)
+    powers = np.uint64(1) << np.arange(63, -1, -1, dtype=np.uint64)
+    return bits @ powers
+
+
+def _hamming_sims(pa: np.ndarray, pb: np.ndarray) -> np.ndarray:
+    out = np.empty(len(pa))
+    for i, (x, y) in enumerate(zip(pa, pb)):
+        out[i] = 1 - bin(int(x) ^ int(y)).count("1") / 64
+    return out
+
+
+def _ncc_batch(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    ac = a - a.mean(axis=(1, 2), keepdims=True)
+    bc = b - b.mean(axis=(1, 2), keepdims=True)
+    num = (ac * bc).sum(axis=(1, 2))
+    denom = np.sqrt((ac * ac).sum(axis=(1, 2)) * (bc * bc).sum(axis=(1, 2)))
+    out = np.zeros(len(a))
+    ok = denom > 0
+    out[ok] = num[ok] / denom[ok]
+    # 常数 tile（denom=0）与单字 ncc 特例一致：完全相同=1.0，否则 0.0
+    for i in np.flatnonzero(~ok):
+        out[i] = 1.0 if np.array_equal(a[i], b[i]) else 0.0
+    return out
+
+
 @dataclass
 class CompareResult:
     score: float
@@ -70,16 +112,19 @@ class CompareResult:
 
 
 def compare(a: RenderBundle, b: RenderBundle) -> CompareResult | None:
-    """只按两字体可用字交集评分；交集空 = 无法比较（None）。"""
-    inter = set(a.tiles) & set(b.tiles)
+    """只按两字体可用字交集评分；交集空 = 无法比较（None）。
+
+    全批向量化（整批堆叠一次算 pHash+NCC，不再逐字循环 numpy）。
+    交集按排序序遍历：分数跨次调用/交换参数完全确定。
+    """
+    inter = sorted(set(a.tiles) & set(b.tiles))
     if not inter:
         return None
-    total, wsum = 0.0, 0.0
-    for ch in inter:
-        ta, tb = a.tiles[ch], b.tiles[ch]
-        s = 0.5 * _hamming_sim(phash(ta), phash(tb)) + 0.5 * max(ncc(ta, tb), 0.0)
-        w = CHAR_WEIGHT(ch)
-        total += s * w
-        wsum += w
+    ta = np.stack([a.tiles[c] for c in inter]).astype(np.float64)
+    tb = np.stack([b.tiles[c] for c in inter]).astype(np.float64)
+    hsim = _hamming_sims(_phash_batch(ta), _phash_batch(tb))
+    nsim = np.maximum(_ncc_batch(ta, tb), 0.0)
+    w = np.array([CHAR_WEIGHT(c) for c in inter])
+    score = float((0.5 * hsim + 0.5 * nsim) @ w / w.sum())
     size_ratio = b.ink_median / a.ink_median if a.ink_median else 1.0
-    return CompareResult(total / wsum, size_ratio, len(inter))
+    return CompareResult(score, size_ratio, len(inter))

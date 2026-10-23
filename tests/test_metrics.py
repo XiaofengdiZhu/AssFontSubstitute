@@ -59,3 +59,36 @@ def test_engine_discriminates_shapes(tmp_path):
     diff = compare(box1, circ)
     assert same is not None and diff is not None
     assert same.score > diff.score
+
+
+def test_phash_batch_matches_single():
+    import numpy as np
+
+    from ass_font_substitute.core.similarity.metrics import _phash_batch
+    rng = np.random.default_rng(1)
+    tiles = rng.integers(0, 255, (7, 48, 48)).astype(np.uint8)
+    batch = _phash_batch(tiles.astype(np.float64))
+    for i in range(len(tiles)):
+        assert int(batch[i]) == phash(tiles[i])
+
+
+def test_compare_deterministic_and_symmetric():
+    rng = np.random.default_rng(2)
+    mk = lambda seed: {(c): rng.integers(0, 255, (48, 48)).astype(np.uint8)
+                       for c in "永中木8A"}
+    b1, b2 = _bundle(mk(0)), _bundle(mk(1))
+    r12, r21 = compare(b1, b2), compare(b2, b1)
+    assert r12.score == r21.score
+    assert compare(b1, b2).score == r12.score
+    assert r12.n_chars == 5
+
+
+def test_compare_constant_tiles_ncc_edge():
+    # 常数 tile（denom=0）：不炸不 NaN。不同常数：NCC 特例 0.0，但均匀 tile
+    # 的 pHash 退化全同（median=自身，无数位翻转）→ hamming 1.0 → 0.5*1+0.5*0=0.5
+    u1 = np.full((48, 48), 100, np.uint8)
+    u2 = np.full((48, 48), 200, np.uint8)
+    same = compare(_bundle({"永": u1, "中": u2}), _bundle({"永": u1, "中": u2}))
+    assert same is not None and same.score == 1.0
+    diff = compare(_bundle({"永": u1}), _bundle({"永": u2}))
+    assert diff is not None and diff.score == 0.5
