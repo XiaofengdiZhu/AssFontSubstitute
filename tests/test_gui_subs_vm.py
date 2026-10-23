@@ -1,7 +1,7 @@
 import pytest
 
 from ass_font_substitute.core.coverage.matcher import UsageClass
-from ass_font_substitute.core.decision.store import record_decision
+from ass_font_substitute.core.decision.store import latest_decision, record_decision
 from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.core.models import CmapRanges
 from ass_font_substitute.core.similarity.cache import Cache
@@ -271,3 +271,79 @@ def test_attach_pick_dedupes_and_checks(lib_env):
     assert card.checked_key == e.fingerprint and o.source == "pick"
     o2 = vm.attach_pick(card, e)
     assert len([x for x in card.options if x.key == e.fingerprint]) == 1
+
+
+# ---- 应用层（Task 14）----
+
+def test_build_mapping_covers_all_variants(vm_full, tmp_path):
+    vm, ents = _vm_full(vm_full)
+    usage = _usage("黑体", FULL)
+    usage.variants = {"黑体", "HEITI", "heiti"}
+    cls = UsageClass("keep", [ents[0], ents[1]], 1.0, [])
+    card = vm.make_card(usage, cls)
+    card.checked_key = "fp-song"                       # 手动改选宋体
+    vm.cards = [card]
+    m = vm.build_mapping()
+    assert m == {"黑体": "宋体", "HEITI": "宋体", "heiti": "宋体"}
+
+
+def test_replacement_counts(vm_full):
+    vm, ents = _vm_full(vm_full)
+    c1 = vm.make_card(_usage("黑体", FULL),
+                      UsageClass("keep", [ents[0], ents[1]], 1.0, []))
+    c1.checked_key = "fp-song"                          # 换宋体 → 替换
+    # 宋体卡勾 fp-song 是原字体行（source=original）不计替换；改用孪生行：
+    # 勾「非原字体行」实体 → 替换，映射 宋体→宋体（孪生改写同名的真实形态）
+    c2 = vm.make_card(_usage("宋体", FULL),
+                      UsageClass("twin", [ents[1]], 1.0, [], twin_hit=ents[1]))
+    c2.checked_key = "fp-song"                          # 勾孪生行 → 替换
+    c3 = vm.make_card(_usage("不存在体", FULL), UsageClass("missing"))
+    c3.checked_key = KEEP                               # 保留 → 不替换
+    vm.cards = [c1, c2, c3]
+    assert vm.replacement_counts() == (2, 3)
+    assert vm.build_mapping() == {"黑体": "宋体", "宋体": "宋体"}
+
+
+def test_apply_files_and_decisions(vm_full, tmp_path):
+    vm, ents = _vm_full(vm_full)
+    sub = tmp_path / "a.ass"
+    # 对白带足中性高频字：detect_encoding 合理性校验要求 ≥5 个
+    sub.write_text(
+        "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\n"
+        "Format: Name, Fontname\nStyle: Def,黑体,54\n\n[Events]\n"
+        "Format: Layer, Style, Text\nDialogue: 0,Def,,0,0,0,,永宇的好，我在山中的日子\n",
+        "utf-8")
+    fp = FileParse(str(sub), None, [_usage("黑体", FULL)], [], [])
+    fp.checked = True
+    vm.files = [fp]
+    cls = UsageClass("keep", [ents[0], ents[1]], 1.0, [])
+    card = vm.make_card(_usage("黑体", FULL), cls)
+    card.checked_key = "fp-song"
+    vm.cards = [card]
+    assert vm.pending_out_conflicts() == []
+    rs = vm.apply_files()
+    assert rs[0].error is None
+    out = tmp_path / "a.substituted.ass"
+    assert out.exists() and "宋体" in out.read_text("utf-8")
+    assert "黑体" not in out.read_text("utf-8")
+    vm.record_all()
+    assert latest_decision(vm.decisions_db, "黑体", "t2s") == ("fp-song", False)
+
+
+def test_apply_conflict_requires_confirm(vm_full, tmp_path):
+    vm, ents = _vm_full(vm_full)
+    sub = tmp_path / "b.ass"
+    sub.write_text("x", "utf-8")
+    out = tmp_path / "b.substituted.ass"
+    out.write_text("旧文件", "utf-8")                    # 已存在 → 冲突
+    fp = FileParse(str(sub), None, [_usage("黑体", FULL)], [], [])
+    vm.files = [fp]
+    cls = UsageClass("keep", [ents[0], ents[1]], 1.0, [])
+    card = vm.make_card(_usage("黑体", FULL), cls)
+    card.checked_key = "fp-song"
+    vm.cards = [card]
+    assert vm.pending_out_conflicts() == [str(out)]
+    rs = vm.apply_files()
+    assert rs[0].error == "exists" and out.read_text("utf-8") == "旧文件"
+    rs = vm.apply_files(overwrite_confirm=True)
+    assert rs[0].error is None

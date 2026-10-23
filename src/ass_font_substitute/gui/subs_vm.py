@@ -9,7 +9,8 @@ from ass_font_substitute.core.decision.store import latest_decision, record_deci
 from ass_font_substitute.core.fontindex.library import FontEntity, normalize_name
 from ass_font_substitute.core.models import FontUsage
 from ass_font_substitute.core.similarity.search import FontSearcher
-from ass_font_substitute.gui.jobs import FileParse, classify_one
+from ass_font_substitute.gui.jobs import (ApplyFileResult, FileParse,
+                                          apply_to_file, classify_one)
 
 KEEP = "__keep__"           # 「保留原字体名」选项键（missing/zero 卡）
 SIM_FLOOR = 0.50            # 放宽重算下限（= SIM_BOUNDS[0]）
@@ -274,6 +275,56 @@ class SubsVM:
             card.options.append(o)
         card.checked_key = o.key
         return o
+
+    # ---- 应用层 ----
+    def build_mapping(self) -> dict[str, str]:
+        """raw 拼写全集 → 选中实体名。勾选原字体行（source=original）不改写。"""
+        m: dict[str, str] = {}
+        for c in self.cards:
+            if not c.replaced:
+                continue
+            o = c.option(c.checked_key)
+            for v in c.variants:
+                m[v] = o.display_name
+        return m
+
+    def replacement_counts(self) -> tuple[int, int]:
+        return sum(1 for c in self.cards if c.replaced), len(self.cards)
+
+    def _out_path(self, path: str) -> Path:
+        return Path(path).with_name(Path(path).stem + self._settings.get("save_suffix"))
+
+    def pending_out_conflicts(self) -> list[str]:
+        """另存目标已存在的勾选文件（覆盖原文件模式无冲突）。"""
+        return [str(self._out_path(f.path)) for f in self.checked_parses()
+                if not self._settings.get("overwrite_default")
+                and self._out_path(f.path).exists()]
+
+    def apply_files(self, overwrite_confirm: bool = False) -> list:
+        """逐勾选文件写回（jobs.apply_to_file）。另存目标已存在且未确认 →
+        该文件 error="exists" 跳过；覆盖原文件模式无冲突。"""
+        mapping = self.build_mapping()
+        overwrite = bool(self._settings.get("overwrite_default"))
+        out = []
+        for f in self.checked_parses():
+            if not overwrite and not overwrite_confirm \
+                    and self._out_path(f.path).exists():
+                out.append(ApplyFileResult(f.path, error="exists"))
+                continue
+            out.append(apply_to_file(f.path, mapping,
+                                     self._settings.get("save_suffix"), overwrite))
+        return out
+
+    def record_all(self) -> None:
+        """决定记忆：勾选实体 → fingerprint；KEEP → keep=True。
+        键 = norm_name + 当前方向。"""
+        for c in self.cards:
+            if c.checked_key == KEEP:
+                record_decision(self.decisions_db, c.norm_name, self.direction,
+                                None, keep=True)
+            else:
+                record_decision(self.decisions_db, c.norm_name, self.direction,
+                                c.checked_key)
 
 
 class _LibStub:
