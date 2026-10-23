@@ -84,10 +84,23 @@ ass_font_substitute/
 
 ## 7. ASS 解析与改写（core/assparse）
 
-- 编码探测：UTF-8 → UTF-16 → GBK 逐级尝试；**保持原编码与行尾写回**，不转码（解析时记录）
-- 提取：`[V4+ Styles]` Fontname；行内 `\fn名称` 覆盖标签；对白文本剥离 override 标签与 `\p` drawing 坐标后计入用字集
+**库选型（已评估，refs/ 内有源码与验证 PoC）**：**light_ass 做解析分析 + 完全自研的行级外科手术式写回**。所有现成库的 `save()` 都是整文件重序列化（pysubs2 强插广告注释、无视文件 Format 行；light_ass 丢弃 `[Fonts]` 等未知段），无法满足「未改动行字节级原样」；pysubs2 的 `\fn` 正则只认 ASCII（CJK 字体名截断，实测漏解析），排除。PoC（`refs/_smoke/poc_surgical_v2.py`）已在 temp/ 真实字幕验证：UTF-8 BOM / GBK / UTF-16LE 三种编码下仅目标行变化，其余行字节级原样。
+
+**解析（light_ass）**：
+- `Document.load(path, strict=False)`（strict 默认 True，不规范行会抛异常）
+- Styles 的 fontname；行内 `FontNameTag`（CJK 完整保留）；drawing 坐标独立成 DrawingNode；`get_plain_text()` 只含文本节点
+- 用字统计按解析节点流：TextNode 计入「当前有效字体」（style 字体 + `\fn` 覆盖 + `\r` 重置，参考 ass-hanvert `convert.py` 的写法）；DrawingNode / Comment 行排除
+- `@字体` 竖排变体视作同字体，替换时同步生成（参考 ass-hanvert `apply_font_mapping`）
+
+**编码探测（自写，不用 light_ass 的——它只采样前 1024 字节且 latin-1 兜底必中导致乱码）**：
+- BOM 表（UTF-8/16/32）→ 无 BOM 时对**全文件**顺序试探 utf-8 → gb18030 → big5 → shift_jis → euc-kr → 全部失败则报错
+- 探测结果传 `Document.load(path, encoding=...)`
+
+**写回（自研行级手术）**：
+- bytes 读入 → 解码 → `splitlines(keepends=True)`（UTF-16 必须先解码再切行，直接切字节会切错 `0A 00`）→ 仅改目标行 → 原编码 `write_bytes`（二进制模式，避免行尾被平台翻译）
+- Style 行按该文件自己的 Format 行定位 Fontname 列（列序不可硬编码）
+- `\fn` 替换仅在 `{...}` 块内、lookahead 保证字体名完整匹配，防前缀误伤
 - 每字体计数：引用样式数、行内 `\fn` 处数、去重用字数（UI 显示「4 样式 · 2 行内 · 2304 字」）
-- 改写：只改被替换字体的 Fontname 与 `\fn` 值；其余行保持原样
 - 输出：默认另存 `<原名>.substituted.ass`（后缀可配）；可选覆盖原文件（开关）
 
 ## 8. 覆盖率与孪生检测（core/coverage）
@@ -176,6 +189,7 @@ ass_font_substitute/
 - Python 3.12/3.13，uv 管理环境与依赖
 - GUI：PySide6 + PyQt-Fluent-Widgets（注意其 GPL-3.0，自用无碍，将来分发需同 GPL）
 - 字体：fontTools（解析）、freetype-py（渲染，无需安装字体）
+- ASS 解析：light_ass（MIT，零依赖；仅解析，写回自研）
 - 图像：numpy（pHash/NCC）
 - 繁简转换：OpenCC（字体名孪生转换）
 - 打包：后期 PyInstaller（onedir）
