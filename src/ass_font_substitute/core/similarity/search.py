@@ -62,9 +62,11 @@ class FontSearcher:
         pool = [e for e in lib.entities()
                 if target is None or e.fingerprint != target.fingerprint]
         pool = rank_pool(target, pool, direction)
-        # 覆盖率 < 阈值的候选垫底（stable partition，不剔除）
-        low = [e for e in pool if coverage_detail(e.cmap, chars)[0] < cov_threshold]
-        high = [e for e in pool if e not in low]
+        # 覆盖率 < 阈值的候选垫底（stable partition，不剔除；布尔掩码保持 O(n)，
+        # 17k+ 实体库上 `e not in low` 的成员测试是平方级，实测每次构造拖到 60s）
+        flags = [coverage_detail(e.cmap, chars)[0] >= cov_threshold for e in pool]
+        low = [e for e, ok in zip(pool, flags) if not ok]
+        high = [e for e, ok in zip(pool, flags) if ok]
         self._iter: Iterator[FontEntity] = iter(high + low)
         self._tver = tver
         self._tcache: dict[str, object] = {}
