@@ -44,7 +44,7 @@ class UsageClass:
 
 def classify_usage(usage: FontUsage, lib: LibraryIndex, threshold: float = 0.98,
                    direction: str = "t2s") -> UsageClass:
-    """用字分类：零用字 keep；在库按覆盖率 keep/replace；不在库走孪生检测。"""
+    """用字分类：零用字 keep；在库按覆盖率 keep；覆盖不足先试孪生再 replace；不在库走孪生。"""
     if not usage.chars:
         return UsageClass(kind="keep")
     entities = find_fonts(lib, usage)
@@ -54,10 +54,24 @@ def classify_usage(usage: FontUsage, lib: LibraryIndex, threshold: float = 0.98,
         ratio, missing = covs[best]
         if ratio >= threshold:
             return UsageClass("keep", entities, ratio, missing)
+        # 在库但覆盖不足（如繁体原名在库、简体版同库）：先跑孪生检测
+        twin = _first_adequate_twin(lib, usage, threshold, direction)
+        if twin is not None:
+            tratio, tmissing = coverage_detail(twin.cmap, usage.chars)
+            return UsageClass("twin", [twin], tratio, tmissing, twin_hit=twin)
         return UsageClass("replace", entities, ratio, missing)
     # 不在库 → 孪生检测
-    for t in twin_candidates(lib, usage, direction):
-        ratio, missing = coverage_detail(t.cmap, usage.chars)
-        if ratio >= threshold:
-            return UsageClass("twin", [t], ratio, missing, twin_hit=t)
+    twin = _first_adequate_twin(lib, usage, threshold, direction)
+    if twin is not None:
+        tratio, tmissing = coverage_detail(twin.cmap, usage.chars)
+        return UsageClass("twin", [twin], tratio, tmissing, twin_hit=twin)
     return UsageClass("missing")
+
+
+def _first_adequate_twin(lib: LibraryIndex, usage: FontUsage, threshold: float,
+                         direction: str) -> FontEntity | None:
+    for t in twin_candidates(lib, usage, direction):
+        ratio, _ = coverage_detail(t.cmap, usage.chars)
+        if ratio >= threshold:
+            return t
+    return None

@@ -35,6 +35,35 @@ def test_twin_under_coverage_falls_back_to_missing(tmp_path):
     assert r.twin_hit is None and r.entities == []
 
 
+def test_in_library_low_coverage_prefers_twin(tmp_path):
+    # 方案A：本名在库但覆盖不足 → 先跑孪生；转换名（简体版）在库且达标 → 孪生对应
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "tc.ttf", chars="永和的文字", family="華康原體W5")    # 本名在库，缺 "中"
+    build_font(d / "sc.ttf", chars="永和的中文字", family="华康原体W5")  # t2s(華康原體W5) 精确命中
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    lib = LibraryIndex.open([d])
+    r = classify_usage(_usage("華康原體W5", "永和的中文字"), lib)
+    assert r.kind == "twin"
+    assert r.twin_hit is not None and r.twin_hit.display_name == "华康原体W5"
+    assert r.coverage == 1.0
+
+
+def test_in_library_low_coverage_twin_under_coverage_still_replace(tmp_path):
+    # 方案A回落：孪生也在库但覆盖不达标 → 仍需替换（在库实体作候选）
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "tc.ttf", chars="永和的文字", family="華康原體W5")
+    build_font(d / "sc.ttf", chars="永和的文字", family="华康原体W5")  # 孪生也缺 "中"
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    lib = LibraryIndex.open([d])
+    r = classify_usage(_usage("華康原體W5", "永和的中文字"), lib)
+    assert r.kind == "replace" and "中" in r.missing_chars
+    assert r.entities and r.twin_hit is None
+
+
 def test_twin_convert():
     assert twin_convert("華康測試體W5", "t2s") == "华康测试体 W5" or \
            twin_convert("華康測試體W5", "t2s").replace(" ", "") == "华康测试体W5"
