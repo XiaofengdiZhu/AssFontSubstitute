@@ -1,7 +1,8 @@
 import numpy as np
 
 from ass_font_substitute.core.similarity.metrics import CHAR_WEIGHT, compare, ncc, phash
-from ass_font_substitute.core.similarity.render import RenderBundle
+from ass_font_substitute.core.similarity.render import RenderBundle, render_bundle
+from tests.fonts import build_font
 
 
 def _bundle(tiles, ink=40.0):
@@ -42,3 +43,19 @@ def test_char_weight_cjk_ranges():
     assert CHAR_WEIGHT("Ａ") == 0.3            # U+FF21 全角形式
     assert CHAR_WEIGHT("ꀀ") == 0.3            # U+A000 彝文音节
     assert CHAR_WEIGHT("A") == 0.3             # ASCII
+
+
+def test_engine_discriminates_shapes(tmp_path):
+    # 正向验证：同形字体互比得分，须高于方块 vs 圆形（引擎能区分字形，而非只会自比）
+    chars = "永中木"
+    build_font(tmp_path / "box1.ttf", chars=chars, family="Box體一")
+    build_font(tmp_path / "box2.ttf", chars=chars, family="Box體二")
+    build_font(tmp_path / "circle.ttf", chars=chars, family="圓體", shape="circle")
+    box1 = render_bundle(tmp_path / "box1.ttf", 0, chars)
+    box2 = render_bundle(tmp_path / "box2.ttf", 0, chars)
+    circ = render_bundle(tmp_path / "circle.ttf", 0, chars)
+    assert all(t.max() > 0 for t in circ.tiles.values())   # 圆形有墨迹
+    same = compare(box1, box2)
+    diff = compare(box1, circ)
+    assert same is not None and diff is not None
+    assert same.score > diff.score

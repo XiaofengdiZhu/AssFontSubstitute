@@ -21,9 +21,25 @@ def _box(pen: TTGlyphPen) -> None:
     pen.closePath()
 
 
-def _new_box() -> object:
+def _circle(pen: TTGlyphPen) -> None:
+    # 四段二次贝塞尔近似实心圆（圆心 (300,300)，半径 280；
+    # 0.9142r 为二次曲线过 45° 点的控制点系数）
+    cx, cy, r = 300, 300, 280
+    k = round(r * 0.9142)
+    pen.moveTo((cx + r, cy))
+    pen.qCurveTo((cx + k, cy + k), (cx, cy + r))
+    pen.qCurveTo((cx - k, cy + k), (cx - r, cy))
+    pen.qCurveTo((cx - k, cy - k), (cx, cy - r))
+    pen.qCurveTo((cx + k, cy - k), (cx + r, cy))
+    pen.closePath()
+
+
+def _new_glyph(shape: str) -> object:
     pen = TTGlyphPen(None)
-    _box(pen)
+    if shape == "circle":
+        _circle(pen)
+    else:
+        _box(pen)
     return pen.glyph()
 
 
@@ -36,6 +52,7 @@ def _make(spec: dict):
     psname = spec.get("psname") or (family + "-" + str(weight))
     version = spec.get("version", "Version 1.000")
     extra_aliases = spec.get("extra_aliases") or {}
+    shape = spec.get("shape", "box")
 
     glyph_order = [".notdef", "space"] + [f"g{i}" for i in range(len(chars))]
     cmap = {0x20: "space"}
@@ -43,9 +60,9 @@ def _make(spec: dict):
     for i, c in enumerate(chars):
         cmap[ord(c)] = f"g{i}"
 
-    glyphs = {".notdef": _new_box(), "space": TTGlyphPen(None).glyph()}
+    glyphs = {".notdef": _new_glyph(shape), "space": TTGlyphPen(None).glyph()}
     for i in range(len(chars)):
-        glyphs[f"g{i}"] = _new_box()
+        glyphs[f"g{i}"] = _new_glyph(shape)
 
     fb = FontBuilder(1000, isTTF=True)
     fb.setupGlyphOrder(glyph_order)
@@ -73,10 +90,10 @@ def _make(spec: dict):
 def build_font(path: Path, chars: str, family: str = DEFAULT_FAMILY,
                extra_aliases: dict | None = None, psname: str | None = None,
                version: str = "Version 1.000", weight: int = 400,
-               width: int = 5, italic: bool = False) -> None:
+               width: int = 5, italic: bool = False, shape: str = "box") -> None:
     spec = dict(chars=chars, family=family, extra_aliases=extra_aliases,
                 psname=psname, version=version, weight=weight, width=width,
-                italic=italic)
+                italic=italic, shape=shape)
     _make(spec).save(path)
 
 
