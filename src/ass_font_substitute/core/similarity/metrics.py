@@ -43,8 +43,19 @@ def ncc(a: np.ndarray, b: np.ndarray) -> float:
     return float((x * y).sum() / denom)
 
 
+# R13：权重 1.0 仅限 CJK 相关区段（部首/符号/假名/注音/统一汉字/兼容/扩展），
+# 全角形式（U+FF00–）、彝文（U+A000–）、谚文音节等一律 0.3。
+# 扩展 A（U+3400–4DBF）含于 U+2E80–9FFF，不单列；扩展 G 起第 3 平面极罕见，暂不含。
+CJK_WEIGHT_RANGES: tuple[tuple[int, int], ...] = (
+    (0x2E80, 0x9FFF),    # CJK 部首补充 ～ 统一汉字（含扩展 A、假名、注音、兼容）
+    (0xF900, 0xFAFF),    # CJK 兼容表意文字
+    (0x20000, 0x2EBEF),  # CJK 统一汉字扩展 B–F
+)
+
+
 def CHAR_WEIGHT(c: str) -> float:
-    return 1.0 if 0x2E80 <= ord(c) <= 0x9FFF or 0x3400 <= ord(c) else 0.3
+    cp = ord(c)
+    return 1.0 if any(lo <= cp <= hi for lo, hi in CJK_WEIGHT_RANGES) else 0.3
 
 
 def _hamming_sim(a: int, b: int) -> float:
