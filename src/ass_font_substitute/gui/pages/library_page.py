@@ -42,10 +42,15 @@ class LibraryPage(ScrollArea):
         v = QVBoxLayout(self.view)
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+        # 间距节奏对齐设置页：页边距 (36,24,36,36)，区块间 16（区块间
+        # 无组标题，32 空得没道理），标题→卡片 12
+        v.setContentsMargins(36, 24, 36, 36)
+        v.setSpacing(0)
 
         page_title = QLabel("字体库管理")
         setFont(page_title, 20)     # 与设置页 SettingCardGroup 标题同款（Normal 字重）
         v.addWidget(page_title)
+        v.addSpacing(12)
 
         # 统计条置顶、操作条其下：打开页先读库概况再看到操作
         self.stat_cards: dict[str, BodyLabel] = {}
@@ -74,6 +79,7 @@ class LibraryPage(ScrollArea):
             col.addWidget(val)
             stat_row.addLayout(col, 1)
         v.addWidget(stat_card)
+        v.addSpacing(16)
 
         # 按钮初始无布局，_rebuild_dir_rows 时装进分组卡标题栏/失败卡
         self.btn_add = PushButton(FIF.FOLDER_ADD, "添加目录")
@@ -91,7 +97,9 @@ class LibraryPage(ScrollArea):
         self._busy_icons: list[QIcon] | None = None
 
         self.dirs_box = QVBoxLayout()
+        self.dirs_box.setContentsMargins(0, 0, 0, 0)
         v.addLayout(self.dirs_box)
+        v.addSpacing(16)
 
         self.failures_card = PushSettingCard("打开", FIF.INFO, "查看失败清单",
                                              "暂无失败文件")
