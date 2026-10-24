@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
                             IconWidget, IndeterminateProgressRing, InfoBadge,
-                            StrongBodyLabel, TransparentPushButton)
+                            StrongBodyLabel, TransparentPushButton,
+                            isDarkTheme)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.subs_vm import KEEP, SIM_FLOOR, Card
@@ -37,6 +38,18 @@ QFrame#tofu{ border: 1px dashed rgba(198,43,28,0.55); border-radius: 6px; }
 
 def _pct(v: float | None) -> str:
     return f"{v * 100:.1f}%" if v is not None else ""
+
+
+def _pill(text: str) -> QLabel:
+    """中性灰药丸标签（原字体/简繁/字重/分类）：InfoBadge.custom 底色自定义
+    但文字色死在样式表白字上——浅底白字直接隐形，自绘 QSS 双色全控。"""
+    dark = isDarkTheme()
+    w = QLabel(text)
+    w.setStyleSheet(
+        f"QLabel{{color:{'#cccccc' if dark else '#5c5c5c'};"
+        f" background:{'rgba(255,255,255,0.10)' if dark else 'rgba(0,0,0,0.06)'};"
+        f" border-radius:4px; padding:1px 8px; font-size:11px;}}")
+    return w
 
 
 class FontCard(CardWidget):
@@ -94,8 +107,7 @@ class FontCard(CardWidget):
         h.addWidget(CaptionLabel(self.card.header))
         h.addStretch(1)
         if kind == "zero":
-            h.addWidget(InfoBadge.custom(_STATUS_TEXT["zero"],
-                                         QColor("#f0f0f0"), QColor("#3f3f3f")))
+            h.addWidget(_pill(_STATUS_TEXT["zero"]))
         else:
             h.addWidget(_BADGE_MAKER[kind](_STATUS_TEXT[kind]))
         return head
@@ -153,8 +165,7 @@ class FontCard(CardWidget):
             if b in ("孪生对应", "上次使用"):        # 强调标签用主题徽章
                 name_row.addWidget(InfoBadge.info(b))
             else:                                   # 原字体/不改动/简繁/字重等：中性灰
-                name_row.addWidget(InfoBadge.custom(b, QColor("#eceff1"),
-                                                    QColor("#3f3f3f")))
+                name_row.addWidget(_pill(b))
         name_row.addStretch(1)
         text.addLayout(name_row)
         text.addWidget(CaptionLabel(self._metrics_text(o)))

@@ -327,6 +327,7 @@ def test_zero_usage_keep_card_presentation_and_no_search(qapp, tmp_path, monkeyp
     from ass_font_substitute.core.coverage.matcher import UsageClass
     from ass_font_substitute.core.models import FontUsage
     from ass_font_substitute.gui.jobs import FileParse
+    from PySide6.QtWidgets import QLabel
     from qfluentwidgets import InfoBadge, TransparentPushButton
     page = _make_page(qapp, tmp_path, monkeypatch)
     usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
@@ -334,7 +335,10 @@ def test_zero_usage_keep_card_presentation_and_no_search(qapp, tmp_path, monkeyp
     page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
     page._on_result(f"classify:{page._gen}:0", (usage, UsageClass(kind="keep")))
     fc = page._cards_ui["甲字体"]
-    assert "保留（无对白用字）" in [b.text() for b in fc.findChildren(InfoBadge)]
+    # 零字卡徽章是自绘药丸（QLabel），不是 InfoBadge（白字浅底隐形问题）
+    texts = ([b.text() for b in fc.findChildren(InfoBadge)]
+             + [l.text() for l in fc.findChildren(QLabel)])
+    assert "保留（无对白用字）" in texts
     assert not [b for b in fc.findChildren(TransparentPushButton)
                 if "继续找" in b.text()]
     page._continue_search("甲字体")            # 兜底：无字卡不派搜索工
