@@ -80,6 +80,7 @@ def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
     d = tmp_path / "fonts"
     d.mkdir()
     build_font(d / "a.ttf", chars="永宇", family="甲")
+    (d / "b_bad.ttf").write_bytes(b"not a font")    # 坏文件：入 bad 表不计实体
     from PySide6.QtTest import QTest          # 本版 PySide6 无模块级 qWait
     from ass_font_substitute.gui.app import AFSWindow
     from ass_font_substitute.gui.settings_store import Settings
@@ -110,6 +111,9 @@ def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
         if page.vm.stats.get("fonts") == 1:
             break
     assert page.vm.stats.get("fonts") == 1
+    row = page.vm.dirs[0]
+    # 目录行统计：文件=盘上全部支持后缀（含坏文件）；失败/旧版=bad 表
+    assert (row.files, row.fonts, row.fail) == (2, 1, 1)
     w.close()
 
 
@@ -169,8 +173,10 @@ def test_dir_library_stats_maps_normalized_paths(qapp, tmp_path, monkeypatch):
     from ass_font_substitute.gui.pages.library_page import _dir_library_stats
     ent = SimpleNamespace(dir_path=str(tmp_path), rel_path="a.ttf", script="简")
     fwd = str(tmp_path).replace("\\", "/")
-    snap = SimpleNamespace(lib=SimpleNamespace(entities=lambda: [ent]))
+    snap = SimpleNamespace(lib=SimpleNamespace(
+        entities=lambda: [ent],
+        skipped=lambda: [f"{str(tmp_path)}\\a.ttf#1 旧版本"]))
     out = _dir_library_stats(snap, [fwd])
-    assert out[fwd] == {"files": 1, "fonts": 1, "sc": 1, "tc": 0}
+    assert out[fwd] == {"fonts": 1, "sc": 1, "tc": 0, "skipped": 1}
     # 未知目录（非本库目录）不进结果
     assert _dir_library_stats(snap, ["X:/nowhere"])["X:/nowhere"]["fonts"] == 0

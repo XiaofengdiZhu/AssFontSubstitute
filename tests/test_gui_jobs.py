@@ -36,14 +36,22 @@ def test_probe_dir_status_states(tmp_path, font_dir):
     # 未建索引：全部计新增
     st = probe_dir_status(str(font_dir))
     assert st.state == "stale" and st.added == 1 and st.indexed_files == 0
+    assert st.total == 1 and st.bad == 0
     # 建索引后：ok
     update_dir(str(font_dir))
     st = probe_dir_status(str(font_dir))
     assert st.state == "ok" and st.indexed_files == 1
+    assert st.total == 1 and st.bad == 0
     # 追加文件：stale with added
     build_font(font_dir / "new.ttf", chars="永", family="新字体")
     st = probe_dir_status(str(font_dir))
     assert st.state == "stale" and st.added == 1
+    assert st.total == 2
+    # 坏文件入 bad 表：total 含它，bad 计数
+    (font_dir / "junk.ttf").write_bytes(b"not a font")
+    update_dir(str(font_dir))
+    st = probe_dir_status(str(font_dir))
+    assert st.total == 3 and st.bad == 1 and st.indexed_files == 2
 
 
 def test_probe_does_not_create_db(tmp_path):

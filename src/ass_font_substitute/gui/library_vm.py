@@ -12,10 +12,11 @@ class DirRow:
     state: str = "stale"        # ok / stale / indexing / offline
     added: int = 0
     changed: int = 0
-    files: int = 0              # 库内统计：已索引文件数
+    files: int = 0              # 盘上全部支持后缀文件数（含坏文件，probe total）
     fonts: int = 0              # 字体实体数（版本去重后）
     sc: int = 0                 # 支持简体
     tc: int = 0                 # 支持繁体
+    fail: int = 0               # 失败/旧版 = 坏文件表行数 + 版本去重跳过数
 
     @property
     def badge(self) -> str:
@@ -63,16 +64,19 @@ class LibraryVM:
                 continue                        # 更新进行中不被探测结果覆盖
             if str(Path(d.path)) in offline_set:
                 d.state, d.added, d.changed = "offline", 0, 0
+                d.files, d.fail = 0, 0
                 continue
             s = by.get(d.path)
             if s is None or s.state in ("missing", "offline"):
                 d.state, d.added, d.changed = "offline", 0, 0
+                d.files, d.fail = 0, 0
             else:
                 d.state, d.added, d.changed = s.state, s.added, s.changed
+                d.files, d.fail = s.total, s.bad
             st = (dir_stats or {}).get(d.path)
             if st:
-                d.files, d.fonts = st["files"], st["fonts"]
-                d.sc, d.tc = st["sc"], st["tc"]
+                d.fonts, d.sc, d.tc = st["fonts"], st["sc"], st["tc"]
+                d.fail += st.get("skipped", 0)
         self.stats = snapshot_stats
         self.overlaps = list(overlaps)
         self.failed_dirs = [d.path for d in self.dirs if d.state == "offline"]

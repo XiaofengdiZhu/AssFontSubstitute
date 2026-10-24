@@ -36,16 +36,18 @@ def test_refresh_maps_status_and_reports_failures(tmp_path):
     vm.add_dir("J:/a")
     vm.add_dir("J:/b")
     vm.refresh(
-        [DirStatus("J:/a", "stale", added=2, changed=1)],
+        [DirStatus("J:/a", "stale", added=2, changed=1, total=7, bad=2)],
         {"dirs": 1, "files": 5, "fonts": 4, "support_sc": 3, "support_tc": 1},
         ["J:/a 嵌套于 J:/b"], ["J:/b"],
-        dir_stats={"J:/a": {"files": 5, "fonts": 4, "sc": 3, "tc": 1}})
+        dir_stats={"J:/a": {"fonts": 4, "sc": 3, "tc": 1, "skipped": 2}})
     a = vm.dirs[0]
     assert (a.state, a.added, a.changed) == ("stale", 2, 1)
-    assert (a.files, a.fonts, a.sc, a.tc) == (5, 4, 3, 1)
+    assert a.files == 7                          # 盘上全部支持后缀（含坏文件）
+    assert a.fail == 4                           # bad 2 + skipped 2
+    assert (a.fonts, a.sc, a.tc) == (4, 3, 1)
     b = vm.dirs[1]
     assert b.state == "offline"
-    assert (b.files, b.fonts, b.sc, b.tc) == (0, 0, 0, 0)   # 无统计不误挂
+    assert (b.files, b.fonts, b.sc, b.tc, b.fail) == (0, 0, 0, 0, 0)
     assert vm.failed_dirs == ["J:/b"]
     assert vm.stats["fonts"] == 4
     assert vm.overlaps == ["J:/a 嵌套于 J:/b"]

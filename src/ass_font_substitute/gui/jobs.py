@@ -24,6 +24,8 @@ class DirStatus:
     added: int = 0
     changed: int = 0
     indexed_files: int = 0
+    total: int = 0              # 盘上全部支持后缀文件数（含坏文件）
+    bad: int = 0                # 索引坏文件表行数
 
 
 def probe_dir_status(dir_path: str) -> DirStatus:
@@ -34,8 +36,9 @@ def probe_dir_status(dir_path: str) -> DirStatus:
         return DirStatus(dir_path, "missing")
     dbf = d / "fontindex.db"
     if not dbf.exists():
+        disk = scan_dir(d)
         st = DirStatus(dir_path, "stale")
-        st.added = len(scan_dir(d))
+        st.total = st.added = len(disk)
         return st
     try:
         conn = sqlite3.connect(dbf.resolve().as_uri() + "?mode=ro", uri=True)
@@ -47,7 +50,10 @@ def probe_dir_status(dir_path: str) -> DirStatus:
     except sqlite3.Error:
         return DirStatus(dir_path, "offline")
     st = DirStatus(dir_path, "ok", indexed_files=len(known))
-    for p in scan_dir(d):
+    st.bad = len(bad)
+    disk = scan_dir(d)
+    st.total = len(disk)
+    for p in disk:
         rel = p.relative_to(d).as_posix()
         s = p.stat()
         cur = (s.st_size, s.st_mtime_ns)

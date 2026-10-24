@@ -121,8 +121,9 @@ class LibraryPage(ScrollArea):
             path_lbl = _ElidedLabel(d.path)     # 窄窗中部省略，tooltip 全路径
             path_lbl.setToolTip(d.path)
             mid.addWidget(path_lbl)
-            sub = CaptionLabel(f"文件 {d.files} · 字体 {d.fonts}"
-                               f" · 支持简体 {d.sc} · 支持繁体 {d.tc}")
+            sub = CaptionLabel(
+                f"文件 {d.files} · 字体 {d.fonts} · 支持简体 {d.sc}"
+                f" · 支持繁体 {d.tc} · 失败/旧版 {d.fail}")
             mid.addWidget(sub)
             h.addLayout(mid, 1)
             badge = self._BADGE_MAKER.get(d.state, InfoBadge.info)(d.badge)
@@ -391,11 +392,12 @@ class _FailuresDialog(MessageBoxBase):
 
 
 def _dir_library_stats(snap, dirs: list[str]) -> dict:
-    """每目录库内统计（worker 线程纯数据）：文件/字体/支持简繁。
+    """每目录库内统计（worker 线程纯数据）：字体/支持简繁/旧版跳过数。
 
     实体 dir_path 是 str(Path(dir)) 规范化形（反斜杠），目录表是原样
-    字符串（可能正斜杠），按 Path 归一映射回原键。"""
-    out = {d: {"files": set(), "fonts": 0, "sc": 0, "tc": 0} for d in dirs}
+    字符串（可能正斜杠），按 Path 归一映射回原键；skipped 条目形如
+    「<目录>/<rel>#<face> 旧版本」，同样按归一前缀归目录。"""
+    out = {d: {"fonts": 0, "sc": 0, "tc": 0, "skipped": 0} for d in dirs}
     by_norm = {str(Path(d)): d for d in dirs}
     for e in snap.lib.entities():
         key = by_norm.get(e.dir_path)
@@ -403,12 +405,16 @@ def _dir_library_stats(snap, dirs: list[str]) -> dict:
             continue
         s = out[key]
         s["fonts"] += 1
-        s["files"].add(e.rel_path)
         if e.script in ("简", "简繁"):
             s["sc"] += 1
         if e.script in ("繁", "简繁"):
             s["tc"] += 1
-    return {d: {**v, "files": len(v["files"])} for d, v in out.items()}
+    for item in snap.lib.skipped():
+        for d_norm, key in by_norm.items():
+            if item.startswith(d_norm + "/") or item.startswith(d_norm + "\\"):
+                out[key]["skipped"] += 1
+                break
+    return out
 
 
 def _lib_job(ctx, dirs):
