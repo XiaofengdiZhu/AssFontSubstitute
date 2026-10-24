@@ -8,7 +8,7 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
                             StrongBodyLabel, TransparentPushButton)
 from qfluentwidgets import FluentIcon as FIF
 
-from ass_font_substitute.gui.subs_vm import KEEP, Card
+from ass_font_substitute.gui.subs_vm import KEEP, SIM_FLOOR, Card
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 
 # 状态图标/徽章配色（亮/暗各一份，线框配色）
@@ -167,9 +167,15 @@ class FontCard(CardWidget):
             bar.setFixedHeight(28)
             g.addWidget(bar, 0, Qt.AlignVCenter)
 
-        row.mousePressEvent = lambda e, k=o.key: (
-            self.option_checked.emit(self.card.norm_name, k)
-            if k != self.card.checked_key else None)
+        # 行点击=切换选择：实例级覆盖 mousePressEvent（QFrame 默认不消费），
+        # 只认左键，右键/中键不应有选择行为
+        def _row_press(e, k=o.key):
+            if e.button() != Qt.MouseButton.LeftButton:
+                return
+            if k != self.card.checked_key:
+                self.option_checked.emit(self.card.norm_name, k)
+
+        row.mousePressEvent = _row_press
         return row
 
     def _build_picker_row(self) -> QFrame:
@@ -187,7 +193,11 @@ class FontCard(CardWidget):
         chev = IconWidget(FIF.CHEVRON_RIGHT.colored(QColor("#8a8a8a"),
                                                     QColor("#9a9a9a")))
         g.addWidget(chev, 0, Qt.AlignVCenter)
-        row.mousePressEvent = lambda e: self.pick_clicked.emit(self.card.norm_name)
+        def _pick_press(e):
+            if e.button() == Qt.MouseButton.LeftButton:
+                self.pick_clicked.emit(self.card.norm_name)
+
+        row.mousePressEvent = _pick_press
         row.setCursor(Qt.PointingHandCursor)
         return row
 
@@ -233,7 +243,7 @@ class FontCard(CardWidget):
                 "无更多相似字体"
                 + (f"（当前最低相似率 {_pct(card.min_sim)}）" if card.min_sim else "")))
             relax = TransparentPushButton("放宽门槛重算")
-            relax.setEnabled(card.min_sim is None or card.min_sim > 0.50)
+            relax.setEnabled(card.min_sim is None or card.min_sim > SIM_FLOOR)
             relax.clicked.connect(
                 lambda: self.relax_clicked.emit(self.card.norm_name))
             foot.addWidget(relax)

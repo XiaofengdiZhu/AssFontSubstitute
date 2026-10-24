@@ -93,6 +93,11 @@ class SubsVM:
     def add_files(self, parses: list[FileParse]) -> None:
         by = {f.path: f for f in self.files}
         for p in parses:
+            old = by.get(p.path)
+            if old is not None:
+                # 重载/重解析保留用户勾选：默认 checked=True 会静默恢复
+                # 被排除的文件，「替换并保存」会写回用户明确排除的文件
+                p.checked = old.checked
             by[p.path] = p
         self.files = list(by.values())
 

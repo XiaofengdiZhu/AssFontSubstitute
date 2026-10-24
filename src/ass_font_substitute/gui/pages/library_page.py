@@ -249,7 +249,8 @@ class _FailuresDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(hint)
         self.viewLayout.addWidget(text, 1)
-        self.widget.setMinimumWidth(640)
+        # 窄窗下固定最小宽会横向溢出，与 FontPickerDialog 同款钳制
+        self.widget.setFixedWidth(min(720, max(self.width() - 48, 320)))
         # 按钮区钉在 widget 底部：高度封在窗口内，正文超出交给 TextEdit 滚动
         win_h = self.window().height() if self.window() is not None else 0
         if win_h > 350:

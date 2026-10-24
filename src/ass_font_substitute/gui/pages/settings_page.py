@@ -15,6 +15,7 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, Dialog,
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.lastdir import pick_existing_dir
+from ass_font_substitute.gui.paths import default_cache_path
 from ass_font_substitute.gui.settings_store import (COV_BOUNDS, SIM_BOUNDS,
                                                     SIZE_BOUNDS)
 from ass_font_substitute.gui.widgets.spin import SpinBox
@@ -37,7 +38,8 @@ def _sample_brief(text: str) -> str:
 
 
 class _WheelFreeCard(SettingCard):
-    """滚轮事件拦截：卡片内控件不响应滚轮，避免滚动设置页时误改数值。"""
+    """滚轮事件拦截：卡片内控件不响应滚轮，避免滚动设置页时误改数值。
+    只拦经 installEventFilter 挂进来的控件——每个交互控件都要显式挂。"""
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.Wheel and watched in (
@@ -67,7 +69,8 @@ class _PercentCard(_WheelFreeCard):
         self.hBoxLayout.addSpacing(_SPACING)
         self.slider.installEventFilter(self)
         self.slider.valueChanged.connect(self._on_value)
-        self._on_value(value)
+        # 构造只刷标签不提交：存量值若因精度差与回推值不符，不该被静默改写
+        self.valueLabel.setText(f"{value}%")
 
     def _on_value(self, v):
         self.valueLabel.setText(f"{v}%")
@@ -80,7 +83,6 @@ class _SpinBoxCard(_WheelFreeCard):
     def __init__(self, icon, title, content, lo, hi, value, on_commit,
                  suffix="", step=1, parent=None):
         super().__init__(icon, title, content, parent)
-        self._on_commit = on_commit
         self.spin = SpinBox(self)
         self.spin.setRange(lo, hi)
         self.spin.setSingleStep(step)
@@ -111,7 +113,13 @@ class _SampleEditBox(MessageBoxBase):
         self.viewLayout.addWidget(self.edit)
         self.yesButton.setText("保存")
         self.cancelButton.setText("取消")
-        self.widget.setMinimumWidth(560)
+        self.widget.setFixedWidth(min(720, max(self.width() - 48, 320)))
+        # 窄窗（MaskDialogBase 覆盖页宽）下固定最小宽会横向溢出，
+        # 与 FontPickerDialog/_FailuresDialog 同款钳制；高度同款封顶，
+        # 免得标题+警告+编辑区把按钮顶出窗口
+        win_h = self.window().height()
+        if win_h > 420:
+            self.widget.setMaximumHeight(win_h - 32)
         self.edit.textChanged.connect(
             lambda: self.yesButton.setEnabled(bool(self.edit.toPlainText().strip())))
         self.yesButton.setEnabled(bool(text.strip()))
@@ -171,13 +179,14 @@ class SettingsPage(ScrollArea):
 
         # ── 输出 ─────────────────────────────────────────────
         g2 = SettingCardGroup("输出", self.view)
-        self.save_mode_card = SettingCard(
+        self.save_mode_card = _WheelFreeCard(
             FIF.SAVE, "保存方式", "替换结果写回方式（与处理字幕页同步）", self)
         self.save_mode_combo = ComboBox(self.save_mode_card)
         self.save_mode_combo.addItems(["另存为新文件", "覆盖原文件"])
         self.save_mode_combo.setFixedWidth(150)
         self.save_mode_combo.setCurrentIndex(
             1 if settings.get("overwrite_default") else 0)
+        self.save_mode_combo.installEventFilter(self.save_mode_card)
         self.save_mode_combo.currentIndexChanged.connect(self._on_save_mode)
         self.save_mode_card.hBoxLayout.addWidget(
             self.save_mode_combo, 0, Qt.AlignmentFlag.AlignRight)
@@ -256,6 +265,8 @@ class SettingsPage(ScrollArea):
         self.spin_smax.setValue(hi)
         self.spin_smin.setMaximum(hi)
         self.spin_smax.setMinimum(lo)
+        # 滚轮拦截按属性名认控件：大小区间的双 SpinBox 必须挂上
+        card.spin, card.spin_max = self.spin_smin, self.spin_smax
         self.spin_smin.valueChanged.connect(
             lambda x: (self.settings.set("size_min", x / 100),
                        self.spin_smax.setMinimum(x)))
@@ -274,6 +285,8 @@ class SettingsPage(ScrollArea):
     def _add_sim_pending_hint(self, group):
         """相似候选标题行右端红字提示：在跑的搜索器持有建器时的门槛快照，
         此刻改动要等下次寻找相似才生效（提示由搜索活跃状态驱动显隐）。"""
+        # 依赖 qfw 1.11.3 SettingCardGroup 内部布局：vBoxLayout 首元素是
+        # titleLabel，随后 spacing + cardLayout——升级 qfw 改了顺序会静默错位
         group.vBoxLayout.removeWidget(group.titleLabel)
         head = QHBoxLayout()
         head.addWidget(group.titleLabel)
@@ -376,6 +389,12 @@ class SettingsPage(ScrollArea):
         if not d:
             return
         new = Path(d) / "cache.db"
+        current = self.settings.get("cache_path") or default_cache_path()
+        if new == Path(current):
+            # 选中的就是现役缓存目录：迁移会先删现役 db 再 rename 自身，
+            # 结果缓存被删且连接悬空——直接拒绝
+            InfoBar.warning("位置未变", "选择的目录与当前缓存位置相同", parent=self)
+            return
         migrate = True
         if new.exists():
             w = Dialog("目标已有缓存文件",

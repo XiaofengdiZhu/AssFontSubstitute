@@ -19,6 +19,7 @@ from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.subs_vm import SubsVM
 from ass_font_substitute.gui.widgets.font_card import FontCard
 from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+from ass_font_substitute.gui.widgets.wheel_block import WheelBlock
 
 
 class SubsPage(ScrollArea):
@@ -111,6 +112,9 @@ class SubsPage(ScrollArea):
         self.save_mode.setCurrentIndex(
             1 if self.settings.get("overwrite_default") else 0)
         self.save_mode.currentIndexChanged.connect(self._on_save_mode)
+        # 滚动页面扫过下拉会误改保存方式并落盘——吞滚轮
+        self._wheel_block = WheelBlock(self)
+        self.save_mode.installEventFilter(self._wheel_block)
         bottom.addWidget(self.save_mode)
         # 另存模式才需要后缀；编辑与设置页双向同步（suffixChanged 信号）
         self.suffix_label = CaptionLabel("另存后缀:")
@@ -250,8 +254,14 @@ class SubsPage(ScrollArea):
             self._apply_results = []
             self._apply_total = 0
             self._apply_dispatching = False
-            self._update_summary()         # 按当前状态恢复（全关时保持禁用）
-        InfoBar.error("任务失败", f"{tag}: {err}", parent=self)
+            self._update_summary()         # 按当前状态恢复
+        # 弹泡白名单：只报本页任务。其余 tag（cachestat/cachemove/预览渲染
+        # 失败等）别页自会提示或已自行降级——无差别弹泡只会刷屏且不可读
+        if isinstance(tag, str) and (
+                tag in ("slib", "apply")
+                or tag.startswith(("parse:", "classify:", "pull:",
+                                   "searcher:", "newsearcher:"))):
+            InfoBar.error("任务失败", f"{tag}: {err}", parent=self)
 
     # ---- 分类 ----
     def _reclassify(self):
@@ -379,13 +389,20 @@ class SubsPage(ScrollArea):
                                chars=self.vm.chars_by_norm.get(norm),
                                direction=self._direction, parent=self)
         if dlg.exec() and dlg.selected is not None:
+            # 模态期间 worker 结果照常派发：parse/classify 可能已整页重算，
+            # 闭包里的旧 card 成孤儿——回填前按 norm 重取
+            card = self._card(norm)
+            if card is None:
+                InfoBar.warning("字体已重算",
+                                "该字体卡片已被重新分类，请重新选择", parent=self)
+                return
             self.vm.attach_pick(card, dlg.selected)
             self._refresh_card(card)     # pick 可能新增选项行，整卡重建回填
             self._update_summary()
 
     # ---- 应用 ----
     def _apply(self):
-        if getattr(self, "_apply_dispatching", False):
+        if self._apply_dispatching:
             return                        # 派工在途：忽略重复点击（防重入）
         conflicts = self.vm.pending_out_conflicts()
         if conflicts and not self._confirmed_once:
@@ -408,6 +425,11 @@ class SubsPage(ScrollArea):
                                self.settings.get("save_suffix"), overwrite)
 
     def _on_apply_done(self, result):
+        # 派工中断（_on_failed 复位）后迟到的结果不再触发收尾，
+        # 否则剩余回执会连环重复 InfoBar/record_all
+        if not self._apply_dispatching or len(self._apply_results) \
+                >= self._apply_total:
+            return
         self._apply_results.append(result)
         if len(self._apply_results) < self._apply_total:
             return
@@ -420,6 +442,8 @@ class SubsPage(ScrollArea):
             InfoBar.success("替换完成", f"{len(ok)} 个文件已写入", parent=self)
         self.vm.record_all()
         self._apply_dispatching = False
+        self._apply_results = []
+        self._apply_total = 0
         self._update_summary()             # 按当前状态恢复按钮可用性
 
     def _update_summary(self):
@@ -430,7 +454,10 @@ class SubsPage(ScrollArea):
         self.summary.set_counts(kinds)
         n, total = self.vm.replacement_counts()
         self.replace_label.setText(f"将替换 {n} / {total} 种字体")
-        self.btn_apply.setEnabled(bool(self.vm.checked_parses())
+        # 派工期保持禁用：此时写盘用的是派工快照，改勾选不会生效，
+        # 放开按钮只会让「替换并保存」与决策记忆（record_all）分叉
+        self.btn_apply.setEnabled(not self._apply_dispatching
+                                  and bool(self.vm.checked_parses())
                                   and bool(self.vm.cards))
         active = any(c.searching for c in self.vm.cards)
         if active != self._search_active:
@@ -455,6 +482,8 @@ class SubsPage(ScrollArea):
 
     def _on_suffix_edit(self):
         text = self.suffix_edit.text().strip()
+        if text == self.settings.get("save_suffix"):
+            return                        # 失焦也触发 editingFinished：未变不落盘
         try:
             self.settings.set("save_suffix", text)
         except ValueError:

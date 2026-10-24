@@ -29,6 +29,8 @@ _SLIDE_OUT_CURVE = FluentAnimation.createBezierCurve(0.8, 0, 0.78, 1)
 def patch_mask_dialog_animation() -> None:
     """全局替换 MaskDialogBase 的开/关动画。在 QApplication 创建后调用一次。"""
     MaskDialogBase.slideEdge = None   # 子类设成 Qt.Edge 时，面板从这条边滑入滑出
+    # qfw 1.11.3 全部子类都不设 slideEdge，实际恒走淡入淡出；滑移路径按
+    # GPL 原实现保留（预留给未来想给某个弹窗加方向感的场景）
     MaskDialogBase.showEvent = _show_event
     MaskDialogBase.done = _done
 
@@ -205,7 +207,9 @@ class _AnimationLayer(QWidget):
         # 截面板时也会渲染到这一层
         if self._is_rendering_panel:
             return
-        # 打开时等第一次绘制再截图，这时布局已排好
+        # 仅剩异常保护：两路 _run() 均已移入 __init__（7feb4c3 起打开/关闭
+        # 都在构造时截图）。正常流程此分支不可达——绘制中 render 会触发
+        # Qt 递归重绘中止，正是当年要根治的问题，勿把截图移回这里
         if self._panel.isNull():
             self._run()
         mask_opacity, panel_opacity, panel_offset = self._to_frame(

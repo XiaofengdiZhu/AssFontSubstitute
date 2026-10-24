@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import shiboken6
 from PySide6.QtCore import QEvent, QTimer
-from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
+from PySide6.QtWidgets import QSpinBox
 from qfluentwidgets.common.font import setFont
 from qfluentwidgets.common.style_sheet import FluentStyleSheet
 from qfluentwidgets.components.widgets.spin_box import SpinButton, SpinIcon
 
 _BTN_W, _BTN_H, _GAP, _RIGHT = 31, 23, 5, 4   # qfw InlineSpinBox 的按钮几何
+_EDIT_RESERVE = _BTN_W * 2 + _GAP + _RIGHT + 14   # 按钮区 + 边框预留
 
 
 class _FluentSpinMixin:
-    """原生 QSpinBox/QDoubleSpinBox 套 qfluentwidgets 样式 + qfw SpinButton。
+    """原生 QSpinBox 套 qfluentwidgets 样式 + qfw SpinButton。
 
     qfluentwidgets 1.11.3 的 SpinBox（InlineSpinBox）在 PySide6 6.12 下内部
     lineEdit 宽度会被 QSS subControlRect 算成 1px，数值不可见（与嵌套层级/
@@ -41,10 +43,10 @@ class _FluentSpinMixin:
 
     def _fix_edit(self):
         """QSS 下 Qt 可能把内部 lineEdit 算成 1px——按自身宽度兜底重设。
-        右侧预留按钮区（31+5+31+4+边框），窄框（<140）退回全宽：
-        那时数值必然很短，不会滑进按钮底下。"""
+        右侧预留按钮区（_EDIT_RESERVE），窄框退回全宽：那时数值必然很短，
+        不会滑进按钮底下。"""
         le = self.lineEdit()
-        want = self.width() - 84
+        want = self.width() - _EDIT_RESERVE
         if want <= 20:
             want = self.width() - 4
         if want > 20 and le.width() != want:
@@ -60,10 +62,15 @@ class _FluentSpinMixin:
         self._fix_edit()
 
     def eventFilter(self, obj, e):
-        # Qt 在焦点/样式事件后仍会重排 lineEdit——等它落子后纠偏一次
+        # Qt 在焦点/样式事件后仍会重排 lineEdit——等它落子后纠偏一次。
+        # singleShot 回调不与控件生命周期绑定，销毁后触发会 RuntimeError
         if obj is self.lineEdit() and e.type() == QEvent.Type.Resize:
-            QTimer.singleShot(0, self._fix_edit)
+            QTimer.singleShot(0, self._fix_edit_if_alive)
         return super().eventFilter(obj, e)
+
+    def _fix_edit_if_alive(self):
+        if shiboken6.isValid(self):
+            self._fix_edit()
 
     def changeEvent(self, e):
         super().changeEvent(e)
@@ -74,8 +81,4 @@ class _FluentSpinMixin:
 
 
 class SpinBox(_FluentSpinMixin, QSpinBox):
-    pass
-
-
-class DoubleSpinBox(_FluentSpinMixin, QDoubleSpinBox):
     pass

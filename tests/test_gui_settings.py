@@ -127,3 +127,99 @@ def test_last_dir_roundtrip_and_dialog_seed(tmp_path, monkeypatch, qapp):
                         lambda *a: fake_seed_call(*a))
     lastdir.pick_existing_dir(None, s, "选目录")
     assert seen["d"] == ""
+
+
+def test_last_dir_drive_root_gets_separator(tmp_path, monkeypatch, qapp):
+    pytest.importorskip("PySide6")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from ass_font_substitute.gui import lastdir
+
+    s = Settings(tmp_path / "s.json")
+    drive = tmp_path.drive or "C:"
+    # 真实对话框返回反斜杠路径：根目录文件的 dirname 已带分隔符
+    monkeypatch.setattr(lastdir.QFileDialog, "getOpenFileNames",
+                        lambda *a, **kw: ([f"{drive}\\a.ass"], ""))
+    lastdir.pick_open_files(None, s, "选文件", "f")
+    assert s.get("last_dir") == drive + "\\"
+    # 盘相对路径（dirname 剥成裸 "C:"）经 _remember 归一成根
+    lastdir._remember(s, drive)
+    assert s.get("last_dir") == drive + "\\"
+
+
+def test_nan_and_bad_legacy_values_filtered(tmp_path):
+    f = tmp_path / "s.json"
+    f.write_text(json.dumps({"cov_threshold": float("nan"),
+                             "save_suffix": "no-dot",
+                             "min_sim": float("inf")}), "utf-8")
+    s = Settings(f)
+    assert s.get("cov_threshold") == DEFAULTS["cov_threshold"]   # NaN 拒收
+    assert s.get("min_sim") == DEFAULTS["min_sim"]               # Inf 拒收
+    assert s.get("save_suffix") == DEFAULTS["save_suffix"]       # 存量后缀复验
+    import math
+    with pytest.raises(ValueError):
+        s.set("cov_threshold", float("nan"))
+    with pytest.raises(ValueError):
+        s.set("cov_threshold", float("inf"))
+
+
+def test_settings_concurrent_set_threadsafe(tmp_path):
+    import threading
+    s = Settings(tmp_path / "s.json")
+    errs = []
+
+    def worker(i):
+        try:
+            for _ in range(30):
+                s.set("n_pause", 1 + i)
+        except Exception as e:                     # tmp 撞名/句柄互斥即在此暴露
+            errs.append(e)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errs
+    assert (tmp_path / "s.json.tmp").exists() is False
+
+
+def test_wheel_filter_blocks_only_registered(qapp):
+    pytest.importorskip("PySide6")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QSlider, QWidget
+    from ass_font_substitute.gui.pages.settings_page import _WheelFreeCard
+    from qfluentwidgets import FluentIcon as FIF
+
+    card = _WheelFreeCard(FIF.FILTER, "t", "c")
+    host = QWidget()
+    slider = QSlider(host)
+    other = QSlider(host)
+    card.slider = slider
+    wheel = QEvent(QEvent.Type.Wheel)
+    assert card.eventFilter(slider, wheel) is True      # 注册过的控件被拦
+    assert card.eventFilter(other, wheel) is False      # 未注册的放行
+    assert card.eventFilter(slider, QEvent(QEvent.Type.None_)) is False
+
+
+def test_wheel_block_filter(qapp):
+    pytest.importorskip("PySide6")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QComboBox
+    from ass_font_substitute.gui.widgets.wheel_block import WheelBlock
+
+    f = WheelBlock()
+    assert f.eventFilter(QComboBox(), QEvent(QEvent.Type.Wheel)) is True
+    assert f.eventFilter(QComboBox(), QEvent(QEvent.Type.None_)) is False
+
+
+def test_percent_card_init_does_not_commit(qapp):
+    pytest.importorskip("PySide6")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from ass_font_substitute.gui.pages.settings_page import _PercentCard
+    from qfluentwidgets import FluentIcon as FIF
+
+    calls = []
+    _PercentCard(FIF.FILTER, "t", "c", 90, 100, 1, 96, calls.append)
+    assert calls == []                              # 构造不提交，存量值不被改写

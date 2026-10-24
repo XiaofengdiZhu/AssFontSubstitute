@@ -255,6 +255,37 @@ def test_preview_text_and_save_mode_combo(qapp, tmp_path, monkeypatch):
     assert page.suffix_edit.text() == ".fixed.ass"
 
 
+def test_reload_keeps_unchecked_state(qapp, tmp_path, monkeypatch):
+    # 回归：重新载入重解析后不得恢复被用户取消勾选的文件（否则
+    # 「替换并保存」会写回明确排除的文件）
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+
+    def parse_payload(path):
+        return FileParse(path, None, [FontUsage(
+            raw_name="甲字体", norm_name="甲字体", style_count=1,
+            inline_count=1, chars=set("永宇"), variants={"甲字体"})], [], [])
+
+    page._on_result("parse:p.ass", parse_payload("p.ass"))
+    page.vm.set_checked("p.ass", False)
+    page._on_result("parse:p.ass", parse_payload("p.ass"))   # 重载重解析
+    assert [f.checked for f in page.vm.files if f.path == "p.ass"] == [False]
+
+
+def test_apply_late_result_after_failed_reset_is_dropped(qapp, tmp_path, monkeypatch):
+    # 派工中断复位后，迟到的 apply 回执不得再触发收尾（重复 InfoBar/record_all）
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    from ass_font_substitute.gui.jobs import ApplyFileResult
+
+    page._on_failed("apply", "boom")
+    before = len(page.vm.files)                    # record_all 不该被迟到回执触发
+    page._on_apply_done(ApplyFileResult("p.ass", ".substituted.ass", None))
+    assert page._apply_results == []
+    assert page._apply_total == 0
+    assert len(page.vm.files) == before
+
+
 def test_zero_usage_keep_card_presentation_and_no_search(qapp, tmp_path, monkeypatch):
     # 回归：空库下 0 字用法分类出 kind=keep——不得冒充「库中有」徽章，
     # 也不给搜索入口（无可比字型，误触发会空转）

@@ -17,6 +17,8 @@ def _seed(settings) -> str:
 
 def _remember(settings, d: str) -> None:
     if d and os.path.isdir(d):
+        if len(d) == 2 and d[1] == ":":
+            d += os.sep        # 盘符根：os.path.dirname 给的是盘相对路径
         settings.set("last_dir", d)
 
 
