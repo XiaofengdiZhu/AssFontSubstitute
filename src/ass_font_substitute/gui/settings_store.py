@@ -7,6 +7,9 @@ import re
 import threading
 from pathlib import Path
 
+from PySide6.QtCore import QObject
+from PySide6.QtCore import Signal
+
 from ass_font_substitute.core.coverage.matcher import COV_THRESHOLD
 from ass_font_substitute.core.similarity.search import MIN_SIM
 from ass_font_substitute.core.similarity.search import SAMPLE_TEXT
@@ -49,11 +52,16 @@ _ENUM_KEYS = {
 _SUFFIX_RE = re.compile(r"^\..+$")
 
 
-class Settings:
+class Settings(QObject):
     """JSON 设置。get/set 同步落盘（tmp + os.replace 原子写）；
     损坏/含未知键/类型不符的存量数据按默认处理，绝不崩 GUI。"""
 
+    #: (key, value) 落盘后、且值有变才发；reload/启动装载不发。
+    #: worker 线程 set（cache_move）时 Qt 自动按接收者线程排队投递
+    valueChanged = Signal(str, object)
+
     def __init__(self, path: Path | None = None):
+        super().__init__()
         self.path = Path(path) if path is not None else None
         # worker 线程（cache_move 落 cache_path）与 UI 线程并发 set：
         # 互斥保住「tmp 固定名原子写」与 dumps 期间字典不被改
@@ -120,8 +128,11 @@ class Settings:
         if key in _ENUM_KEYS and value not in _ENUM_KEYS[key]:
             raise ValueError(f"{key} 必须是 {'/'.join(sorted(_ENUM_KEYS[key]))} 之一")
         with self._lock:
+            old = self._data.get(key)
             self._data[key] = value
             self.save()
+        if old != value:                        # emit 在锁外：槽内再入 set 不死锁
+            self.valueChanged.emit(key, value)
 
     def save(self) -> None:
         with self._lock:

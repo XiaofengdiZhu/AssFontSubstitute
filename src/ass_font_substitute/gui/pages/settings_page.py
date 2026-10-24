@@ -165,8 +165,6 @@ def _theme_aware_title(group) -> None:
 class SettingsPage(ScrollArea):
     saveModeChanged = Signal(bool)       # 覆盖原文件？（处理字幕页同步）
     suffixChanged = Signal(str)          # 另存后缀变更（处理字幕页同步）
-    themeChanged = Signal(str)           # 主题模式 auto/light/dark（主窗口应用）
-    bgEffectChanged = Signal(str)        # 窗口背景材质（主窗口应用）
 
     def __init__(self, settings, worker, parent=None):
         super().__init__(parent)
@@ -417,14 +415,10 @@ class SettingsPage(ScrollArea):
             self.lang_combo.blockSignals(False)
 
     def _on_theme(self, index):
-        value = _THEME_VALUES[index]
-        self.settings.set("theme", value)
-        self.themeChanged.emit(value)
+        self.settings.set("theme", _THEME_VALUES[index])   # 窗口经 valueChanged 应用
 
     def _on_bg_effect(self, index):
-        value = _BG_VALUES[index]
-        self.settings.set("bg_effect", value)
-        self.bgEffectChanged.emit(value)
+        self.settings.set("bg_effect", _BG_VALUES[index])
 
     # ---- 保存方式/后缀（与处理字幕页双向同步）----
     def _on_save_mode(self, index):

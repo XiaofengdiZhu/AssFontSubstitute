@@ -271,8 +271,8 @@ def test_general_group_language_theme_bg(qapp, tmp_path, monkeypatch):
     assert page.bg_combo.currentText() == "Mica"
 
     themes, effects = [], []
-    page.themeChanged.connect(themes.append)
-    page.bgEffectChanged.connect(effects.append)
+    s.valueChanged.connect(lambda k, v: themes.append(v) if k == "theme"
+                           else effects.append(v) if k == "bg_effect" else None)
     page.theme_combo.setCurrentIndex(2)           # 深色
     page.bg_combo.setCurrentIndex(4)              # 无
     assert themes == ["dark"] and effects == ["none"]
@@ -314,3 +314,43 @@ def test_enum_keys_out_of_range_fall_back(tmp_path):
     s = Settings(f)
     assert (s.get("language"), s.get("theme"),
             s.get("bg_effect")) == ("zh-Hans", "auto", "mica")
+
+
+def test_value_changed_signal_semantics(qapp, tmp_path):
+    # set 新值发 (key, value) 且 emit 前已落盘；同值不发；reload 装载不发；
+    # set 抛 ValueError（校验拒收）不发
+    import json as _json
+
+    s = Settings(tmp_path / "s.json")
+    got = []
+    s.valueChanged.connect(lambda k, v: got.append((k, v, _json.loads(
+        (tmp_path / "s.json").read_text("utf-8"))["theme"])))
+    s.set("theme", "dark")
+    assert got == [("theme", "dark", "dark")]     # 第三元：emit 时文件已更新
+    s.set("theme", "dark")
+    assert got == [("theme", "dark", "dark")]     # 同值不发
+    s2 = Settings(tmp_path / "s.json")            # 装载已有值不发
+    s2.valueChanged.connect(lambda k, v: got.append((k, v, None)))
+    assert got == [("theme", "dark", "dark")]
+    with pytest.raises(ValueError):
+        s.set("theme", "blue")
+    assert got == [("theme", "dark", "dark")]
+
+
+def test_value_changed_cross_thread_queued(qapp, tmp_path):
+    # worker 线程 set（cache_move 通路）：接收者在主线程，经 Qt 队列投递，
+    # processEvents 后可见——绝不直接在发射线程执行槽
+    import threading
+
+    s = Settings(tmp_path / "s.json")
+    got = []
+    s.valueChanged.connect(lambda k, v: got.append((k, v, threading.current_thread())))
+    t = threading.Thread(target=lambda: s.set("cache_path", str(tmp_path / "c")))
+    t.start()
+    t.join()
+    assert not got                                # 发射线程≠接收线程：未直接执行
+    qapp.processEvents()
+    assert len(got) == 1
+    k, v, th = got[0]
+    assert (k, v) == ("cache_path", str(tmp_path / "c"))
+    assert th is threading.main_thread()          # 槽跑在接收者线程

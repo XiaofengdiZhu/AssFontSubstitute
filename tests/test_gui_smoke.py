@@ -269,7 +269,7 @@ def test_window_applies_stored_theme_and_effect(qapp, tmp_path, monkeypatch):
         w = AFSWindow(s)
         assert qconfig.theme == Theme.DARK        # 建页前已定主题
         assert not w.isMicaEffectEnabled()        # none：FluentWindow 出厂 Mica 已关
-        w.settings_page.bgEffectChanged.emit("mica")
+        w.settings.set("bg_effect", "mica")       # store 信号驱动窗口应用
         assert w.isMicaEffectEnabled()
     finally:
         setTheme(Theme.AUTO)                      # 还原全局主题，防污染后续测试

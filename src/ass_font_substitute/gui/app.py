@@ -106,8 +106,9 @@ class AFSWindow(FluentWindow):
             self.settings_page.set_save_suffix)
         self.settings_page.suffixChanged.connect(
             self.subs_page.set_save_suffix)
-        self.settings_page.themeChanged.connect(self._apply_theme)
-        self.settings_page.bgEffectChanged.connect(self._apply_bg_effect)
+        # store 级变更通知驱动窗口应用：任何来源的 set（含 worker 线程
+        # cache_move 同款通路）都能触发，页面不再当信号转发器
+        self.settings.valueChanged.connect(self._on_setting_changed)
         # 主题切换（含跟随系统翻转）后重贴窗口材质（Mica 明暗/Acrylic 底色随
         # 主题变）；自绘控件（统计分隔线/药丸）paintEvent 现取主题色，免刷
         qconfig.themeChangedFinished.connect(self._apply_bg_effect)
@@ -123,6 +124,12 @@ class AFSWindow(FluentWindow):
         self.resize(1100, 750)
 
     # ---- 主题与窗口材质（设置页「常规」组驱动）----
+    def _on_setting_changed(self, key: str, value):
+        if key == "theme":
+            self._apply_theme(value)
+        elif key == "bg_effect":
+            self._apply_bg_effect(value)
+
     def _apply_theme(self, name: str):
         setTheme(_THEME_OF[name])
 
