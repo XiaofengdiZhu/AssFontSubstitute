@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from ass_font_substitute.gui.lastdir import pick_existing_dir
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget,
-                            IndeterminateProgressRing, InfoBar, MessageBoxBase,
-                            PrimaryPushButton, PushButton, ScrollArea,
-                            StrongBodyLabel, SubtitleLabel, TextEdit, ToolButton)
+                            InfoBar, MessageBoxBase, PrimaryPushButton,
+                            PushButton, ScrollArea, StrongBodyLabel,
+                            SubtitleLabel, TextEdit, ToolButton)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.jobs import (ensure_library, probe_dir_status,
@@ -37,15 +38,17 @@ class LibraryPage(ScrollArea):
         self.btn_add = PushButton(FIF.FOLDER_ADD, "添加字体目录")
         self.btn_refresh = PushButton(FIF.SYNC, "刷新状态")
         self.btn_update = PrimaryPushButton(FIF.UPDATE, "更新全部索引")
-        self.btn_cancel = PushButton("取消更新")
-        self.btn_cancel.hide()
-        self.ring = IndeterminateProgressRing()
-        self.ring.hide()
-        for w in (self.btn_add, self.btn_refresh, self.btn_update,
-                  self.btn_cancel, self.ring):
+        for w in (self.btn_add, self.btn_refresh, self.btn_update):
             head.addWidget(w)
         head.addStretch(1)
         v.addLayout(head)
+
+        # 更新态：按钮原地变「[旋转环]取消更新」，宽度锁定防文字变短塌缩
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setInterval(50)
+        self._busy_timer.timeout.connect(self._tick_busy)
+        self._busy_i = 0
+        self._busy_icons: list[QIcon] | None = None
 
         self.btn_failures = PushButton(FIF.INFO, "查看失败清单")
         v.addWidget(self.btn_failures, 0, Qt.AlignLeft)
@@ -70,8 +73,7 @@ class LibraryPage(ScrollArea):
 
         self.btn_add.clicked.connect(self._add_dir)
         self.btn_refresh.clicked.connect(self.refresh_status)
-        self.btn_update.clicked.connect(self._start_update)
-        self.btn_cancel.clicked.connect(self._cancel_update)
+        self.btn_update.clicked.connect(self._on_update_clicked)
         self.btn_failures.clicked.connect(self._show_failures)
         self.worker.result.connect(self._on_result)
         self.worker.failed.connect(self._on_failed)
@@ -160,6 +162,13 @@ class LibraryPage(ScrollArea):
             InfoBar.warning("目录不可用", "；".join(self.vm.failed_dirs), parent=self)
 
     # ---- 索引更新 ----
+    def _on_update_clicked(self):
+        """更新中点击=取消（按钮原地变身，不再有独立取消按钮）。"""
+        if self._index_worker is not None:
+            self._cancel_update()
+        else:
+            self._start_update()
+
     def _start_update(self):
         dirs = [d.path for d in self.vm.dirs]
         if dirs:
@@ -177,9 +186,7 @@ class LibraryPage(ScrollArea):
         for d in dirs:
             self.vm.mark_indexing(d)
         self._rebuild_dir_rows()
-        self.btn_update.hide()
-        self.btn_cancel.show()
-        self.ring.show()
+        self._set_updating(True)
         self._index_worker = IndexWorker(dirs)
         self._index_worker.progress.connect(self._on_index_progress)
         self._index_worker.finished_dir.connect(self._on_index_done)
@@ -188,7 +195,8 @@ class LibraryPage(ScrollArea):
         self._index_worker.start()
 
     def _on_index_progress(self, d, done, total, res):
-        self.btn_cancel.setText(f"取消更新（{done}/{total}）")
+        # 宽度锁定期间计数不进文字（会撑宽/塌缩），进度走 tooltip
+        self.btn_update.setToolTip(f"正在更新索引（{done}/{total}），点击取消")
 
     def _on_index_done(self, d, res):
         if not getattr(res, "cancelled", False):
@@ -200,11 +208,53 @@ class LibraryPage(ScrollArea):
 
     def _on_index_all_done(self):
         self._index_worker = None
-        self.btn_update.show()
-        self.btn_cancel.hide()
-        self.ring.hide()
-        self.btn_cancel.setText("取消更新")
+        self._set_updating(False)
         self.refresh_status()
+
+    def _set_updating(self, on: bool):
+        """更新态切换：图标位换自绘旋转弧、文字换「取消更新」，宽度
+        锁定为进入前值（「取消更新」比原文短，不锁会塌缩跳位）。"""
+        if on:
+            w = max(self.btn_update.width(),
+                    self.btn_update.sizeHint().width())
+            self.btn_update.setFixedWidth(w)
+            self.btn_update.setText("取消更新")
+            self._busy_i = 0
+            self.btn_update.setIcon(self._busy_frames()[0])
+            self._busy_timer.start()
+            self.btn_update.setToolTip("正在更新索引，点击取消")
+        else:
+            self._busy_timer.stop()
+            self.btn_update.setText("更新全部索引")
+            self.btn_update.setIcon(FIF.UPDATE)
+            # 16777215 = QWIDGETSIZE_MAX（PySide6 未导出该常量）
+            self.btn_update.setMinimumWidth(0)
+            self.btn_update.setMaximumWidth(16777215)
+            self.btn_update.setToolTip("")
+
+    def _busy_frames(self) -> list[QIcon]:
+        """旋转弧逐帧 QIcon（qfw 无内置忙碌图标；主色按钮底上画白弧，
+        按 DPR 出图防高分屏发虚——PreviewBar 贴图同款教训）。"""
+        if self._busy_icons is None:
+            dpr = self.btn_update.devicePixelRatioF()
+            frames = []
+            for i in range(12):
+                pm = QPixmap(int(16 * dpr), int(16 * dpr))
+                pm.setDevicePixelRatio(dpr)
+                pm.fill(Qt.transparent)
+                p = QPainter(pm)
+                p.setRenderHint(QPainter.Antialiasing)
+                p.setPen(QPen(Qt.white, 2, Qt.SolidLine, Qt.RoundCap))
+                p.drawArc(1, 1, 14, 14, -(i * 30) * 16, -100 * 16)
+                p.end()
+                frames.append(QIcon(pm))
+            self._busy_icons = frames
+        return self._busy_icons
+
+    def _tick_busy(self):
+        frames = self._busy_frames()
+        self._busy_i = (self._busy_i + 1) % len(frames)
+        self.btn_update.setIcon(frames[self._busy_i])
 
     def _cancel_update(self):
         if self._index_worker is not None:

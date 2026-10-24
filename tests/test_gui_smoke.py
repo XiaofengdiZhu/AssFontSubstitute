@@ -87,11 +87,25 @@ def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
     s = Settings(tmp_path / "settings.json")
     w = AFSWindow(s)
     page = w.library_page
+    # 回归：更新态按钮原地变「[旋转环]取消更新」且宽度锁定不塌缩，
+    # 收尾还原文字/图标/宽度（旧独立取消按钮+外挂巨环方案已废）
+    page._set_updating(True)
+    w0 = page.btn_update.minimumWidth()
+    assert page.btn_update.text() == "取消更新"
+    assert page.btn_update.minimumWidth() == page.btn_update.maximumWidth()
+    assert w0 >= page.btn_update.sizeHint().width()
+    assert page._busy_timer.isActive()
+    assert not page.btn_update.icon().isNull()
+    page._set_updating(False)
+    assert page.btn_update.text() == "更新全部索引"
+    assert not page._busy_timer.isActive()
+    assert page.btn_update.maximumWidth() == 16777215  # QWIDGETSIZE_MAX
     assert page.vm.add_dir(str(d)) is True
     page.worker.submit("update", _update_dirs_job, [str(d)])
     page.worker.submit("lib", _ensure_lib_job, [str(d)])
-    # 等待串行工作者处理完（上限 2s，超时即断言失败，属预期行为）
-    for _ in range(100):
+    # 等待串行工作者处理完：update 任务含 FreeType 冷导入实测 ~2.3s、
+    # lib 再 ~0.6s，预算给足 6s（旧 2s 预算在本机偶发/必挂=假 flaky）
+    for _ in range(300):
         QTest.qWait(20)
         if page.vm.stats.get("fonts") == 1:
             break
