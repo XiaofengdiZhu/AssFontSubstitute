@@ -32,6 +32,7 @@ class AFSWindow(FluentWindow):
         self.addSubInterface(self.subs_page, FIF.DOCUMENT, "处理字幕")
         self.addSubInterface(self.settings_page, FIF.SETTING, "设置",
                              NavigationItemPosition.BOTTOM)
+        self.settings_page.bind_search_activity(self.subs_page)
         self.setWindowTitle("Ass 字体替补")
         self.resize(1100, 750)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
                             FlowLayout, InfoBadge, InfoBar, LineEdit,
@@ -15,10 +15,7 @@ from ass_font_substitute.gui.jobs import (apply_to_file, classify_one,
                                           parse_subtitle, pull_chunk)
 from ass_font_substitute.gui.paths import decisions_path
 from ass_font_substitute.gui.preview_vm import PreviewVM
-from ass_font_substitute.gui.settings_store import (COV_BOUNDS, SIM_BOUNDS,
-                                                    SIZE_BOUNDS)
 from ass_font_substitute.gui.subs_vm import SubsVM
-from ass_font_substitute.gui.widgets.spin import SpinBox
 from ass_font_substitute.gui.widgets.font_card import FontCard
 from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
 
@@ -27,6 +24,8 @@ class SubsPage(ScrollArea):
     """处理字幕页：文件卡列表 → 参数行 → 字体卡渐进填充 → 底部应用条。
     跨线程约定：worker 任务收纯数据、回纯数据；vm 的全部变更都发生在
     UI 线程的 _on_result / 信号槽里。"""
+
+    searchActiveChanged = Signal(bool)   # 有无进行中的相似搜索（设置页提示用）
 
     def __init__(self, settings, worker, parent=None):
         super().__init__(parent)
@@ -44,6 +43,7 @@ class SubsPage(ScrollArea):
         self._apply_results: list = []
         self._apply_dispatching = False     # 派工在途标志（防重入）
         self._confirmed_once = False
+        self._search_active = False
 
         self.view = QWidget(self)
         v = QVBoxLayout(self.view)
@@ -88,19 +88,7 @@ class SubsPage(ScrollArea):
         self.seg_dir.addItem("t2s", "繁 → 简", lambda: self._set_direction("t2s"))
         self.seg_dir.addItem("s2t", "简 → 繁", lambda: self._set_direction("s2t"))
         self.seg_dir.setCurrentItem("t2s")
-        self.spin_cov = _stepper(_pct_i(COV_BOUNDS[0]), _pct_i(COV_BOUNDS[1]), 1,
-                                 _pct_i(self.settings.get("cov_threshold")), "%")
-        self.spin_sim = _stepper(_pct_i(SIM_BOUNDS[0]), _pct_i(SIM_BOUNDS[1]), 5,
-                                 _pct_i(self.settings.get("min_sim")), "%")
-        self.spin_smin = _stepper(_pct_i(SIZE_BOUNDS[0]), _pct_i(SIZE_BOUNDS[1]), 1,
-                                  _pct_i(self.settings.get("size_min")), "%")
-        self.spin_smax = _stepper(_pct_i(SIZE_BOUNDS[0]), _pct_i(SIZE_BOUNDS[1]), 1,
-                                  _pct_i(self.settings.get("size_max")), "%")
         pl.addWidget(_fld("孪生检测方向", self.seg_dir))
-        pl.addWidget(_fld("覆盖率", self.spin_cov))
-        pl.addWidget(_fld("最低相似率", self.spin_sim))
-        pl.addWidget(_fld("大小下限", self.spin_smin))
-        pl.addWidget(_fld("大小上限", self.spin_smax))
         self.preview_edit = LineEdit()
         self.preview_edit.setPlaceholderText("预览字体（留空显示字体名）")
         self.preview_edit.setClearButtonEnabled(True)
@@ -141,10 +129,6 @@ class SubsPage(ScrollArea):
         self.worker.result.connect(self._on_result)
         self.worker.failed.connect(self._on_failed)
         self.preview_edit.textChanged.connect(self._on_preview_text)
-        for spin in (self.spin_cov, self.spin_sim, self.spin_smin, self.spin_smax):
-            spin.valueChanged.connect(self._reclassify)
-        self.spin_smin.valueChanged.connect(self._clamp_size)
-        self.spin_smax.valueChanged.connect(self._clamp_size)
         self._preview_debounce = QTimer(self)
         self._preview_debounce.setSingleShot(True)
         self._preview_debounce.setInterval(300)
@@ -275,7 +259,7 @@ class SubsPage(ScrollArea):
         if not usages:
             return
         self.worker.submit("slib", _lib_job, list(self.settings.get("font_dirs")))
-        cov = self.spin_cov.value() / 100
+        cov = float(self.settings.get("cov_threshold"))
         for i, u in enumerate(usages):
             self.worker.submit(f"classify:{self._gen}:{i}", _classify_job, u,
                                cov, self._direction)
@@ -357,17 +341,18 @@ class SubsPage(ScrollArea):
                                self._cancel_for(norm))   # 续用：累计 hit_count 语义
             return
         # 新搜索器：相似度基准由 UI 线程算好传入（worker 线程无 vm 引用）；
-        # 门槛取 card.min_sim（vm 与在用搜索器保持同步），非设置页原值
+        # 门槛取 card.min_sim（vm 与在用搜索器保持同步），非设置页原值；
+        # 覆盖率/大小区间此刻从设置页现读（改设置不影响在跑的搜索器）
         card.searching = True
         self._refresh_card(card)
         self.worker.submit(f"newsearcher:{norm}", _new_searcher_job,
                            vm_target(self.vm, card),
                            self.vm.chars_by_norm.get(norm, set()),
-                           self.spin_cov.value() / 100,
+                           float(self.settings.get("cov_threshold")),
                            int(self.settings.get("n_pause")),
                            float(card.min_sim or self.settings.get("min_sim")),
-                           (self.spin_smin.value() / 100,
-                            self.spin_smax.value() / 100),
+                           (float(self.settings.get("size_min")),
+                            float(self.settings.get("size_max"))),
                            self._direction)
 
     def _relax_search(self, norm):
@@ -440,6 +425,10 @@ class SubsPage(ScrollArea):
                                   and bool(self.vm.cards)
                                   and (self.sw_save.isChecked()
                                        or self.sw_overwrite.isChecked()))
+        active = any(c.searching for c in self.vm.cards)
+        if active != self._search_active:
+            self._search_active = active
+            self.searchActiveChanged.emit(active)
 
     # ---- 开关/联动 ----
     def _on_save_toggle(self, checked):
@@ -458,16 +447,6 @@ class SubsPage(ScrollArea):
         self.settings.set("overwrite_default", checked)
         self._update_summary()
 
-    def _clamp_size(self, _value=0):
-        """大小区间联动：下限不得超过上限（上限随之抬升）。"""
-        if self.spin_smin.value() > self.spin_smax.value():
-            self.spin_smax.setValue(self.spin_smin.value())
-
-
-def _pct_i(x) -> int:
-    """小数 → 百分数整数（round 而非 int：0.95*100 的浮点尾差会截成 94）。"""
-    return round(x * 100)
-
 
 def _fld(label: str, w: QWidget) -> QWidget:
     """参数工具条的字段对：标签+控件，交 FlowLayout 换行排布。"""
@@ -478,16 +457,6 @@ def _fld(label: str, w: QWidget) -> QWidget:
     h.addWidget(CaptionLabel(label))
     h.addWidget(w)
     return box
-
-
-def _stepper(lo, hi, step, val, suffix):
-    s = SpinBox()
-    s.setRange(lo, hi)
-    s.setSingleStep(step)
-    s.setValue(val)
-    s.setSuffix(suffix)
-    s.setFixedWidth(140)
-    return s
 
 
 class _ElidedLabel(BodyLabel):

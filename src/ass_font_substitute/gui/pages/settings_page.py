@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QFileDialog
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, Dialog,
                             HyperlinkCard, InfoBar, LineEdit,
                             MessageBoxBase, PrimaryPushSettingCard,
@@ -163,6 +163,7 @@ class SettingsPage(ScrollArea):
         g1.addSettingCard(self.size_card)
         g1.addSettingCard(self.pause_card)
         g1.addSettingCard(self.threads_card)
+        self._add_sim_pending_hint(g1)
         v.addWidget(g1)
 
         # ── 输出 ─────────────────────────────────────────────
@@ -254,6 +255,36 @@ class SettingsPage(ScrollArea):
         card.hBoxLayout.addWidget(self.spin_smax, 0, Qt.AlignmentFlag.AlignRight)
         card.hBoxLayout.addSpacing(_SPACING)
         return card
+
+    def _add_sim_pending_hint(self, group):
+        """相似候选标题行右端红字提示：在跑的搜索器持有建器时的门槛快照，
+        此刻改动要等下次寻找相似才生效（提示由搜索活跃状态驱动显隐）。"""
+        group.vBoxLayout.removeWidget(group.titleLabel)
+        head = QHBoxLayout()
+        head.addWidget(group.titleLabel)
+        head.addStretch(1)
+        self.sim_pending_hint = CaptionLabel("下次寻找相似时生效")
+        self.sim_pending_hint.setStyleSheet("color: #c42b1c; font-weight: 600;")
+        self.sim_pending_hint.hide()
+        head.addWidget(self.sim_pending_hint)
+        group.vBoxLayout.insertLayout(0, head)
+        self._search_active = False
+        for w in (self.cov_card.slider, self.sim_card.slider,
+                  self.spin_smin, self.spin_smax, self.pause_card.spin):
+            w.valueChanged.connect(self._mark_sim_pending)
+
+    def bind_search_activity(self, subs_page):
+        """AFSWindow 注入处理字幕页：跟踪在跑相似搜索，驱动提示显隐。"""
+        subs_page.searchActiveChanged.connect(self._on_search_active)
+
+    def _on_search_active(self, active: bool):
+        self._search_active = active
+        # 新搜索开始=建器已带最新设置；搜索全部结束=无待生效项
+        self.sim_pending_hint.hide()
+
+    def _mark_sim_pending(self):
+        if self._search_active:
+            self.sim_pending_hint.show()
 
     def _save_suffix(self):
         try:
