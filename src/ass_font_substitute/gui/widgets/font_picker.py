@@ -59,6 +59,7 @@ class FontPickerDialog(MessageBoxBase):
             all_title.hide()
             self.filter_bar.hide()
             self.all_list.hide()
+            self.hint.hide()
             self.empty_label.show()
 
         body = QWidget()
@@ -81,14 +82,19 @@ class FontPickerDialog(MessageBoxBase):
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(body)
+        # win11 默认样式会给 QScrollArea viewport 涂 rgb(243,243,243) 灰底
+        scroll.enableTransparentBackground()
+        scroll.viewport().setAutoFillBackground(False)
         self.viewLayout.addWidget(scroll, 1)
 
-        self.widget.setMinimumWidth(720)
-        # 按钮区钉在 widget 底部：widget 高度必须封在窗口内，
-        # 内容装不下由 scroll 兜底，否则按钮被顶出窗口外
-        win_h = self.window().height() if self.window() is not None else 0
-        if win_h > 350:
-            self.widget.setFixedHeight(max(min(win_h - 48, 620), 320))
+        # 按钮区钉在 widget 底部：高度封在窗口内，内容装不下由 scroll 兜底；
+        # 空库态只有标题+提示，收到 280 免得撑满整窗。dialog 尺寸 = 所在页面
+        if self.pvm.entities:
+            h = max(min(self.height() - 48, 620), 320)
+        else:
+            h = max(min(self.height() - 48, 280), 220)
+        self.widget.setFixedHeight(h)
+        self.widget.setFixedWidth(min(720, max(self.width() - 48, 320)))
         self.yesButton.setText("选定")
         self.yesButton.setEnabled(False)
         self.cancelButton.setText("取消")
