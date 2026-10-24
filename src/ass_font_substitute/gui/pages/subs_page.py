@@ -305,6 +305,15 @@ class SubsPage(ScrollArea):
         self.vm.direction = d
         self._reclassify()
 
+    def on_library_changed(self):
+        """字体库管理页删目录/索引更新后的广播：全量重分类。
+
+        分类结论（库中有/没有、候选池）基于建卡时的库快照，库变了即失效；
+        _reclassify 换代自带取消在跑 pull、清旧 searcher。解析批次中不打断
+        ——批末 _parse_arrived 的重算读当时 font_dirs，天然收敛。"""
+        if not self._parsing:
+            self._reclassify()
+
     # ---- 卡片 UI ----
     def _make_card_ui(self, card) -> FontCard:
         fc = FontCard(card, self.worker, self._pvm,

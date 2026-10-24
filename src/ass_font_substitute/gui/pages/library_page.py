@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
@@ -21,6 +21,9 @@ _STAT_KEYS = [("dirs", "字体目录"), ("files", "文件总数"), ("fonts", "�
 
 
 class LibraryPage(ScrollArea):
+    libraryChanged = Signal()
+    """目录增删或索引更新完成：订阅页重拉库数据（browse 清单/ subs 重分类）"""
+
     def __init__(self, settings, worker, parent=None):
         super().__init__(parent)
         self.settings, self.worker = settings, worker
@@ -98,6 +101,8 @@ class LibraryPage(ScrollArea):
             upd.clicked.connect(lambda _=False, p=d.path: self._start_update_dir(p))
             h.addWidget(upd)
             rm = ToolButton(FIF.DELETE)
+            # 更新在途禁删：索引线程正写该目录 db，删后状态失配
+            rm.setEnabled(self._index_worker is None)
             rm.clicked.connect(lambda _=False, p=d.path: self._remove_dir(p))
             h.addWidget(rm)
             self.dirs_box.addWidget(card)
@@ -116,6 +121,8 @@ class LibraryPage(ScrollArea):
         self.vm.remove_dir(path)
         self._rebuild_dir_rows()
         self.refresh_status()
+        # 实体集已变：订阅页（browse 清单 / subs 重分类）随之刷新
+        self.libraryChanged.emit()
 
     # ---- 状态刷新（lib 构建与逐目录探测在 worker 线程同一任务内串行完成，
     #      UI 线程只消费纯数据，无先 probe 后 lib 的顺序竞态）----
@@ -185,9 +192,10 @@ class LibraryPage(ScrollArea):
             return
         for d in dirs:
             self.vm.mark_indexing(d)
+        # 先持 worker 再重排行：行内 upd/rm 按钮的在途禁用读该字段
+        self._index_worker = IndexWorker(dirs)
         self._rebuild_dir_rows()
         self._set_updating(True)
-        self._index_worker = IndexWorker(dirs)
         self._index_worker.progress.connect(self._on_index_progress)
         self._index_worker.finished_dir.connect(self._on_index_done)
         self._index_worker.failed.connect(self._on_index_failed)
@@ -210,6 +218,8 @@ class LibraryPage(ScrollArea):
         self._index_worker = None
         self._set_updating(False)
         self.refresh_status()
+        # 索引内容变了（新索引字体/去重变化），与删目录同病同治
+        self.libraryChanged.emit()
 
     def _set_updating(self, on: bool):
         """更新态切换：图标位换自绘旋转弧、文字换「取消更新」，宽度

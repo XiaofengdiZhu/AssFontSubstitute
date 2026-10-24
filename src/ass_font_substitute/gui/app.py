@@ -51,6 +51,11 @@ class AFSWindow(FluentWindow):
         self.addSubInterface(self.settings_page, FIF.SETTING, "设置",
                              NavigationItemPosition.BOTTOM)
         self.settings_page.bind_search_activity(self.subs_page)
+        # 库数据变化（删目录/索引更新完成）广播：预览页重拉清单、字幕页重分类
+        self.library_page.libraryChanged.connect(
+            self.browse_page.on_library_changed)
+        self.library_page.libraryChanged.connect(
+            self.subs_page.on_library_changed)
         # 保存方式/另存后缀双向同步：任一页改动回灌另一页（setter 不回写）
         self.subs_page.saveModeChanged.connect(
             self.settings_page.set_save_mode)

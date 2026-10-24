@@ -340,3 +340,24 @@ def test_zero_usage_keep_card_presentation_and_no_search(qapp, tmp_path, monkeyp
     page._continue_search("甲字体")            # 兜底：无字卡不派搜索工
     assert not [s for s in page.worker.submits
                 if s[0].startswith("newsearcher:")]
+
+
+def test_on_library_changed_reclassifies_and_defers_in_batch(qapp, tmp_path, monkeypatch):
+    # 字体库管理页广播（删目录/索引更新）：空闲态立即换代重分类；
+    # 解析批次中不打断——批末 _parse_arrived 才重算
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, _card, norm = _feed_replace_card(page, ent_a, ent_b)
+    assert page.vm.cards and norm in page._cards_ui
+
+    gen0 = page._gen
+    page.on_library_changed()
+    assert page._gen == gen0 + 1
+    assert not page.vm.cards and not page._cards_ui
+
+    page._parsing.add("q.ass")
+    gen1 = page._gen
+    page.on_library_changed()
+    assert page._gen == gen1                    # 批次中不立即重算
+    page._parse_arrived("q.ass")
+    assert page._gen == gen1 + 1

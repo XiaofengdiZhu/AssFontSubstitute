@@ -111,3 +111,53 @@ def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
             break
     assert page.vm.stats.get("fonts") == 1
     w.close()
+
+
+def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
+    # 删目录广播：browse 页真清数据（不是只挂 hint），subs 页换代重分类；
+    # 更新在途时目录行按钮（更新/删除）禁用
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    from tests.fonts import build_font
+    d = tmp_path / "fonts"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永宇", family="甲")
+    from PySide6.QtTest import QTest
+    from qfluentwidgets import ToolButton
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    s = Settings(tmp_path / "settings.json")
+    w = AFSWindow(s)
+    page = w.library_page
+    assert page.vm.add_dir(str(d)) is True
+    page.worker.submit("update", _update_dirs_job, [str(d)])
+    page.worker.submit("lib", _ensure_lib_job, [str(d)])
+    for _ in range(300):
+        QTest.qWait(20)
+        if page.vm.stats.get("fonts") == 1:
+            break
+    assert page.vm.stats.get("fonts") == 1
+    w.browse_page.reload_library()
+    for _ in range(300):
+        QTest.qWait(20)
+        if w.browse_page.pvm.entities:
+            break
+    assert len(w.browse_page.pvm.entities) == 1
+
+    # 更新在途：行内按钮禁用（_index_worker 先于重排行赋值）
+    page._index_worker = object()
+    page._rebuild_dir_rows()
+    row = page.dirs_box.itemAt(0).widget()
+    assert all(not b.isEnabled() for b in row.findChildren(ToolButton))
+    page._index_worker = None
+    page._rebuild_dir_rows()
+    row = page.dirs_box.itemAt(0).widget()
+    assert all(b.isEnabled() for b in row.findChildren(ToolButton))
+
+    gen0 = w.subs_page._gen
+    page._remove_dir(str(d))                    # → libraryChanged 广播
+    assert w.browse_page.pvm.entities == []
+    assert not w.browse_page.hint.isHidden()
+    assert w.browse_page.count_label.text() == "0 款字体"
+    assert w.subs_page._gen == gen0 + 1
+    w.close()

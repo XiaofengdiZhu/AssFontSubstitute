@@ -64,9 +64,15 @@ class BrowsePage(ScrollArea):
     def reload_library(self):
         dirs = tuple(self.settings.get("font_dirs"))
         if not dirs:
-            self.hint.show()
+            # 目录清空必须真清数据：只显 hint 会让旧字体列表留在提示下面
+            self.pvm.set_entities([])
+            self._reload_list()
             return
         self.worker.submit("blib", _lib_job, list(dirs))
+
+    def on_library_changed(self):
+        """字体库管理页删目录/索引更新后的广播：立即重拉，不等切页。"""
+        self.reload_library()
 
     def _on_result(self, tag, payload):
         if tag != "blib":
