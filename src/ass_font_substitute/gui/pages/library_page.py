@@ -8,10 +8,11 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
 from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.pages.subs_page import _ElidedLabel
-from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, IconWidget,
-                            InfoBadge, InfoBar, MessageBox, MessageBoxBase,
+from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget,
+                            GroupHeaderCardWidget, InfoBadge,
+                            InfoBar, MessageBox, MessageBoxBase,
                             PrimaryPushButton, PushButton, ScrollArea,
-                            StrongBodyLabel, SubtitleLabel, TextEdit,
+                            SubtitleLabel, TextEdit,
                             ToolButton, isDarkTheme, setFont)
 from qfluentwidgets import FluentIcon as FIF
 
@@ -108,37 +109,41 @@ class LibraryPage(ScrollArea):
             item = self.dirs_box.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        if not self.vm.dirs:
+            return
+        # 一张 GroupHeaderCardWidget 框住全部目录行（行间分隔线由组件管），
+        # 自带 48px 标题头不显示——只借「一卡多行」框架
+        card = GroupHeaderCardWidget(self)
+        card.headerView.hide()
+        card.separator.hide()
         for d in self.vm.dirs:
-            card = CardWidget()
-            h = QHBoxLayout(card)
-            h.setContentsMargins(16, 10, 12, 10)
-            h.setSpacing(12)
-            icon = IconWidget(FIF.FOLDER, card)
-            icon.setFixedSize(22, 22)
-            h.addWidget(icon, 0, Qt.AlignVCenter)
-            mid = QVBoxLayout()
-            mid.setSpacing(1)
-            path_lbl = _ElidedLabel(d.path)     # 窄窗中部省略，tooltip 全路径
-            path_lbl.setToolTip(d.path)
-            mid.addWidget(path_lbl)
-            sub = CaptionLabel(
-                f"文件 {d.files} · 字体 {d.fonts} · 支持简体 {d.sc}"
-                f" · 支持繁体 {d.tc} · 失败/旧版 {d.fail}")
-            mid.addWidget(sub)
-            h.addLayout(mid, 1)
+            right = QWidget()
+            rh = QHBoxLayout(right)
+            rh.setContentsMargins(0, 0, 0, 0)
+            rh.setSpacing(8)
             badge = self._BADGE_MAKER.get(d.state, InfoBadge.info)(d.badge)
-            h.addWidget(badge, 0, Qt.AlignVCenter)
+            rh.addWidget(badge, 0, Qt.AlignVCenter)
             upd = ToolButton(FIF.SYNC)
             upd.setToolTip("更新该目录索引")
             upd.setEnabled(self._index_worker is None and d.state != "indexing")
             upd.clicked.connect(lambda _=False, p=d.path: self._start_update_dir(p))
-            h.addWidget(upd, 0, Qt.AlignVCenter)
+            rh.addWidget(upd, 0, Qt.AlignVCenter)
             rm = ToolButton(FIF.DELETE)
             # 更新在途禁删：索引线程正写该目录 db，删后状态失配
             rm.setEnabled(self._index_worker is None)
             rm.clicked.connect(lambda _=False, p=d.path: self._remove_dir(p))
-            h.addWidget(rm, 0, Qt.AlignVCenter)
-            self.dirs_box.addWidget(card)
+            rh.addWidget(rm, 0, Qt.AlignVCenter)
+
+            group = card.addGroup(FIF.FOLDER, "",
+                                  f"文件 {d.files} · 字体 {d.fonts}"
+                                  f" · 支持简体 {d.sc} · 支持繁体 {d.tc}"
+                                  f" · 失败/旧版 {d.fail}", right)
+            # 标题位放路径（组件 titleLabel 不省略，换 _ElidedLabel 防窄窗顶飞）
+            path_lbl = _ElidedLabel(d.path)
+            path_lbl.setToolTip(d.path)
+            group.textLayout.insertWidget(0, path_lbl)
+            group.titleLabel.hide()
+        self.dirs_box.addWidget(card)
 
     def _add_dir(self):
         d = pick_existing_dir(self, self.settings, "选择字体目录", "library")
