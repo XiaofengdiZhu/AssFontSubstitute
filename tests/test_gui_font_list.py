@@ -170,3 +170,35 @@ def test_preview_bar_reapplies_tiles_on_theme_flip(qapp):
         setTheme(Theme.AUTO)
         if bar is not None:
             bar.deleteLater()
+
+
+def test_preview_bar_theme_flip_at_zero_height_defers_to_show(qapp):
+    # 高度 0（布局未跑/被压塌）时换肤跳过重贴（缩到 0 得 null 贴图），
+    # 旧贴图保留；首次 show 时 showEvent 用缓存 tiles 补贴到新主题
+    from PySide6.QtCore import QPoint
+    from qfluentwidgets import Theme
+    from qfluentwidgets import setTheme
+
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
+
+    pvm = PreviewVM()
+    pvm.put_tiles(("fp1", "永"), [_solid_tile()])
+    bar = None
+    try:
+        setTheme(Theme.DARK)
+        bar = PreviewBar(_FakeWorker(), pvm, _ent("fp1", "甲"), "永", "t")
+        bar.setFixedHeight(0)                  # 模拟未布局/被压塌
+        setTheme(Theme.LIGHT)
+        qapp.processEvents()
+        ink = bar.pixmap().toImage().pixelColor(QPoint(10, 10))
+        assert (ink.red(), ink.green(), ink.blue()) == (255, 255, 255)   # 跳过：旧贴图在
+        bar.setFixedHeight(28)
+        bar.show()
+        qapp.processEvents()
+        ink = bar.pixmap().toImage().pixelColor(QPoint(10, 10))
+        assert (ink.red(), ink.green(), ink.blue()) == (0, 0, 0)         # show 补贴
+    finally:
+        setTheme(Theme.AUTO)
+        if bar is not None:
+            bar.deleteLater()

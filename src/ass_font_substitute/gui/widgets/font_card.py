@@ -66,7 +66,9 @@ class _PillLabel(QLabel):
         font.setPixelSize(11)
         self.setFont(font)
         self.setContentsMargins(8, 1, 8, 1)
-        qconfig.themeChanged.connect(lambda _: self.update())
+        # 绑定方法连接：随接收者析构自动断开；lambda 挂永生 qconfig 上，
+        # 卡片 deleteLater 后死槽每次换肤喷 RuntimeError 噪声且连接泄漏
+        qconfig.themeChanged.connect(self.update)
 
     def paintEvent(self, e):
         painter = QPainter(self)

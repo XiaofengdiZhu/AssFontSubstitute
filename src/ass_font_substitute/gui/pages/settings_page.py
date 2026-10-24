@@ -327,7 +327,8 @@ class SettingsPage(ScrollArea):
         g4.addSettingCard(repo_card)
         v.addWidget(g4)
 
-        # 组标题换主题跟随色（须在 _add_sim_pending_hint 前：后者要搬 titleLabel）
+        # 组标题换主题跟随色（replaceWidget 递归进子布局，_add_sim_pending_hint
+        # 先搬过 titleLabel 也照样找得到、换得动）
         for g in (g0, g1, g2, g3, g4):
             _theme_aware_title(g)
 

@@ -55,12 +55,25 @@ class PreviewBar(CaptionLabel):
         self._entity, self._text, self._tag = entity, text, tag
         self._inflight = False
         self._tiles = None                   # 最近一次贴上的 tiles，换肤重贴用
+        self._stale_theme = False            # 不可见期换肤未贴上，showEvent 补
         qconfig.themeChanged.connect(self._on_theme_changed)
         self._render()
 
     def _on_theme_changed(self, _theme):
-        # 贴图字形色按主题取：换肤用已缓存的 tiles 原地重贴（零渲染开销）
-        if self._tiles is not None:
+        # 贴图字形色按主题取：换肤用已缓存的 tiles 原地重贴（零渲染开销）。
+        # 高度为 0（布局未跑/被压塌）时缩图得 null，跳过并记脏留给 showEvent
+        if self._tiles is None:
+            return
+        if self.height() > 0:
+            self._apply(self._tiles)
+        else:
+            self._stale_theme = True
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        # 不可见期（高度 0 跳过）换肤的补贴：旧贴图非空，得靠脏标记识别
+        if self._stale_theme and self.height() > 0:
+            self._stale_theme = False
             self._apply(self._tiles)
 
     def _render(self):
