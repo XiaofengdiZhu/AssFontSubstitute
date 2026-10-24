@@ -40,25 +40,7 @@ class LibraryPage(ScrollArea):
         self.setWidget(self.view)
         self.setWidgetResizable(True)
 
-        head = QHBoxLayout()
-        self.btn_add = PushButton(FIF.FOLDER_ADD, "添加字体目录")
-        self.btn_refresh = PushButton(FIF.SYNC, "刷新状态")
-        self.btn_update = PrimaryPushButton(FIF.UPDATE, "更新全部索引")
-        for w in (self.btn_add, self.btn_refresh, self.btn_update):
-            head.addWidget(w)
-        head.addStretch(1)
-        v.addLayout(head)
-
-        # 更新态：按钮原地变「[旋转环]取消更新」，宽度锁定防文字变短塌缩
-        self._busy_timer = QTimer(self)
-        self._busy_timer.setInterval(50)
-        self._busy_timer.timeout.connect(self._tick_busy)
-        self._busy_i = 0
-        self._busy_icons: list[QIcon] | None = None
-
-        self.btn_failures = PushButton(FIF.INFO, "查看失败清单")
-        v.addWidget(self.btn_failures, 0, Qt.AlignLeft)
-
+        # 统计条置顶、操作条其下：打开页先读库概况再看到操作
         self.stat_cards: dict[str, BodyLabel] = {}
         stat_card = CardWidget()
         stat_row = QHBoxLayout(stat_card)
@@ -85,6 +67,24 @@ class LibraryPage(ScrollArea):
             col.addWidget(val)
             stat_row.addLayout(col, 1)
         v.addWidget(stat_card)
+
+        head = QHBoxLayout()
+        self.btn_add = PushButton(FIF.FOLDER_ADD, "添加字体目录")
+        self.btn_refresh = PushButton(FIF.SYNC, "刷新状态")
+        self.btn_failures = PushButton(FIF.INFO, "查看失败清单")
+        self.btn_update = PrimaryPushButton(FIF.UPDATE, "更新全部索引")
+        for b in (self.btn_add, self.btn_refresh, self.btn_failures):
+            head.addWidget(b)
+        head.addStretch(1)
+        head.addWidget(self.btn_update)     # 主操作靠右
+        v.addLayout(head)
+
+        # 更新态：按钮原地变「[旋转环]取消更新」，宽度锁定防文字变短塌缩
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setInterval(50)
+        self._busy_timer.timeout.connect(self._tick_busy)
+        self._busy_i = 0
+        self._busy_icons: list[QIcon] | None = None
 
         self.dirs_box = QVBoxLayout()
         v.addLayout(self.dirs_box)
