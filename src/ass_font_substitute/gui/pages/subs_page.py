@@ -5,9 +5,9 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
-                            FlowLayout, InfoBadge, InfoBar, LineEdit,
+                            ComboBox, FlowLayout, InfoBadge, InfoBar, LineEdit,
                             PrimaryPushButton, PushButton, ScrollArea,
-                            SegmentedWidget, StrongBodyLabel, SwitchButton)
+                            SegmentedWidget, StrongBodyLabel)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.jobs import (apply_to_file, classify_one,
@@ -26,6 +26,8 @@ class SubsPage(ScrollArea):
     UI 线程的 _on_result / 信号槽里。"""
 
     searchActiveChanged = Signal(bool)   # 有无进行中的相似搜索（设置页提示用）
+    saveModeChanged = Signal(bool)       # 覆盖原文件？（设置页同步）
+    suffixChanged = Signal(str)          # 另存后缀变更（设置页同步）
 
     def __init__(self, settings, worker, parent=None):
         super().__init__(parent)
@@ -101,27 +103,33 @@ class SubsPage(ScrollArea):
         v.addStretch(1)
 
         bottom = QHBoxLayout()
-        # SwitchButton 构造参数是 Off 态文案、勾上显示 onText（默认 "On"）——
-        # 双态同文案才能当常驻标签用
-        self.sw_save = SwitchButton("另存替换后文件")
-        self.sw_save.setOnText("另存替换后文件")
-        self.sw_save.setChecked(True)
-        self.sw_overwrite = SwitchButton("覆盖原文件")
-        self.sw_overwrite.setOnText("覆盖原文件")
-        self.sw_save.checkedChanged.connect(self._on_save_toggle)
-        self.sw_overwrite.checkedChanged.connect(self._on_overwrite_toggle)
-        bottom.addWidget(self.sw_save)
-        bottom.addWidget(self.sw_overwrite)
-        bottom.addWidget(CaptionLabel(
-            f"另存后缀 {self.settings.get('save_suffix')}（设置页可改）"))
+        bottom.addWidget(CaptionLabel("保存方式:"))
+        self.save_mode = ComboBox()
+        self.save_mode.addItems(["另存为新文件", "覆盖原文件"])
+        self.save_mode.setFixedWidth(150)
+        self.save_mode.setCurrentIndex(
+            1 if self.settings.get("overwrite_default") else 0)
+        self.save_mode.currentIndexChanged.connect(self._on_save_mode)
+        bottom.addWidget(self.save_mode)
+        # 另存模式才需要后缀；编辑与设置页双向同步（suffixChanged 信号）
+        self.suffix_label = CaptionLabel("另存后缀:")
+        self.suffix_edit = LineEdit()
+        self.suffix_edit.setText(self.settings.get("save_suffix"))
+        self.suffix_edit.setFixedWidth(160)
+        self.suffix_edit.setClearButtonEnabled(True)
+        self.suffix_edit.editingFinished.connect(self._on_suffix_edit)
+        bottom.addWidget(self.suffix_label)
+        bottom.addWidget(self.suffix_edit)
         bottom.addStretch(1)
         self.replace_label = CaptionLabel("将替换 0 / 0 种字体")
         bottom.addWidget(self.replace_label)
-        self.btn_apply = PrimaryPushButton(FIF.PLAY, "应用替换")
+        self.btn_apply = PrimaryPushButton(FIF.PLAY, "替换并保存")
         self.btn_apply.setEnabled(False)
         self.btn_apply.clicked.connect(self._apply)
         bottom.addWidget(self.btn_apply)
         v.addLayout(bottom)
+        self._set_suffix_row_visible(
+            not self.settings.get("overwrite_default"))
 
         # ---- connect 段（控件就绪后统一接线）----
         self.btn_add.clicked.connect(self._add_files)
@@ -422,30 +430,46 @@ class SubsPage(ScrollArea):
         n, total = self.vm.replacement_counts()
         self.replace_label.setText(f"将替换 {n} / {total} 种字体")
         self.btn_apply.setEnabled(bool(self.vm.checked_parses())
-                                  and bool(self.vm.cards)
-                                  and (self.sw_save.isChecked()
-                                       or self.sw_overwrite.isChecked()))
+                                  and bool(self.vm.cards))
         active = any(c.searching for c in self.vm.cards)
         if active != self._search_active:
             self._search_active = active
             self.searchActiveChanged.emit(active)
 
-    # ---- 开关/联动 ----
-    def _on_save_toggle(self, checked):
-        if checked:                       # 另存 / 覆盖互斥：开一个关另一个
-            self.sw_overwrite.blockSignals(True)
-            self.sw_overwrite.setChecked(False)
-            self.sw_overwrite.blockSignals(False)
-        self.settings.set("overwrite_default", False)
-        self._update_summary()            # 全关时禁用应用条（spec §7）
-
-    def _on_overwrite_toggle(self, checked):
-        if checked:
-            self.sw_save.blockSignals(True)
-            self.sw_save.setChecked(False)
-            self.sw_save.blockSignals(False)
-        self.settings.set("overwrite_default", checked)
+    # ---- 保存方式/后缀（与设置页双向同步）----
+    def _on_save_mode(self, index):
+        overwrite = index == 1
+        self.settings.set("overwrite_default", overwrite)
+        self._set_suffix_row_visible(not overwrite)
+        self.saveModeChanged.emit(overwrite)
         self._update_summary()
+
+    def set_save_mode(self, overwrite: bool):
+        """设置页改了保存方式：只搬 UI（信号源头已写设置，不再回写）。"""
+        self.save_mode.blockSignals(True)
+        self.save_mode.setCurrentIndex(1 if overwrite else 0)
+        self.save_mode.blockSignals(False)
+        self._set_suffix_row_visible(not overwrite)
+        self._update_summary()
+
+    def _on_suffix_edit(self):
+        text = self.suffix_edit.text().strip()
+        try:
+            self.settings.set("save_suffix", text)
+        except ValueError:
+            InfoBar.error("后缀无效", "必须以点开头且非空，如 .substituted.ass",
+                          parent=self)
+            self.suffix_edit.setText(self.settings.get("save_suffix"))
+            return
+        self.suffixChanged.emit(self.settings.get("save_suffix"))
+
+    def set_save_suffix(self, text: str):
+        """设置页改了后缀：只搬 UI（editingFinished 不因 setText 触发）。"""
+        self.suffix_edit.setText(text)
+
+    def _set_suffix_row_visible(self, visible: bool):
+        self.suffix_label.setVisible(visible)
+        self.suffix_edit.setVisible(visible)
 
 
 def _fld(label: str, w: QWidget) -> QWidget:

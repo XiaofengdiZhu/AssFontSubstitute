@@ -51,6 +51,15 @@ class AFSWindow(FluentWindow):
         self.addSubInterface(self.settings_page, FIF.SETTING, "设置",
                              NavigationItemPosition.BOTTOM)
         self.settings_page.bind_search_activity(self.subs_page)
+        # 保存方式/另存后缀双向同步：任一页改动回灌另一页（setter 不回写）
+        self.subs_page.saveModeChanged.connect(
+            self.settings_page.set_save_mode)
+        self.settings_page.saveModeChanged.connect(
+            self.subs_page.set_save_mode)
+        self.subs_page.suffixChanged.connect(
+            self.settings_page.set_save_suffix)
+        self.settings_page.suffixChanged.connect(
+            self.subs_page.set_save_suffix)
         self.setWindowTitle("Ass 字体替补")
         self.resize(1100, 750)
 

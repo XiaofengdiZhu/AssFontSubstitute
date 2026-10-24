@@ -4,7 +4,7 @@ import os
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import QFileDialog
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, Dialog,
@@ -118,6 +118,9 @@ class _SampleEditBox(MessageBoxBase):
 
 
 class SettingsPage(ScrollArea):
+    saveModeChanged = Signal(bool)       # 覆盖原文件？（处理字幕页同步）
+    suffixChanged = Signal(str)          # 另存后缀变更（处理字幕页同步）
+
     def __init__(self, settings, worker, parent=None):
         super().__init__(parent)
         self.settings, self.worker = settings, worker
@@ -168,6 +171,17 @@ class SettingsPage(ScrollArea):
 
         # ── 输出 ─────────────────────────────────────────────
         g2 = SettingCardGroup("输出", self.view)
+        self.save_mode_card = SettingCard(
+            FIF.SAVE, "保存方式", "替换结果写回方式（与处理字幕页同步）", self)
+        self.save_mode_combo = ComboBox(self.save_mode_card)
+        self.save_mode_combo.addItems(["另存为新文件", "覆盖原文件"])
+        self.save_mode_combo.setFixedWidth(150)
+        self.save_mode_combo.setCurrentIndex(
+            1 if settings.get("overwrite_default") else 0)
+        self.save_mode_combo.currentIndexChanged.connect(self._on_save_mode)
+        self.save_mode_card.hBoxLayout.addWidget(
+            self.save_mode_combo, 0, Qt.AlignmentFlag.AlignRight)
+        self.save_mode_card.hBoxLayout.addSpacing(_SPACING)
         self.suffix_card = _WheelFreeCard(
             FIF.SAVE, "另存后缀", "替换结果另存的文件名后缀，须以点开头",
             self)
@@ -182,6 +196,7 @@ class SettingsPage(ScrollArea):
         self.sample_card = PushSettingCard(
             "编辑…", FIF.FONT, "对比文字", _sample_brief(settings.get("sample_text")), self)
         self.sample_card.clicked.connect(self._edit_sample)
+        g2.addSettingCard(self.save_mode_card)
         g2.addSettingCard(self.suffix_card)
         g2.addSettingCard(self.sample_card)
         v.addWidget(g2)
@@ -286,6 +301,22 @@ class SettingsPage(ScrollArea):
         if self._search_active:
             self.sim_pending_hint.show()
 
+    # ---- 保存方式/后缀（与处理字幕页双向同步）----
+    def _on_save_mode(self, index):
+        overwrite = index == 1
+        self.settings.set("overwrite_default", overwrite)
+        self.saveModeChanged.emit(overwrite)
+
+    def set_save_mode(self, overwrite: bool):
+        """处理字幕页改了保存方式：只搬 UI（源头已写设置，不再回写）。"""
+        self.save_mode_combo.blockSignals(True)
+        self.save_mode_combo.setCurrentIndex(1 if overwrite else 0)
+        self.save_mode_combo.blockSignals(False)
+
+    def set_save_suffix(self, text: str):
+        """处理字幕页改了后缀：setText 不触发 editingFinished，无回环。"""
+        self.suffix_edit.setText(text)
+
     def _save_suffix(self):
         try:
             self.settings.set("save_suffix", self.suffix_edit.text().strip())
@@ -293,6 +324,8 @@ class SettingsPage(ScrollArea):
             InfoBar.error("后缀无效", "必须以点开头且非空，如 .substituted.ass",
                           parent=self)
             self.suffix_edit.setText(self.settings.get("save_suffix"))
+            return
+        self.suffixChanged.emit(self.settings.get("save_suffix"))
 
     def _edit_sample(self):
         dlg = _SampleEditBox(self.settings.get("sample_text"), self)

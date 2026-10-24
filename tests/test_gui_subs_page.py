@@ -224,7 +224,7 @@ def test_apply_reentry_guard_disables_during_dispatch(qapp, tmp_path, monkeypatc
     assert page.btn_apply.isEnabled()               # 收尾经 _update_summary 恢复
 
 
-def test_preview_text_and_mutually_exclusive_switches(qapp, tmp_path, monkeypatch):
+def test_preview_text_and_save_mode_combo(qapp, tmp_path, monkeypatch):
     page = _make_page(qapp, tmp_path, monkeypatch)
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
     _usage, _card, _norm = _feed_replace_card(page, ent_a, ent_b)
@@ -234,17 +234,25 @@ def test_preview_text_and_mutually_exclusive_switches(qapp, tmp_path, monkeypatc
     assert page._cards_ui["甲字体"] is not old       # 旧卡弃置、新卡持同一 vm 卡
     assert page._cards_ui["甲字体"].card is page.vm.cards[0]
 
-    assert page.sw_save.isChecked() and not page.sw_overwrite.isChecked()
-    page.sw_overwrite.setChecked(True)              # 开覆盖 → 另存自动关
-    assert page.sw_save.isChecked() is False
+    assert page.save_mode.currentIndex() == 0       # 默认另存为新文件
+    assert not page.suffix_edit.isHidden()          # 另存模式显示后缀行
+    page.save_mode.setCurrentIndex(1)               # 切覆盖 → 落设置 + 收后缀行
     assert page.settings.get("overwrite_default") is True
-    page.sw_save.setChecked(True)                   # 开另存 → 覆盖自动关
-    assert page.sw_overwrite.isChecked() is False
+    assert page.suffix_edit.isHidden()
+    page.save_mode.setCurrentIndex(0)               # 切回另存 → 后缀行复出
     assert page.settings.get("overwrite_default") is False
-    page.sw_save.setChecked(False)                  # §7：全关 → 应用条禁用
-    assert not page.btn_apply.isEnabled()
-    page.sw_save.setChecked(True)                   # 恢复另存 → 重新可用
-    assert page.btn_apply.isEnabled()
+    assert not page.suffix_edit.isHidden()
+    page.set_save_mode(True)                        # 设置页同步：只搬 UI 不回写
+    assert page.save_mode.currentIndex() == 1
+    assert page.settings.get("overwrite_default") is False
+
+    page.suffix_edit.setText(".fixed.ass")          # 编辑完成 → 落设置
+    page.suffix_edit.editingFinished.emit()
+    assert page.settings.get("save_suffix") == ".fixed.ass"
+    page.suffix_edit.setText("bad")                 # 非法后缀 → 报错回退
+    page.suffix_edit.editingFinished.emit()
+    assert page.settings.get("save_suffix") == ".fixed.ass"
+    assert page.suffix_edit.text() == ".fixed.ass"
 
 
 def test_zero_usage_keep_card_presentation_and_no_search(qapp, tmp_path, monkeypatch):
