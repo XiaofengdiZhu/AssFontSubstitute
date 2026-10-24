@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, qInstallMessageHandler
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF, FluentWindow, NavigationItemPosition
@@ -15,6 +15,24 @@ from ass_font_substitute.gui.pages.subs_page import SubsPage
 from ass_font_substitute.gui.settings_store import Settings
 from ass_font_substitute.gui.widgets.dialog_ani import patch_mask_dialog_animation
 from ass_font_substitute.gui.workers import CoreWorker
+
+# qfw 的 QSS 用 font 简写（如 `font: 14px 'Segoe UI',...`）造 pixel 字体
+# （pointSize == -1）。首次悬停触发重绘时 Qt 内部对该字体走 setPointSize(-1)
+# 喷一条无害警告（temp/probe_pointsize_fix.py 每进程仅一条，其余消息不受
+# 影响）。无 C++ 栈帧可修（qInstallMessageHandler 栈里只有 qWait），过滤之，
+# 其余 Qt 消息按默认格式原样转发。
+_POINT_SIZE_WARN = "QFont::setPointSize: Point size <= 0"
+
+
+def _forward_qt_messages(_type, ctx, message: str) -> None:
+    if _POINT_SIZE_WARN in message:
+        return
+    category = ctx.category
+    if category and category != "default":
+        sys.stderr.write(f"{category}: {message}\n")
+    else:
+        sys.stderr.write(message + "\n")
+    sys.stderr.flush()
 
 
 class AFSWindow(FluentWindow):
@@ -55,6 +73,7 @@ def main() -> int:
             "AssFontSubstitute.App")
     # fontTools 解析怪字体喷大量 warning（post.stringData 等），界面程序静默
     logging.getLogger("fontTools").setLevel(logging.ERROR)
+    qInstallMessageHandler(_forward_qt_messages)
     app = QApplication(sys.argv)
     # 弹窗开/关动画换自绘层（Ghost Downloader 方案）：顶层窗口零特效，
     # 杜绝顶层特效引发的 native 窗口重建闪现带标题栏小窗
