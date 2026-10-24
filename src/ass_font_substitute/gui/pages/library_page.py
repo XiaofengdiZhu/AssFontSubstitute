@@ -90,6 +90,11 @@ class LibraryPage(ScrollArea):
             badge = BodyLabel(d.badge)
             badge.setObjectName("dirBadge")
             h.addWidget(badge)
+            upd = ToolButton(FIF.SYNC)
+            upd.setToolTip("更新该目录索引")
+            upd.setEnabled(self._index_worker is None and d.state != "indexing")
+            upd.clicked.connect(lambda _=False, p=d.path: self._start_update_dir(p))
+            h.addWidget(upd)
             rm = ToolButton(FIF.DELETE)
             rm.clicked.connect(lambda _=False, p=d.path: self._remove_dir(p))
             h.addWidget(rm)
@@ -157,6 +162,16 @@ class LibraryPage(ScrollArea):
     # ---- 索引更新 ----
     def _start_update(self):
         dirs = [d.path for d in self.vm.dirs]
+        if dirs:
+            self._launch_update(dirs)
+
+    def _start_update_dir(self, path):
+        """单目录更新：与「更新全部索引」同一条 IndexWorker 通路，
+        任一更新在途即不可再启（索引线程独占写库）。"""
+        if path in [d.path for d in self.vm.dirs]:
+            self._launch_update([path])
+
+    def _launch_update(self, dirs: list[str]):
         if not dirs or self._index_worker is not None:
             return
         for d in dirs:
