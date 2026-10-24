@@ -5,12 +5,14 @@ from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFileDialog
+from PySide6.QtWidgets import QFileDialog
 from PySide6.QtWidgets import QVBoxLayout, QWidget
-from qfluentwidgets import (BodyLabel, ComboBox, Dialog, HyperlinkCard,
-                            InfoBar, LineEdit, PrimaryPushSettingCard,
+from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, Dialog,
+                            HyperlinkCard, InfoBar, LineEdit,
+                            MessageBoxBase, PrimaryPushSettingCard,
                             PushSettingCard, ScrollArea, SettingCard,
-                            SettingCardGroup, Slider, TextEdit, ToolButton)
+                            SettingCardGroup, Slider, SubtitleLabel, TextEdit,
+                            ToolButton)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.settings_store import (COV_BOUNDS, SIM_BOUNDS,
@@ -90,6 +92,29 @@ class _SpinBoxCard(_WheelFreeCard):
         self.hBoxLayout.addSpacing(_SPACING)
         self.spin.installEventFilter(self)
         self.spin.valueChanged.connect(on_commit)
+
+
+class _SampleEditBox(MessageBoxBase):
+    """编辑对比文字：fluent 风格弹窗（原生 QDialog 与页面风格割裂）。"""
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(parent)
+        self.titleLabel = SubtitleLabel("编辑相似度对比文字")
+        warn = CaptionLabel("保存后已有的相似度结果将全部失效，"
+                            "下次使用时自动按新文字重新计算。")
+        warn.setWordWrap(True)
+        self.edit = TextEdit()
+        self.edit.setPlainText(text)
+        self.edit.setFixedHeight(220)
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(warn)
+        self.viewLayout.addWidget(self.edit)
+        self.yesButton.setText("保存")
+        self.cancelButton.setText("取消")
+        self.widget.setMinimumWidth(560)
+        self.edit.textChanged.connect(
+            lambda: self.yesButton.setEnabled(bool(self.edit.toPlainText().strip())))
+        self.yesButton.setEnabled(bool(text.strip()))
 
 
 class SettingsPage(ScrollArea):
@@ -239,24 +264,11 @@ class SettingsPage(ScrollArea):
             self.suffix_edit.setText(self.settings.get("save_suffix"))
 
     def _edit_sample(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("编辑相似度对比文字")
-        dlg.resize(480, 320)
-        v = QVBoxLayout(dlg)
-        warn = BodyLabel("保存后已有的相似度结果将全部失效，下次使用时自动按新文字重新计算。")
-        warn.setWordWrap(True)
-        v.addWidget(warn)
-        edit = TextEdit()
-        edit.setPlainText(self.settings.get("sample_text"))
-        v.addWidget(edit)
-        box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        box.accepted.connect(dlg.accept)
-        box.rejected.connect(dlg.reject)
-        v.addWidget(box)
+        dlg = _SampleEditBox(self.settings.get("sample_text"), self)
         if dlg.exec():
             try:
-                self.settings.set("sample_text", edit.toPlainText())
-                self.sample_card.setContent(_sample_brief(edit.toPlainText()))
+                self.settings.set("sample_text", dlg.edit.toPlainText())
+                self.sample_card.setContent(_sample_brief(dlg.edit.toPlainText()))
             except ValueError:
                 InfoBar.error("对比文字不能为空", "", parent=self)
 
