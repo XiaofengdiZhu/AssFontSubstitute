@@ -27,6 +27,8 @@ from PySide6.QtWidgets import QWidget
 from qfluentwidgets.common.animation import FluentAnimation
 from qfluentwidgets.components.dialog_box.mask_dialog_base import MaskDialogBase
 
+from ass_font_substitute.gui.widgets.primary_text import tune
+
 _FADE_IN_MS = 200
 _FADE_OUT_MS = 100
 _SLIDE_MS = 300
@@ -44,8 +46,16 @@ def patch_mask_dialog_animation() -> None:
     MaskDialogBase.done = _done
 
 
+def _tune_dialog_buttons(dialog: MaskDialogBase) -> None:
+    """弹窗按钮懒创建（MessageBox yesButton 等 primary 按钮出厂白字），
+    显示前按当前强调色亮度补调，动画截图截到的就是修过的样子。"""
+    for child in dialog.findChildren(QWidget):
+        tune(child)
+
+
 def _show_event(dialog: MaskDialogBase, e) -> None:
     QDialog.showEvent(dialog, e)
+    _tune_dialog_buttons(dialog)
     _AnimationLayer(dialog, is_closing=False)
 
 

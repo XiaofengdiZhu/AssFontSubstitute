@@ -36,6 +36,7 @@ DEFAULTS: dict = {
     "last_dirs": {},                               # 各对话框上次目录 {scope: 路径}
     "language": "zh-Hans",                         # 界面语言（国际化待接入，暂存储值）
     "theme": "auto",                               # auto/light/dark
+    "theme_color": "",                             # 强调色 #rrggbb；空=跟随系统
     "bg_effect": "mica",                           # 窗口材质；Win10 下 Mica 类自动退化为实色
 }
 
@@ -50,6 +51,8 @@ _ENUM_KEYS = {
     "bg_effect": {"mica", "mica_alt", "acrylic", "aero", "none"},
 }
 _SUFFIX_RE = re.compile(r"^\..+$")
+# 强调色：空串=跟随系统；非空必须 #rrggbb（ColorDialog c.name() 出货格式）
+_THEME_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class Settings(QObject):
@@ -103,6 +106,9 @@ class Settings(QObject):
                 elif k == "save_suffix" and isinstance(v, str) \
                         and _SUFFIX_RE.match(v):
                     self._data[k] = v           # 存量后缀复验，与 set 同规则
+                elif k == "theme_color" and isinstance(v, str) \
+                        and (v == "" or _THEME_COLOR_RE.match(v)):
+                    self._data[k] = v           # 空串=跟随系统，存量复验同规则
                 elif (k in ("cache_path",) and isinstance(v, str)) or (k in _ENUM_KEYS and v in _ENUM_KEYS[k]):
                     self._data[k] = v
                 elif k == "last_dirs" and isinstance(v, dict) \
@@ -122,6 +128,9 @@ class Settings(QObject):
             raise ValueError("对比文字不能为空")
         if key == "save_suffix" and not (isinstance(value, str) and _SUFFIX_RE.match(value)):
             raise ValueError("另存后缀必须以点开头且非空，如 .substituted.ass")
+        if key == "theme_color" and not (value == ""
+                                         or (isinstance(value, str) and _THEME_COLOR_RE.match(value))):
+            raise ValueError("强调色必须是 #rrggbb 十六进制色，留空跟随系统")
         if key in _FLOAT_KEYS and isinstance(value, float) \
                 and not math.isfinite(value):
             raise ValueError(f"{key} 必须是有限数值")

@@ -276,6 +276,55 @@ def test_window_applies_stored_theme_and_effect(qapp, tmp_path, monkeypatch):
         w.close()
 
 
+def test_theme_color_custom_follow_and_fallback(qapp, tmp_path, monkeypatch):
+    # 强调色三态：自定义 #rrggbb 直接生效；跟随系统取 monkeypatch 的系统色；
+    # 系统色取不到回落 qfw 出厂色 #009faa。setThemeColor 全局，finally 复位
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from PySide6.QtGui import QColor
+    from qfluentwidgets import Theme
+    from qfluentwidgets import qconfig
+    from qfluentwidgets import setTheme
+    from qfluentwidgets import setThemeColor
+
+    import ass_font_substitute.gui.app as app_mod
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    def reset():
+        setThemeColor("#009faa", save=False)      # qfw 出厂色复位防污染
+
+    try:
+        reset()
+        s = Settings(tmp_path / "s.json")
+        # 回归：强调色应用在建页前（主题先行约束），页面 primary 按钮当时
+        # 不存在——建页后必须补一轮 tune，否则浅强调色下重启白字不可读
+        s.set("theme_color", "#f5c1cb")
+        w = AFSWindow(s)
+        assert QColor(qconfig.themeColor.value) == QColor("#f5c1cb")
+        assert "rgba(0, 0, 0" in w.library_page.btn_update.property(
+            "lightCustomQss")
+
+        # 切自定义深色：覆盖撤销 + 色值生效
+        s.set("theme_color", "#0065d5")
+        assert QColor(qconfig.themeColor.value) == QColor("#0065d5")
+        assert not w.library_page.btn_update.property("lightCustomQss")
+
+        # 切跟随系统：取 monkeypatch 的系统强调色（经 store 信号驱动）
+        monkeypatch.setattr(app_mod, "_system_accent",
+                            lambda: QColor("#112233"))
+        s.set("theme_color", "")
+        assert QColor(qconfig.themeColor.value) == QColor("#112233")
+
+        # 系统强调色取不到：回落 qfw 出厂色
+        monkeypatch.setattr(app_mod, "_system_accent", lambda: None)
+        w._apply_theme_color("")
+        assert QColor(qconfig.themeColor.value) == QColor("#009faa")
+    finally:
+        reset()
+        setTheme(Theme.AUTO)
+        w.close()
+
+
 def test_dark_theme_pages_are_dark(qapp, tmp_path, monkeypatch):
     # 回归：subs/library/browse 三页 ScrollArea 默认画调色板底（浅色），
     # 深色主题下整页亮块；enableTransparentBackground 后页面底透出窗口

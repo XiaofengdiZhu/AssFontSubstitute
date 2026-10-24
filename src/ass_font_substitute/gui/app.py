@@ -20,6 +20,7 @@ from qfluentwidgets import Theme
 from qfluentwidgets import isDarkTheme
 from qfluentwidgets import qconfig
 from qfluentwidgets import setTheme
+from qfluentwidgets import setThemeColor
 from qfluentwidgets.common.style_sheet import updateStyleSheet
 from qfluentwidgets.window import SplashScreen
 
@@ -29,6 +30,8 @@ from ass_font_substitute.gui.pages.settings_page import SettingsPage
 from ass_font_substitute.gui.pages.subs_page import SubsPage
 from ass_font_substitute.gui.settings_store import Settings
 from ass_font_substitute.gui.widgets.dialog_ani import patch_mask_dialog_animation
+from ass_font_substitute.gui.widgets.primary_text import patch_primary_icon
+from ass_font_substitute.gui.widgets.primary_text import tune_all
 from ass_font_substitute.gui.workers import CoreWorker
 
 # qfw 的 QSS 用 font 简写（如 `font: 14px 'Segoe UI',...`）造 pixel 字体
@@ -52,6 +55,21 @@ def _forward_qt_messages(_type, ctx, message: str) -> None:
 
 # 设置页 theme 值 → qfw Theme
 _THEME_OF = {"auto": Theme.AUTO, "light": Theme.LIGHT, "dark": Theme.DARK}
+
+# 强调色「跟随系统」的兜底：qfw 出厂主题色（getSystemAccentColor 失败/非
+# win/mac 平台时用）；save=False 一律不落 qconfig 自己的 config.json
+_DEFAULT_THEME_COLOR = QColor("#009faa")
+
+
+def _system_accent() -> QColor | None:
+    """Windows/macOS 系统强调色；取不到（其他平台/注册表缺失）返回 None。"""
+    if sys.platform not in ("win32", "darwin"):
+        return None
+    try:
+        from qframelesswindow.utils import getSystemAccentColor
+        return getSystemAccentColor()
+    except Exception:
+        return None
 
 
 class _Splash(SplashScreen):
@@ -79,6 +97,7 @@ class AFSWindow(FluentWindow):
         self.settings = settings or Settings()
         # 先定主题再建页：页面里有按当前主题取色的自绘控件（统计分隔线/药丸）
         setTheme(_THEME_OF[self.settings.get("theme")])
+        self._apply_theme_color(self.settings.get("theme_color"))
         self._apply_bg_effect(self.settings.get("bg_effect"))
         self.worker = CoreWorker(self.settings)
         self.worker.start()
@@ -92,6 +111,9 @@ class AFSWindow(FluentWindow):
         self.addSubInterface(self.settings_page, FIF.SETTING, "设置",
                              NavigationItemPosition.BOTTOM)
         self.settings_page.bind_search_activity(self.subs_page)
+        # 启动强调色应用在建页前（主题先行约束），页面按钮当时还不存在——
+        # 建页后补一轮 primary 文字色调优，否则重启后存量浅强调色下白字
+        tune_all()
         # 库数据变化（删目录/索引更新完成）广播：预览页重拉清单、字幕页重分类
         self.library_page.libraryChanged.connect(
             self.browse_page.on_library_changed)
@@ -116,6 +138,8 @@ class AFSWindow(FluentWindow):
         # 不用 qfw SystemThemeListener——win32 分支卡在 darkdetect 原生循环
         # 里收不了尾，进程退出会炸
         self._last_sys_theme = darkdetect.theme()
+        # 强调色跟随系统：轮询同款定时器里捎带查系统强调色（注册表读，廉价）
+        self._last_sys_accent = _system_accent()
         self._sys_theme_timer = QTimer(self)
         self._sys_theme_timer.setInterval(2000)
         self._sys_theme_timer.timeout.connect(self._poll_system_theme)
@@ -129,9 +153,20 @@ class AFSWindow(FluentWindow):
             self._apply_theme(value)
         elif key == "bg_effect":
             self._apply_bg_effect(value)
+        elif key == "theme_color":
+            self._apply_theme_color(value)
 
     def _apply_theme(self, name: str):
         setTheme(_THEME_OF[name])
+
+    def _apply_theme_color(self, stored: str):
+        """强调色：非空 #rrggbb 直接用；空=跟随系统（取不到用 qfw 出厂色）。
+        save=False：qconfig 自持的 config.json 与本项目设置无关，不落盘。"""
+        c = QColor(stored) if stored else _system_accent()
+        setThemeColor(c if c is not None else _DEFAULT_THEME_COLOR, save=False)
+        # qfw 缺陷：primary 按钮文字色写死白，浅色强调色下不可读——按
+        # 亮度换深色字（弹窗按钮懒创建，显示前由 dialog_ani 钩子补调）
+        tune_all()
 
     def _apply_bg_effect(self, effect: str | None = None):
         """按设置贴窗口材质。FluentWindow 在 Win11 出厂即开 Mica；其余材质
@@ -159,6 +194,7 @@ class AFSWindow(FluentWindow):
             self.setBackgroundColor(QColor(0, 0, 0, 0))   # 材质透出：底色透明
 
     def _poll_system_theme(self):
+        self._poll_system_accent()          # 强调色跟随独立于主题模式
         if self.settings.get("theme") != "auto":
             return
         t = darkdetect.theme()
@@ -168,6 +204,15 @@ class AFSWindow(FluentWindow):
         qconfig.theme = Theme.AUTO          # 重解析 auto → 新的系统明暗
         updateStyleSheet()
         qconfig.themeChangedFinished.emit()
+
+    def _poll_system_accent(self):
+        """「跟随系统」强调色在系统换色后 2s 内跟上；自定义颜色不受影响。"""
+        if self.settings.get("theme_color"):
+            return
+        c = _system_accent()
+        if c is not None and c != self._last_sys_accent:
+            self._last_sys_accent = c
+            setThemeColor(c, save=False)
 
     def closeEvent(self, e):
         self.library_page.shutdown()        # 先汇合在途索引线程（写库中不能退）
@@ -190,6 +235,7 @@ def main() -> int:
     logging.getLogger("fontTools").setLevel(logging.ERROR)
     qInstallMessageHandler(_forward_qt_messages)
     app = QApplication(sys.argv)
+    patch_primary_icon()        # qfw primary 图标画死反白，浅强调色下换深色
     # 弹窗开/关动画换自绘层（Ghost Downloader 方案）：顶层窗口零特效，
     # 杜绝顶层特效引发的 native 窗口重建闪现带标题栏小窗
     patch_mask_dialog_animation()

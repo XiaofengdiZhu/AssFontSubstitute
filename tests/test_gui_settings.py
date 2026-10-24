@@ -354,3 +354,82 @@ def test_value_changed_cross_thread_queued(qapp, tmp_path):
     k, v, th = got[0]
     assert (k, v) == ("cache_path", str(tmp_path / "c"))
     assert th is threading.main_thread()          # 槽跑在接收者线程
+
+
+def test_theme_color_store_roundtrip_and_reject(tmp_path):
+    # 强调色：空串=跟随系统；合法 #rrggbb 落盘回读；非法拒收；存量坏值回落
+    import json as _json
+
+    s = Settings(tmp_path / "s.json")
+    assert s.get("theme_color") == ""
+    s.set("theme_color", "#0065d5")
+    s2 = Settings(tmp_path / "s.json")
+    assert s2.get("theme_color") == "#0065d5"
+    s.set("theme_color", "")                      # 回跟随系统
+    assert s.get("theme_color") == ""
+    for bad in ("red", "#12345", "#0065d5ff", "0065d5", None):
+        with pytest.raises(ValueError):
+            s.set("theme_color", bad)
+    f = tmp_path / "bad.json"
+    f.write_text(_json.dumps({"theme_color": "hotpink"}), "utf-8")
+    assert Settings(f).get("theme_color") == ""
+
+
+def test_accent_card_follow_custom_and_dialog(qapp, tmp_path, monkeypatch):
+    # 强调色卡：存量自定义→选项「自定义…」+内容显色值；切跟随落空串；
+    # 自定义弹 fluent 取色器，确认才落 store；取消回退「跟随系统」
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Signal
+    from PySide6.QtGui import QColor
+
+    import ass_font_substitute.gui.pages.settings_page as sp
+    from ass_font_substitute.gui.pages.settings_page import SettingsPage
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def submit(self, *a):
+            pass
+
+    class _DlgOk(QObject):
+        colorChanged = Signal(QColor)
+
+        def __init__(self, color, title, parent):
+            super().__init__()
+            self.init_color = color
+
+        def exec(self):
+            self.colorChanged.emit(QColor("#123456"))
+
+    class _DlgCancel(QObject):
+        colorChanged = Signal(QColor)
+
+        def __init__(self, color, title, parent):
+            super().__init__()
+
+        def exec(self):
+            pass                                  # 取消：无信号
+
+    s = Settings(tmp_path / "s.json")
+    s.set("theme_color", "#0065d5")
+    page = SettingsPage(s, _FakeWorker())
+    assert page.accent_combo.currentIndex() == 1
+    assert "#0065d5" in page.accent_card.contentLabel.text()
+
+    # activated 驱动（同项重选照发）；程序化 setCurrentIndex 不触发，
+    # 故直接调 handler 模拟用户选择（combo 视觉态由用户操作自带，不断言）
+    page._on_accent(0)                            # 切跟随系统
+    assert s.get("theme_color") == ""
+
+    monkeypatch.setattr(sp, "ColorDialog", _DlgCancel)
+    page._on_accent(1)                            # 取消：回退跟随系统
+    assert s.get("theme_color") == ""
+    assert page.accent_combo.currentIndex() == 0  # handler 主动回退
+
+    monkeypatch.setattr(sp, "ColorDialog", _DlgOk)
+    page._on_accent(1)                            # 确认：落 store
+    assert s.get("theme_color") == "#123456"
+
+    page._on_accent(1)                            # 回归：已停在自定义再选仍弹窗
+    assert s.get("theme_color") == "#123456"

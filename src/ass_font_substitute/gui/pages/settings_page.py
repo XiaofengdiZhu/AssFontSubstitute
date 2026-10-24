@@ -8,11 +8,13 @@ from pathlib import Path
 from PySide6.QtCore import QEvent
 from PySide6.QtCore import Qt
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import BodyLabel
 from qfluentwidgets import CaptionLabel
+from qfluentwidgets import ColorDialog
 from qfluentwidgets import ComboBox
 from qfluentwidgets import Dialog
 from qfluentwidgets import FluentIcon as FIF
@@ -29,6 +31,7 @@ from qfluentwidgets import Slider
 from qfluentwidgets import SubtitleLabel
 from qfluentwidgets import TextEdit
 from qfluentwidgets import ToolButton
+from qfluentwidgets import qconfig
 from qfluentwidgets import setFont
 
 from ass_font_substitute.gui.lastdir import pick_existing_dir
@@ -220,8 +223,26 @@ class SettingsPage(ScrollArea):
         self.bg_card.hBoxLayout.addWidget(self.bg_combo, 0,
                                           Qt.AlignmentFlag.AlignRight)
         self.bg_card.hBoxLayout.addSpacing(_SPACING)
+        self.accent_card = _WheelFreeCard(
+            FIF.PALETTE, "强调色",
+            "界面控件的强调色；跟随系统取 Windows 主题色，或自定义", self)
+        self.accent_combo = ComboBox(self.accent_card)
+        self.accent_combo.addItems(["跟随系统", "自定义…"])
+        self.accent_combo.setCurrentIndex(
+            0 if not settings.get("theme_color") else 1)
+        self._sync_accent_content()
+        self.accent_combo.setFixedWidth(150)
+        self.accent_combo.installEventFilter(self.accent_card)
+        # activated 而非 currentIndexChanged：已停在「自定义…」再选一次
+        # 也要弹取色器（同项重选 activated 照发，index 变化信号不发）；
+        # 程序化 setCurrentIndex 不触发 activated，取消回退无回环
+        self.accent_combo.activated.connect(self._on_accent)
+        self.accent_card.hBoxLayout.addWidget(self.accent_combo, 0,
+                                              Qt.AlignmentFlag.AlignRight)
+        self.accent_card.hBoxLayout.addSpacing(_SPACING)
         g0.addSettingCard(self.lang_card)
         g0.addSettingCard(self.theme_card)
+        g0.addSettingCard(self.accent_card)
         g0.addSettingCard(self.bg_card)
         v.addWidget(g0)
 
@@ -419,6 +440,33 @@ class SettingsPage(ScrollArea):
 
     def _on_bg_effect(self, index):
         self.settings.set("bg_effect", _BG_VALUES[index])
+
+    # ---- 强调色 ----
+    def _sync_accent_content(self):
+        stored = self.settings.get("theme_color")
+        if stored:
+            self.accent_card.setContent(stored)
+        else:
+            # 跟随系统：展示当前生效色（窗口已解析的系统色/qfw 出厂色）
+            self.accent_card.setContent(
+                f"跟随系统（当前 {QColor(qconfig.themeColor.value).name()}）")
+
+    def _on_accent(self, index):
+        if index == 0:
+            self.settings.set("theme_color", "")
+            self._sync_accent_content()
+            return
+        # 自定义：fluent 取色器；确认（颜色有变）才落 store，取消不动
+        dlg = ColorDialog(QColor(qconfig.themeColor.value), "选择强调色",
+                          self.window())
+        dlg.colorChanged.connect(
+            lambda c: self.settings.set("theme_color", c.name()))
+        dlg.exec()
+        if not self.settings.get("theme_color"):
+            # 取消/原色确认而原本是跟随系统：选项回「跟随系统」
+            self.accent_combo.blockSignals(True)
+            self.accent_combo.setCurrentIndex(0)
+            self.accent_combo.blockSignals(False)
 
     # ---- 保存方式/后缀（与处理字幕页双向同步）----
     def _on_save_mode(self, index):
