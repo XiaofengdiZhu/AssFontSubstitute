@@ -85,7 +85,7 @@ def _phash_batch(tiles: np.ndarray) -> np.ndarray:
 
 def _hamming_sims(pa: np.ndarray, pb: np.ndarray) -> np.ndarray:
     out = np.empty(len(pa))
-    for i, (x, y) in enumerate(zip(pa, pb)):
+    for i, (x, y) in enumerate(zip(pa, pb, strict=False)):
         out[i] = 1 - bin(int(x) ^ int(y)).count("1") / 64
     return out
 

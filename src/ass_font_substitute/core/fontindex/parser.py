@@ -4,10 +4,13 @@ import re
 from pathlib import Path
 
 import xxhash
-from fontTools.ttLib import TTCollection, TTFont
+from fontTools.ttLib import TTCollection
+from fontTools.ttLib import TTFont
 
-from ass_font_substitute.core.fontindex.probes import classify_category, classify_script
-from ass_font_substitute.core.models import CmapRanges, FontRecord
+from ass_font_substitute.core.fontindex.probes import classify_category
+from ass_font_substitute.core.fontindex.probes import classify_script
+from ass_font_substitute.core.models import CmapRanges
+from ass_font_substitute.core.models import FontRecord
 
 NAME_IDS = (1, 4, 6, 16, 17)
 TTC_EXTS = {".ttc", ".otc"}

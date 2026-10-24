@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QPainter, QPainterPath, QPixmap
+from PySide6.QtGui import QImage
+from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainterPath
+from PySide6.QtGui import QPixmap
 from qfluentwidgets import CaptionLabel
 
 from ass_font_substitute.core.similarity.render import RenderBundle
@@ -110,6 +113,6 @@ def _render_job(ctx, entity, text):
     from ass_font_substitute.gui.jobs import render_preview
     try:
         bundle = render_preview(entity, text)
-    except Exception as e:  # noqa: BLE001 损坏字体渲染抛异常折进结果通路
+    except Exception as e:
         return text, None, f"{type(e).__name__}: {e}"
     return text, bundle, None

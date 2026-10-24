@@ -4,7 +4,8 @@ import queue
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread
+from PySide6.QtCore import Signal
 
 from ass_font_substitute.gui.settings_store import Settings
 
@@ -29,7 +30,7 @@ class CoreWorker(QThread):
         p = self._settings.get("cache_path") or str(default_cache_path())
         try:
             cache = Cache(Path(p))
-        except Exception as e:  # noqa: BLE001  启动失败可观察：线程存活，缓存类任务逐个 failed
+        except Exception as e:
             cache = None
             self.failed.emit("worker:init", f"{type(e).__name__}: {e}")
         ctx = SimpleNamespace(settings=self._settings, cache=cache,
@@ -41,7 +42,7 @@ class CoreWorker(QThread):
             tag, fn, args, kw = item
             try:
                 self.result.emit(tag, fn(ctx, *args, **kw))
-            except Exception as e:  # noqa: BLE001  单任务失败不拖垮工作者
+            except Exception as e:
                 self.failed.emit(tag, f"{type(e).__name__}: {e}")
 
     def submit(self, tag, fn, *args, **kw):
@@ -78,7 +79,7 @@ class IndexWorker(QThread):
                     d, progress=lambda done, total, res, d=d:
                     self._on_progress(d, done, total, res))
                 self.finished_dir.emit(d, r)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 self.failed.emit(d, f"{type(e).__name__}: {e}")
 
     def _on_progress(self, d, done, total, res) -> bool:

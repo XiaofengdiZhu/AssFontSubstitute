@@ -3,10 +3,13 @@
 import pytest
 
 from ass_font_substitute.core.fontindex.library import LibraryIndex
-from ass_font_substitute.core.fontindex.store import open_db, update_index
+from ass_font_substitute.core.fontindex.store import open_db
+from ass_font_substitute.core.fontindex.store import update_index
 from ass_font_substitute.core.similarity.cache import Cache
-from ass_font_substitute.gui.jobs import (classify_one, make_searcher,
-                                          parse_subtitle, pull_chunk)
+from ass_font_substitute.gui.jobs import classify_one
+from ass_font_substitute.gui.jobs import make_searcher
+from ass_font_substitute.gui.jobs import parse_subtitle
+from ass_font_substitute.gui.jobs import pull_chunk
 from ass_font_substitute.gui.settings_store import Settings
 from ass_font_substitute.gui.subs_vm import SubsVM
 from tests.fonts import build_font

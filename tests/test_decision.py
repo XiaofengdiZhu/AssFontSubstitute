@@ -1,4 +1,5 @@
-from ass_font_substitute.core.decision.store import latest_decision, record_decision
+from ass_font_substitute.core.decision.store import latest_decision
+from ass_font_substitute.core.decision.store import record_decision
 
 
 def test_record_and_latest(tmp_path):

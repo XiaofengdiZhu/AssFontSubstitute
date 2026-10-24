@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import bisect
 import struct
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
+from dataclasses import field
 
 
 @dataclass(frozen=True)
@@ -23,16 +23,16 @@ class CmapRanges:
 
     def to_bytes(self) -> bytes:
         n = len(self.starts)
-        return struct.pack(f"<I{n * 2}I", n, *sum(zip(self.starts, self.ends), ()))
+        return struct.pack(f"<I{n * 2}I", n, *sum(zip(self.starts, self.ends, strict=False), ()))
 
     @classmethod
-    def from_bytes(cls, b: bytes) -> "CmapRanges":
+    def from_bytes(cls, b: bytes) -> CmapRanges:
         (n,) = struct.unpack("<I", b[:4])
         vals = struct.unpack(f"<{2 * n}I", b[4 : 4 + 8 * n])
         return cls(tuple(vals[0::2]), tuple(vals[1::2]))
 
     @classmethod
-    def from_chars(cls, cps) -> "CmapRanges":
+    def from_chars(cls, cps) -> CmapRanges:
         pts = sorted(set(cps))
         if not pts:
             return cls((), ())
@@ -46,7 +46,7 @@ class CmapRanges:
         return cls(tuple(starts), tuple(ends))
 
     @classmethod
-    def from_cmap_subtables(cls, tables) -> "CmapRanges":
+    def from_cmap_subtables(cls, tables) -> CmapRanges:
         cps: set[int] = set()
         for t in tables:
             cps.update(t.cmap.keys())
@@ -58,8 +58,8 @@ class FontRecord:
     dir_path: str
     rel_path: str
     face_index: int
-    psname: Optional[str]
-    version: Optional[tuple[int, ...]]
+    psname: str | None
+    version: tuple[int, ...] | None
     aliases: list[str]
     weight: int
     width: int
@@ -87,9 +87,9 @@ class Candidate:
     fingerprint: str
     display_name: str
     coverage: float
-    similarity: Optional[float] = None
-    size_ratio: Optional[float] = None
-    n_chars: Optional[int] = None
+    similarity: float | None = None
+    size_ratio: float | None = None
+    n_chars: int | None = None
     script: str = "未标注"
     category: str = "未分类"
     weight: int = 400

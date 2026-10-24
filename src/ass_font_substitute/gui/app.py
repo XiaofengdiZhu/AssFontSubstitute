@@ -4,12 +4,19 @@ import logging
 import sys
 
 import darkdetect
-from PySide6.QtCore import Qt, QTimer, qInstallMessageHandler
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer
+from PySide6.QtCore import qInstallMessageHandler
+from PySide6.QtGui import QColor
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
-from qfluentwidgets import (FluentIcon as FIF, FluentWindow,
-                            NavigationItemPosition, Theme, isDarkTheme,
-                            qconfig, setTheme)
+from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import FluentWindow
+from qfluentwidgets import NavigationItemPosition
+from qfluentwidgets import Theme
+from qfluentwidgets import isDarkTheme
+from qfluentwidgets import qconfig
+from qfluentwidgets import setTheme
 from qfluentwidgets.common.style_sheet import updateStyleSheet
 
 from ass_font_substitute.gui.pages.browse_page import BrowsePage

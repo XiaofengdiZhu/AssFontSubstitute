@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
-from ass_font_substitute.core.fontindex.store import (FP_ALGO, fingerprint_of,
-                                                      load_font_rows, open_db)
+from ass_font_substitute.core.fontindex.store import FP_ALGO
+from ass_font_substitute.core.fontindex.store import fingerprint_of
+from ass_font_substitute.core.fontindex.store import load_font_rows
+from ass_font_substitute.core.fontindex.store import open_db
 from ass_font_substitute.core.models import CmapRanges
 
 
@@ -20,8 +21,8 @@ class FontEntity:
     fingerprint: str
     display_name: str
     aliases: tuple[str, ...]
-    psname: Optional[str]
-    version: Optional[tuple[int, ...]]
+    psname: str | None
+    version: tuple[int, ...] | None
     weight: int
     width: int
     italic: bool
@@ -43,7 +44,7 @@ class LibraryIndex:
         self._load()
 
     @classmethod
-    def open(cls, dirs: list[Path]) -> "LibraryIndex":
+    def open(cls, dirs: list[Path]) -> LibraryIndex:
         return cls(dirs)
 
     def _load(self):
@@ -56,7 +57,7 @@ class LibraryIndex:
                     "WHERE algo=?", (FP_ALGO,))}
                 writeback = []
                 for (rel, fi, ps, ver, al, w, wd, it, cmb, script, cat,
-                     xxh, size, mtime) in load_font_rows(conn):
+                     xxh, _size, _mtime) in load_font_rows(conn):
                     aliases = tuple(json.loads(al))
                     version = tuple(json.loads(ver)) if ver else None
                     cmap = CmapRanges.from_bytes(cmb)

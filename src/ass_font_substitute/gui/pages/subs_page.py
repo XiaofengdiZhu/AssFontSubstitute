@@ -2,17 +2,35 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
-                            ComboBox, FlowLayout, InfoBadge, InfoBar, LineEdit,
-                            PrimaryPushButton, PushButton, ScrollArea,
-                            SegmentedWidget, StrongBodyLabel, setFont)
+from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QHBoxLayout
+from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtWidgets import QWidget
+from qfluentwidgets import BodyLabel
+from qfluentwidgets import CaptionLabel
+from qfluentwidgets import CardWidget
+from qfluentwidgets import CheckBox
+from qfluentwidgets import ComboBox
+from qfluentwidgets import FlowLayout
 from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import InfoBadge
+from qfluentwidgets import InfoBar
+from qfluentwidgets import LineEdit
+from qfluentwidgets import PrimaryPushButton
+from qfluentwidgets import PushButton
+from qfluentwidgets import ScrollArea
+from qfluentwidgets import SegmentedWidget
+from qfluentwidgets import StrongBodyLabel
+from qfluentwidgets import setFont
 
-from ass_font_substitute.gui.jobs import (apply_to_file, classify_one,
-                                          ensure_library, make_searcher,
-                                          parse_subtitle, pull_chunk)
+from ass_font_substitute.gui.jobs import apply_to_file
+from ass_font_substitute.gui.jobs import classify_one
+from ass_font_substitute.gui.jobs import ensure_library
+from ass_font_substitute.gui.jobs import make_searcher
+from ass_font_substitute.gui.jobs import parse_subtitle
+from ass_font_substitute.gui.jobs import pull_chunk
 from ass_font_substitute.gui.lastdir import pick_open_files
 from ass_font_substitute.gui.paths import decisions_path
 from ass_font_substitute.gui.preview_vm import PreviewVM

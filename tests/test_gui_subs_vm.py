@@ -1,13 +1,18 @@
 import pytest
 
 from ass_font_substitute.core.coverage.matcher import UsageClass
-from ass_font_substitute.core.decision.store import latest_decision, record_decision
+from ass_font_substitute.core.decision.store import latest_decision
+from ass_font_substitute.core.decision.store import record_decision
 from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.core.models import CmapRanges
 from ass_font_substitute.core.similarity.cache import Cache
-from ass_font_substitute.gui.jobs import FileParse, classify_one, make_searcher, pull_chunk
+from ass_font_substitute.gui.jobs import FileParse
+from ass_font_substitute.gui.jobs import classify_one
+from ass_font_substitute.gui.jobs import make_searcher
+from ass_font_substitute.gui.jobs import pull_chunk
 from ass_font_substitute.gui.settings_store import Settings
-from ass_font_substitute.gui.subs_vm import KEEP, SubsVM
+from ass_font_substitute.gui.subs_vm import KEEP
+from ass_font_substitute.gui.subs_vm import SubsVM
 from tests.fonts import build_font
 
 
@@ -17,8 +22,8 @@ def _parse(path, name, chars="永宇"):
 
 
 def _usage(name, chars):
-    from ass_font_substitute.core.models import FontUsage
     from ass_font_substitute.core.fontindex.library import normalize_name
+    from ass_font_substitute.core.models import FontUsage
     return FontUsage(raw_name=name, norm_name=normalize_name(name), style_count=1,
                      inline_count=2, chars=set(chars), variants={name})
 
@@ -120,7 +125,7 @@ def test_make_card_replace_missing_preview(vm_full):
 
 
 def test_make_card_missing_and_zero(vm_full):
-    vm, ents = _vm_full(vm_full)
+    vm, _ents = _vm_full(vm_full)
     c1 = vm.make_card(_usage("不存在体", FULL), UsageClass("missing"))
     assert c1.kind == "missing" and c1.options[0].key == KEEP
     vm.apply_default_check(c1)
@@ -160,7 +165,7 @@ def test_default_check_replay_keeps_original_source(vm_full, tmp_path):
 
 
 def test_default_check_keep_decision_targets_keep_option(vm_full, tmp_path):
-    vm, ents = _vm_full(vm_full)
+    vm, _ents = _vm_full(vm_full)
     card = vm.make_card(_usage("不存在体", FULL), UsageClass("missing"))
     record_decision(vm.decisions_db, "不存在体", "t2s", None, keep=True)
     vm.apply_default_check(card)
@@ -177,7 +182,7 @@ def test_default_check_direction_mismatch_ignores_memory(vm_full, tmp_path):
 
 
 def test_rebuild_clears_and_orders(vm_full):
-    vm, ents = _vm_full(vm_full)
+    vm, _ents = _vm_full(vm_full)
     vm.rebuild([_usage("黑体", FULL), _usage("不存在体", "永")], 0.95, "t2s")
     assert [c.kind for c in vm.cards] == ["keep", "missing"]
     vm.rebuild([_usage("不存在体", "永")], 0.95, "t2s")
@@ -194,7 +199,8 @@ def lib_env(tmp_path):
     build_font(d / "t.ttf", chars="永中木", family="TGT圆", shape="circle")
     build_font(d / "n.ttf", chars="永中木", family="NEAR圆", shape="circle")
     build_font(d / "f.ttf", chars="永中木", family="FAR方", shape="box")
-    from ass_font_substitute.core.fontindex.store import update_index, open_db
+    from ass_font_substitute.core.fontindex.store import open_db
+    from ass_font_substitute.core.fontindex.store import update_index
     conn = open_db(d / "fontindex.db")
     update_index(d, conn)
     conn.close()
@@ -224,14 +230,14 @@ def test_search_round_appends_and_finishes_paused(lib_env):
                       threshold=0.95, n_pause=1, min_sim=0.5,
                       size_range=(0.5, 2.0), direction="t2s")
     vm.attach_searcher(card, s)
-    cands, state = pull_chunk(s)
+    cands, _state = pull_chunk(s)
     vm.add_candidates(card, cands)
     vm.finish_search(card, s)
     assert card.search_state == "paused"               # n_pause=1 攒 1 命中即暂停
     assert {o.display_name for o in card.options} >= {"NEAR圆"}
     assert any(o.source == "search" for o in card.options)
     # 续搜：累计 hit_count——再来 1 个命中又暂停
-    cands2, state2 = pull_chunk(s)
+    cands2, _state2 = pull_chunk(s)
     vm.add_candidates(card, cands2)
     vm.finish_search(card, s)
     assert card.search_state in ("paused", "exhausted")
@@ -244,7 +250,7 @@ def test_exhausted_and_relax(lib_env):
                       threshold=0.95, n_pause=99, min_sim=0.99,
                       size_range=(0.5, 2.0), direction="t2s")
     vm.attach_searcher(card, s)
-    cands, state = pull_chunk(s)
+    cands, _state = pull_chunk(s)
     vm.add_candidates(card, cands)
     vm.finish_search(card, s)
     assert card.search_state == "exhausted"
@@ -254,7 +260,7 @@ def test_exhausted_and_relax(lib_env):
                        threshold=0.95, n_pause=99, min_sim=new_min,
                        size_range=(0.5, 2.0), direction="t2s")
     vm.attach_searcher(card, s2)
-    cands2, state2 = pull_chunk(s2)
+    cands2, _state2 = pull_chunk(s2)
     vm.add_candidates(card, cands2)
     vm.finish_search(card, s2)
     assert card.search_state == "exhausted"
@@ -266,7 +272,7 @@ def test_exhausted_and_relax(lib_env):
 
 
 def test_relax_floor(lib_env):
-    vm, lib, ctx = lib_env
+    vm, lib, _ctx = lib_env
     card = _card_for(vm, lib, "TGT圆")
     card.min_sim = 0.55
     assert vm.relax_min_sim(card) == pytest.approx(0.50)
@@ -275,14 +281,14 @@ def test_relax_floor(lib_env):
 
 
 def test_search_target_prefers_original(lib_env):
-    vm, lib, ctx = lib_env
+    vm, lib, _ctx = lib_env
     card = _card_for(vm, lib, "TGT圆")
     t = vm._search_target(card)
     assert t is not None and t.display_name == "TGT圆"
 
 
 def test_attach_pick_dedupes_and_checks(lib_env):
-    vm, lib, ctx = lib_env
+    vm, lib, _ctx = lib_env
     card = _card_for(vm, lib, "TGT圆")
     e = next(e for e in lib.entities() if e.display_name == "NEAR圆")
     o = vm.attach_pick(card, e)

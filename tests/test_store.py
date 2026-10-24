@@ -1,7 +1,9 @@
 import sqlite3
 
-from ass_font_substitute.core.fontindex.store import (
-    DDL, open_db, stats, update_index)
+from ass_font_substitute.core.fontindex.store import DDL
+from ass_font_substitute.core.fontindex.store import open_db
+from ass_font_substitute.core.fontindex.store import stats
+from ass_font_substitute.core.fontindex.store import update_index
 from tests.fonts import build_font
 
 

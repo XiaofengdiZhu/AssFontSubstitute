@@ -1,16 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 
 from ass_font_substitute.core.assparse.extract import merge_usages
-from ass_font_substitute.core.coverage.matcher import UsageClass, coverage_detail
-from ass_font_substitute.core.decision.store import latest_decision, record_decision
-from ass_font_substitute.core.fontindex.library import FontEntity, normalize_name
+from ass_font_substitute.core.coverage.matcher import UsageClass
+from ass_font_substitute.core.coverage.matcher import coverage_detail
+from ass_font_substitute.core.decision.store import latest_decision
+from ass_font_substitute.core.decision.store import record_decision
+from ass_font_substitute.core.fontindex.library import FontEntity
+from ass_font_substitute.core.fontindex.library import normalize_name
 from ass_font_substitute.core.models import FontUsage
 from ass_font_substitute.core.similarity.search import FontSearcher
-from ass_font_substitute.gui.jobs import (ApplyFileResult, FileParse,
-                                          apply_to_file, classify_one)
+from ass_font_substitute.gui.jobs import ApplyFileResult
+from ass_font_substitute.gui.jobs import FileParse
+from ass_font_substitute.gui.jobs import apply_to_file
+from ass_font_substitute.gui.jobs import classify_one
 
 KEEP = "__keep__"           # 「保留原字体名」选项键（missing/zero 卡）
 SIM_FLOOR = 0.50            # 放宽重算下限（= SIM_BOUNDS[0]）

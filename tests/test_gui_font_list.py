@@ -1,7 +1,8 @@
 import os
 
 import pytest
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject
+from PySide6.QtCore import Signal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -43,9 +44,10 @@ def test_font_list_lazy_materialization(qapp):
     # 回归：17k 库 set_rows 不得急切构建行控件（spec §10 虚拟滚动）——
     # 只有可视区 ±WINDOW_PAD 行物化并派渲染，滚动窗口外行控件释放
     from ass_font_substitute.gui.preview_vm import PreviewVM
-    from ass_font_substitute.gui.widgets.font_list import (ROW_H, ROW_SPACING,
-                                                           WINDOW_PAD,
-                                                           FontListWidget)
+    from ass_font_substitute.gui.widgets.font_list import ROW_H
+    from ass_font_substitute.gui.widgets.font_list import ROW_SPACING
+    from ass_font_substitute.gui.widgets.font_list import WINDOW_PAD
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
 
     fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
     fl.resize(300, 600)                     # ~9 行可视
@@ -84,9 +86,12 @@ def test_font_list_lazy_materialization(qapp):
 def test_pill_follows_theme(qapp):
     # 药丸 paintEvent 现取主题色（qfw VerticalSeparator 同法）：渲染像素验证
     # 暗浅两套底色 alpha 不同，setTheme 后旧实例自动换装
-    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtCore import QPoint
+    from PySide6.QtCore import Qt
     from PySide6.QtGui import QImage
-    from qfluentwidgets import Theme, setTheme
+    from qfluentwidgets import Theme
+    from qfluentwidgets import setTheme
+
     from ass_font_substitute.gui.widgets.font_card import _pill
 
     def bg_alpha(w):

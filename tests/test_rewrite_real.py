@@ -21,7 +21,7 @@ def test_real_subtitle_surgical(tmp_path):
     r = rewrite_file(src, {name: "REPLACED_FONT"}, out=tmp_path / "o.ass")
     new_lines = (tmp_path / "o.ass").read_bytes().decode(enc).splitlines(keepends=True)
     assert len(new_lines) == len(orig_lines)
-    diff = [i for i, (a, b) in enumerate(zip(orig_lines, new_lines)) if a != b]
+    diff = [i for i, (a, b) in enumerate(zip(orig_lines, new_lines, strict=False)) if a != b]
     assert diff == r.changed_lines
     assert all("REPLACED_FONT" in new_lines[i] or name in orig_lines[i]
                for i in diff)

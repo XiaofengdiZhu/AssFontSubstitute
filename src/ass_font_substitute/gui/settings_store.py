@@ -8,7 +8,9 @@ import threading
 from pathlib import Path
 
 from ass_font_substitute.core.coverage.matcher import COV_THRESHOLD
-from ass_font_substitute.core.similarity.search import MIN_SIM, SAMPLE_TEXT, SIZE_RANGE
+from ass_font_substitute.core.similarity.search import MIN_SIM
+from ass_font_substitute.core.similarity.search import SAMPLE_TEXT
+from ass_font_substitute.core.similarity.search import SIZE_RANGE
 
 # 界面 stepper 边界（spec §10）：覆盖率 90–100 步长 1；相似率 50–100 步长 5；
 # 大小区间 50–200 步长 1。存储一律小数，页面按百分数换算
@@ -93,9 +95,7 @@ class Settings:
                 elif k == "save_suffix" and isinstance(v, str) \
                         and _SUFFIX_RE.match(v):
                     self._data[k] = v           # 存量后缀复验，与 set 同规则
-                elif k in ("cache_path",) and isinstance(v, str):
-                    self._data[k] = v
-                elif k in _ENUM_KEYS and v in _ENUM_KEYS[k]:
+                elif (k in ("cache_path",) and isinstance(v, str)) or (k in _ENUM_KEYS and v in _ENUM_KEYS[k]):
                     self._data[k] = v
                 elif k == "last_dirs" and isinstance(v, dict) \
                         and all(isinstance(kk, str) and isinstance(vv, str)

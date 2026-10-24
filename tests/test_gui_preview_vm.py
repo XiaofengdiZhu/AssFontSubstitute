@@ -1,8 +1,9 @@
 
 from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.core.models import CmapRanges
-from ass_font_substitute.gui.preview_vm import (CATEGORY_ORDER, PreviewVM,
-                                                weight_tag)
+from ass_font_substitute.gui.preview_vm import CATEGORY_ORDER
+from ass_font_substitute.gui.preview_vm import PreviewVM
+from ass_font_substitute.gui.preview_vm import weight_tag
 
 
 def _ent(fp, name, category="黑", script="简", weight=400):

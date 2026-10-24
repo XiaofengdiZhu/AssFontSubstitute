@@ -1,25 +1,47 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import ClassVar
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
-
-from ass_font_substitute.gui.lastdir import pick_existing_dir
-from ass_font_substitute.gui.pages.subs_page import _ElidedLabel
-from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget,
-                            GroupHeaderCardWidget, InfoBadge,
-                            InfoBar, MessageBox, MessageBoxBase,
-                            PrimaryPushButton, PushButton, PushSettingCard,
-                            ScrollArea, SubtitleLabel, TextEdit, ToolButton,
-                            TransparentToolButton, VerticalSeparator,
-                            setFont)
+from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QFont
+from PySide6.QtGui import QIcon
+from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPen
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QHBoxLayout
+from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtWidgets import QWidget
+from qfluentwidgets import BodyLabel
+from qfluentwidgets import CaptionLabel
+from qfluentwidgets import CardWidget
 from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import GroupHeaderCardWidget
+from qfluentwidgets import InfoBadge
+from qfluentwidgets import InfoBar
+from qfluentwidgets import MessageBox
+from qfluentwidgets import MessageBoxBase
+from qfluentwidgets import PrimaryPushButton
+from qfluentwidgets import PushButton
+from qfluentwidgets import PushSettingCard
+from qfluentwidgets import ScrollArea
+from qfluentwidgets import SubtitleLabel
+from qfluentwidgets import TextEdit
+from qfluentwidgets import ToolButton
+from qfluentwidgets import TransparentToolButton
+from qfluentwidgets import VerticalSeparator
+from qfluentwidgets import setFont
 
-from ass_font_substitute.gui.jobs import (ensure_library, probe_dir_status,
-                                          read_failures, retry_bad)
+from ass_font_substitute.gui.jobs import ensure_library
+from ass_font_substitute.gui.jobs import probe_dir_status
+from ass_font_substitute.gui.jobs import read_failures
+from ass_font_substitute.gui.jobs import retry_bad
+from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.library_vm import LibraryVM
+from ass_font_substitute.gui.pages.subs_page import _ElidedLabel
 from ass_font_substitute.gui.workers import IndexWorker
 
 _STAT_KEYS = [("dirs", "字体目录"), ("files", "文件总数"), ("fonts", "字体总数"),
@@ -113,8 +135,10 @@ class LibraryPage(ScrollArea):
         self.refresh_status()
 
     # ---- 目录列表 ----
-    _BADGE_MAKER = {"ok": InfoBadge.success, "stale": InfoBadge.warning,
-                    "indexing": InfoBadge.info, "offline": InfoBadge.error}
+    # 类级常量表（只读），ClassVar 注解仅为 RUF012
+    _BADGE_MAKER: ClassVar[dict[str, Callable[[], InfoBadge]]] = {
+        "ok": InfoBadge.success, "stale": InfoBadge.warning,
+        "indexing": InfoBadge.info, "offline": InfoBadge.error}
 
     def _rebuild_dir_rows(self):
         while self.dirs_box.count():

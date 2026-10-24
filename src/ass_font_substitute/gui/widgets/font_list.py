@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QSize, Signal
-from PySide6.QtWidgets import (QAbstractItemView, QListWidget, QListWidgetItem,
-                               QVBoxLayout, QWidget)
-from qfluentwidgets import CaptionLabel, StrongBodyLabel
+from PySide6.QtCore import QPoint
+from PySide6.QtCore import QSize
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QAbstractItemView
+from PySide6.QtWidgets import QListWidget
+from PySide6.QtWidgets import QListWidgetItem
+from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtWidgets import QWidget
+from qfluentwidgets import CaptionLabel
+from qfluentwidgets import StrongBodyLabel
 
 from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.gui.preview_vm import weight_tag
@@ -47,7 +53,7 @@ class FontListWidget(QListWidget):
         self._rows = list(entities)
         self._materialized.clear()
         self.clear()
-        for e in self._rows:
+        for _e in self._rows:
             item = QListWidgetItem()
             item.setSizeHint(QSize(10, ROW_H))
             self.addItem(item)

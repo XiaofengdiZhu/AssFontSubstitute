@@ -4,11 +4,13 @@ import hashlib
 import json
 import os
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from ass_font_substitute.core.fontindex.parser import FontParseError, parse_font_file
+from ass_font_substitute.core.fontindex.parser import FontParseError
+from ass_font_substitute.core.fontindex.parser import parse_font_file
 from ass_font_substitute.core.models import CmapRanges
 
 SCHEMA_VERSION = 1
@@ -42,7 +44,7 @@ def fingerprint_of(aliases: list[str], cmap: CmapRanges, weight: int, width: int
     双重防陈旧），LibraryIndex 聚合读命中直取、缺失回写——避免每次打开重算。"""
     canon = json.dumps({
         "aliases": sorted(aliases),
-        "cmap": [list(r) for r in zip(cmap.starts, cmap.ends)],
+        "cmap": [list(r) for r in zip(cmap.starts, cmap.ends, strict=False)],
         "weight": weight, "width": width, "italic": int(italic), "xxh": xxh,
     }, ensure_ascii=False, sort_keys=True)
     return hashlib.sha1(canon.encode("utf-8")).hexdigest()
@@ -100,7 +102,7 @@ def scan_dir(root: Path) -> list[Path]:
 
 
 def update_index(dir_path: Path, conn: sqlite3.Connection,
-                 progress: "Callable[[int, int, UpdateResult], bool] | None" = None) -> UpdateResult:
+                 progress: Callable[[int, int, UpdateResult], bool] | None = None) -> UpdateResult:
     """progress(done, total, res) -> bool 在每解析完一个文件后回调；
     返回 False 停止剩余文件并置 res.cancelled=True。逐文件事务提交，
     取消/中断保留已解析前缀，重跑按增量续（GUI 进度/取消依赖此语义）。"""
@@ -186,13 +188,21 @@ def stats(conn: sqlite3.Connection) -> dict:
 
 
 def load_font_rows(conn: sqlite3.Connection) -> Iterator[tuple]:
-    for row in conn.execute(
+    yield from conn.execute(
             "SELECT f.rel_path, f.face_index, f.psname, f.version, f.aliases, "
             "f.weight, f.width, f.italic, f.cmap, f.script, f.category, "
-            "fi.xxh, fi.size, fi.mtime_ns FROM fonts f JOIN files fi USING(rel_path)"):
-        yield row
+            "fi.xxh, fi.size, fi.mtime_ns FROM fonts f JOIN files fi USING(rel_path)")
 
 
-__all__ = ["open_db", "scan_dir", "update_index", "stats", "load_font_rows",
-           "SCHEMA_VERSION", "IndexSchemaError", "UpdateResult",
-           "FP_ALGO", "fingerprint_of"]
+__all__ = [
+    "FP_ALGO",
+    "SCHEMA_VERSION",
+    "IndexSchemaError",
+    "UpdateResult",
+    "fingerprint_of",
+    "load_font_rows",
+    "open_db",
+    "scan_dir",
+    "stats",
+    "update_index",
+]

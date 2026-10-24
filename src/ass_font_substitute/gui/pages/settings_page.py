@@ -1,23 +1,41 @@
 from __future__ import annotations
 
 import os
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, Dialog,
-                            HyperlinkCard, InfoBar, LineEdit,
-                            MessageBoxBase, PrimaryPushSettingCard,
-                            PushSettingCard, ScrollArea, SettingCard,
-                            SettingCardGroup, Slider, SubtitleLabel, TextEdit,
-                            ToolButton, setFont)
+from PySide6.QtCore import QEvent
+from PySide6.QtCore import Qt
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QHBoxLayout
+from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtWidgets import QWidget
+from qfluentwidgets import BodyLabel
+from qfluentwidgets import CaptionLabel
+from qfluentwidgets import ComboBox
+from qfluentwidgets import Dialog
 from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import HyperlinkCard
+from qfluentwidgets import InfoBar
+from qfluentwidgets import LineEdit
+from qfluentwidgets import MessageBoxBase
+from qfluentwidgets import PrimaryPushSettingCard
+from qfluentwidgets import PushSettingCard
+from qfluentwidgets import ScrollArea
+from qfluentwidgets import SettingCard
+from qfluentwidgets import SettingCardGroup
+from qfluentwidgets import Slider
+from qfluentwidgets import SubtitleLabel
+from qfluentwidgets import TextEdit
+from qfluentwidgets import ToolButton
+from qfluentwidgets import setFont
 
 from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.paths import default_cache_path
-from ass_font_substitute.gui.settings_store import (COV_BOUNDS, SIM_BOUNDS,
-                                                    SIZE_BOUNDS)
+from ass_font_substitute.gui.settings_store import COV_BOUNDS
+from ass_font_substitute.gui.settings_store import SIM_BOUNDS
+from ass_font_substitute.gui.settings_store import SIZE_BOUNDS
 from ass_font_substitute.gui.widgets.spin import SpinBox
 
 REPO_URL = "https://github.com/XiaofengdiZhu/AssFontSubstitute"

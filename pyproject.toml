@@ -31,7 +31,23 @@ build-backend = "uv_build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.ruff]
+target-version = "py312"
+
 [tool.ruff.lint]
-# 默认规则集（pyflakes F + 少量 pycodestyle E）：F821 未定义名
-# （误删 import 一类）、F401 未用 import、F841 未用变量等硬错优先
-select = ["E4", "E7", "E9", "F"]
+# 硬错 + 高性价比风格：pyflakes(F)、pycodestyle 错误级(E4/E7/E9)、
+# import 排序(I)、pyupgrade(UP)、bugbear(B)、comprehensions(C4)、
+# 简化(SIM)、ruff 自有(RUF)。行宽与引号不锁（E501 不启用）。
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "RUF001", # 字符串含全角标点（中文 UI 文案本体）
+    "RUF002", # 注释同上
+    "RUF003", # docstring 同上
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试允许 pytest.raises(Exception) 宽断言
+"tests/**" = ["B017"]
+
+[tool.ruff.lint.isort]
+force-single-line = true   # 一行一 import，diff 干净

@@ -5,7 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject
+from PySide6.QtCore import Signal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -107,8 +108,8 @@ def test_parse_classify_cards_and_check_roundtrip(qapp, tmp_path, monkeypatch):
 
 def test_search_chain_pause_resume_exhaust_and_relax(qapp, tmp_path, monkeypatch):
     from ass_font_substitute.core.coverage.matcher import UsageClass
-    from ass_font_substitute.gui.jobs import FileParse
     from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
     page = _make_page(qapp, tmp_path, monkeypatch)
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
     usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
@@ -158,7 +159,8 @@ def test_search_chain_pause_resume_exhaust_and_relax(qapp, tmp_path, monkeypatch
 
 def test_apply_confirm_mapping_and_record(qapp, tmp_path, monkeypatch):
     from ass_font_substitute.core.decision.store import latest_decision
-    from ass_font_substitute.gui.jobs import ApplyFileResult, FileParse
+    from ass_font_substitute.gui.jobs import ApplyFileResult
+    from ass_font_substitute.gui.jobs import FileParse
     page = _make_page(qapp, tmp_path, monkeypatch)
     src = tmp_path / "a.ass"
     src.write_text("[Script Info]", "utf-8")
@@ -198,7 +200,8 @@ def test_apply_reentry_guard_disables_during_dispatch(qapp, tmp_path, monkeypatc
     # 收尾（_on_apply_done）经 _update_summary 恢复
     from ass_font_substitute.core.coverage.matcher import UsageClass
     from ass_font_substitute.core.models import FontUsage
-    from ass_font_substitute.gui.jobs import ApplyFileResult, FileParse
+    from ass_font_substitute.gui.jobs import ApplyFileResult
+    from ass_font_substitute.gui.jobs import FileParse
     page = _make_page(qapp, tmp_path, monkeypatch)
     src = tmp_path / "a.ass"
     src.write_text("[Script Info]", "utf-8")        # 另存目标不存在 → 无冲突确认
@@ -324,11 +327,13 @@ def test_apply_late_result_after_failed_reset_is_dropped(qapp, tmp_path, monkeyp
 def test_zero_usage_keep_card_presentation_and_no_search(qapp, tmp_path, monkeypatch):
     # 回归：空库下 0 字用法分类出 kind=keep——不得冒充「库中有」徽章，
     # 也不给搜索入口（无可比字型，误触发会空转）
+    from PySide6.QtWidgets import QLabel
+    from qfluentwidgets import InfoBadge
+    from qfluentwidgets import TransparentPushButton
+
     from ass_font_substitute.core.coverage.matcher import UsageClass
     from ass_font_substitute.core.models import FontUsage
     from ass_font_substitute.gui.jobs import FileParse
-    from PySide6.QtWidgets import QLabel
-    from qfluentwidgets import InfoBadge, TransparentPushButton
     page = _make_page(qapp, tmp_path, monkeypatch)
     usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
                       inline_count=0, chars=set(), variants={"甲字体"})

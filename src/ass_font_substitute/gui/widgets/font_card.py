@@ -1,15 +1,30 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
-from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
-                            IconWidget, IndeterminateProgressRing, InfoBadge,
-                            StrongBodyLabel, TransparentPushButton,
-                            isDarkTheme, qconfig)
+from PySide6.QtCore import Qt
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QColor
+from PySide6.QtGui import QPainter
+from PySide6.QtWidgets import QFrame
+from PySide6.QtWidgets import QHBoxLayout
+from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtWidgets import QWidget
+from qfluentwidgets import BodyLabel
+from qfluentwidgets import CaptionLabel
+from qfluentwidgets import CardWidget
+from qfluentwidgets import CheckBox
 from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import IconWidget
+from qfluentwidgets import IndeterminateProgressRing
+from qfluentwidgets import InfoBadge
+from qfluentwidgets import StrongBodyLabel
+from qfluentwidgets import TransparentPushButton
+from qfluentwidgets import isDarkTheme
+from qfluentwidgets import qconfig
 
-from ass_font_substitute.gui.subs_vm import KEEP, SIM_FLOOR, Card
+from ass_font_substitute.gui.subs_vm import KEEP
+from ass_font_substitute.gui.subs_vm import SIM_FLOOR
+from ass_font_substitute.gui.subs_vm import Card
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 
 # 状态图标/徽章配色（亮/暗各一份，线框配色）

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator, Optional
 
-from ass_font_substitute.core.coverage.matcher import COV_THRESHOLD, coverage_detail
-from ass_font_substitute.core.fontindex.library import FontEntity, LibraryIndex
-from ass_font_substitute.core.fontindex.probes import PROBE_SC, PROBE_TC
+from ass_font_substitute.core.coverage.matcher import COV_THRESHOLD
+from ass_font_substitute.core.coverage.matcher import coverage_detail
+from ass_font_substitute.core.fontindex.library import FontEntity
+from ass_font_substitute.core.fontindex.library import LibraryIndex
+from ass_font_substitute.core.fontindex.probes import PROBE_SC
+from ass_font_substitute.core.fontindex.probes import PROBE_TC
 from ass_font_substitute.core.models import Candidate
 from ass_font_substitute.core.similarity.cache import Cache
 from ass_font_substitute.core.similarity.metrics import compare
@@ -28,7 +31,7 @@ def _probe_score(e: FontEntity, direction: str) -> float:
     return e.cmap.hit_ratio(probes)
 
 
-def rank_pool(target: Optional[FontEntity], pool: list[FontEntity],
+def rank_pool(target: FontEntity | None, pool: list[FontEntity],
               direction: str) -> list[FontEntity]:
     """元数据粗排：探针命中率 + 分类匹配 + weight/width 差；target=None 仅探针。"""
     def meta_score(e: FontEntity) -> float:
@@ -51,7 +54,7 @@ class FontSearcher:
     target=None（库中没有）无暂停语义，一次搜穿整池返回覆盖率达标的元数据粗排列表。
     """
 
-    def __init__(self, target: Optional[FontEntity], chars: set[str],
+    def __init__(self, target: FontEntity | None, chars: set[str],
                  lib: LibraryIndex, cache: Cache, sample_text: str,
                  cov_threshold: float = COV_THRESHOLD, n_pause: int = 5,
                  min_sim: float = MIN_SIM,
@@ -99,7 +102,7 @@ class FontSearcher:
             self.target_error = True
         return self._tgt
 
-    def next(self) -> Optional[Candidate]:
+    def next(self) -> Candidate | None:
         """推进到下一个「过全部门槛」的候选；None = 已暂停或耗尽（看 exhausted）。"""
         if self.paused:
             return None
@@ -112,7 +115,7 @@ class FontSearcher:
             if cand is not None:
                 return cand
 
-    def _evaluate(self, e: FontEntity) -> Optional[Candidate]:
+    def _evaluate(self, e: FontEntity) -> Candidate | None:
         # 门槛按成本升序（实测：pair 缓存读取 ~5µs、coverage ~15µs、渲染+评分 ~57ms）：
         # 缓存命中 → 相似率/大小（纯比较）→ 覆盖率 → 未命中才渲染评分。
         # 命中路径全程零渲染。
@@ -128,7 +131,7 @@ class FontSearcher:
         if self.target_error:
             return None             # 目标渲染失败：不逐候选重试，GUI 显「原字体无法渲染」
         r = self.cache.get_pair(self.target.fingerprint, e.fingerprint, self._tver)
-        cov: Optional[float] = None
+        cov: float | None = None
         if r is None:
             cov, _missing = coverage_detail(e.cmap, self.chars)
             if cov < self.cov_threshold:

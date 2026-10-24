@@ -4,10 +4,15 @@ import os
 import pytest
 
 from ass_font_substitute.core.coverage.matcher import COV_THRESHOLD
-from ass_font_substitute.core.similarity.search import MIN_SIM, SAMPLE_TEXT, SIZE_RANGE
-from ass_font_substitute.gui.paths import (appdata_dir, default_cache_path,
-                                           decisions_path, settings_path)
-from ass_font_substitute.gui.settings_store import DEFAULTS, Settings
+from ass_font_substitute.core.similarity.search import MIN_SIM
+from ass_font_substitute.core.similarity.search import SAMPLE_TEXT
+from ass_font_substitute.core.similarity.search import SIZE_RANGE
+from ass_font_substitute.gui.paths import appdata_dir
+from ass_font_substitute.gui.paths import decisions_path
+from ass_font_substitute.gui.paths import default_cache_path
+from ass_font_substitute.gui.paths import settings_path
+from ass_font_substitute.gui.settings_store import DEFAULTS
+from ass_font_substitute.gui.settings_store import Settings
 
 
 @pytest.fixture(scope="module")
@@ -197,9 +202,11 @@ def test_wheel_filter_blocks_only_registered(qapp):
     pytest.importorskip("PySide6")
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QEvent
-    from PySide6.QtWidgets import QSlider, QWidget
-    from ass_font_substitute.gui.pages.settings_page import _WheelFreeCard
+    from PySide6.QtWidgets import QSlider
+    from PySide6.QtWidgets import QWidget
     from qfluentwidgets import FluentIcon as FIF
+
+    from ass_font_substitute.gui.pages.settings_page import _WheelFreeCard
 
     card = _WheelFreeCard(FIF.FILTER, "t", "c")
     host = QWidget()
@@ -217,6 +224,7 @@ def test_wheel_block_filter(qapp):
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QEvent
     from PySide6.QtWidgets import QComboBox
+
     from ass_font_substitute.gui.widgets.wheel_block import WheelBlock
 
     f = WheelBlock()
@@ -227,8 +235,9 @@ def test_wheel_block_filter(qapp):
 def test_percent_card_init_does_not_commit(qapp):
     pytest.importorskip("PySide6")
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from ass_font_substitute.gui.pages.settings_page import _PercentCard
     from qfluentwidgets import FluentIcon as FIF
+
+    from ass_font_substitute.gui.pages.settings_page import _PercentCard
 
     calls = []
     _PercentCard(FIF.FILTER, "t", "c", 90, 100, 1, 96, calls.append)
@@ -238,7 +247,9 @@ def test_percent_card_init_does_not_commit(qapp):
 def test_general_group_language_theme_bg(qapp, tmp_path, monkeypatch):
     # 常规组三卡：初值、改动落盘并发信号、繁体模式选项名换正體中文
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    from PySide6.QtCore import QObject, Signal
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Signal
+
     from ass_font_substitute.gui.pages.settings_page import SettingsPage
     from ass_font_substitute.gui.settings_store import Settings
 

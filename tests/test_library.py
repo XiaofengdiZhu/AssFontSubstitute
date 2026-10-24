@@ -1,5 +1,7 @@
-from ass_font_substitute.core.fontindex.library import LibraryIndex, normalize_name
-from ass_font_substitute.core.fontindex.store import open_db, update_index
+from ass_font_substitute.core.fontindex.library import LibraryIndex
+from ass_font_substitute.core.fontindex.library import normalize_name
+from ass_font_substitute.core.fontindex.store import open_db
+from ass_font_substitute.core.fontindex.store import update_index
 from tests.fonts import build_font
 
 

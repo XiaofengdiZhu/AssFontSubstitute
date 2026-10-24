@@ -1,10 +1,15 @@
 
 import pytest
 
-from ass_font_substitute.gui.jobs import (apply_to_file, ensure_library,
-                                          lib_key, load_library, parse_subtitle,
-                                          probe_dir_status, pull_chunk,
-                                          render_preview, update_dir)
+from ass_font_substitute.gui.jobs import apply_to_file
+from ass_font_substitute.gui.jobs import ensure_library
+from ass_font_substitute.gui.jobs import lib_key
+from ass_font_substitute.gui.jobs import load_library
+from ass_font_substitute.gui.jobs import parse_subtitle
+from ass_font_substitute.gui.jobs import probe_dir_status
+from ass_font_substitute.gui.jobs import pull_chunk
+from ass_font_substitute.gui.jobs import render_preview
+from ass_font_substitute.gui.jobs import update_dir
 from tests.fonts import build_font
 
 
@@ -142,7 +147,9 @@ def test_apply_error_folded(tmp_path):
 
 
 def test_cache_ops(ctx_stub, tmp_path):
-    from ass_font_substitute.gui.jobs import cache_clear, cache_move, cache_stats
+    from ass_font_substitute.gui.jobs import cache_clear
+    from ass_font_substitute.gui.jobs import cache_move
+    from ass_font_substitute.gui.jobs import cache_stats
     st = cache_stats(ctx_stub)
     assert st["pair_count"] == 0
     new = tmp_path / "moved" / "cache.db"
@@ -156,6 +163,7 @@ def ctx_stub(tmp_path, monkeypatch):
     """CoreWorker ctx 等价物（非 Qt）：真实 Cache，真实设置。"""
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     from types import SimpleNamespace
+
     from ass_font_substitute.core.similarity.cache import Cache
     from ass_font_substitute.gui.settings_store import Settings
     s = Settings(tmp_path / "settings.json")

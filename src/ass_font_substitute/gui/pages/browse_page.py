@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout
-from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, ScrollArea,
-                            SearchLineEdit)
+from PySide6.QtWidgets import QHBoxLayout
+from PySide6.QtWidgets import QVBoxLayout
+from qfluentwidgets import BodyLabel
+from qfluentwidgets import CaptionLabel
+from qfluentwidgets import ComboBox
+from qfluentwidgets import ScrollArea
+from qfluentwidgets import SearchLineEdit
 
-from ass_font_substitute.gui.jobs import ensure_library, lib_key
+from ass_font_substitute.gui.jobs import ensure_library
+from ass_font_substitute.gui.jobs import lib_key
 from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.widgets.font_list import FontListWidget
 
@@ -85,9 +90,9 @@ class BrowsePage(ScrollArea):
         self._reload_list()
 
     def _fill_filters(self):
-        for cb, items in ((self.cb_cat, ["全部"] + self.pvm.categories()),
-                          (self.cb_script, ["全部"] + self.pvm.scripts()),
-                          (self.cb_weight, ["全部"] + self.pvm.weight_buckets())):
+        for cb, items in ((self.cb_cat, ["全部", *self.pvm.categories()]),
+                          (self.cb_script, ["全部", *self.pvm.scripts()]),
+                          (self.cb_weight, ["全部", *self.pvm.weight_buckets()])):
             cb.blockSignals(True)
             cb.clear()
             cb.addItems([str(x) for x in items])

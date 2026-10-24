@@ -1,6 +1,9 @@
-from ass_font_substitute.core.coverage.matcher import classify_usage, twin_convert
-from ass_font_substitute.core.fontindex.library import LibraryIndex, normalize_name
-from ass_font_substitute.core.fontindex.store import open_db, update_index
+from ass_font_substitute.core.coverage.matcher import classify_usage
+from ass_font_substitute.core.coverage.matcher import twin_convert
+from ass_font_substitute.core.fontindex.library import LibraryIndex
+from ass_font_substitute.core.fontindex.library import normalize_name
+from ass_font_substitute.core.fontindex.store import open_db
+from ass_font_substitute.core.fontindex.store import update_index
 from ass_font_substitute.core.models import FontUsage
 from tests.fonts import build_font
 
@@ -126,6 +129,7 @@ def test_classify(tmp_path):
 def test_default_threshold_is_95(tmp_path):
     # 设置默认值钉死：24/25 = 96% 达默认 95%（keep），不达旧默认 98%（replace）
     import inspect
+
     from ass_font_substitute.core.coverage.matcher import COV_THRESHOLD
     assert COV_THRESHOLD == 0.95
     assert inspect.signature(classify_usage).parameters["threshold"].default == 0.95

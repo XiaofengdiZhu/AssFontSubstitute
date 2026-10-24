@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 
 from light_ass import Document
 from light_ass.curly.parsed_line import TextNode
-from light_ass.curly.tags import FontNameTag, ResetStyleTag
+from light_ass.curly.tags import FontNameTag
+from light_ass.curly.tags import ResetStyleTag
 
-from ass_font_substitute.core.assparse.encoding import EncodingDetectError, detect_encoding
+from ass_font_substitute.core.assparse.encoding import EncodingDetectError
+from ass_font_substitute.core.assparse.encoding import detect_encoding
 from ass_font_substitute.core.fontindex.library import normalize_name
 from ass_font_substitute.core.models import FontUsage
 
@@ -45,7 +48,7 @@ def extract_usages(path: Path) -> ExtractResult:
     try:
         # 畸形的 Style/Event 行在 strict=False 下仍可能抛错，记录而非中断（批量场景）
         doc = Document.load(str(path), encoding=enc, strict=False)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return ExtractResult(parse_error=f"{type(e).__name__}: {e}")
     return _extract(doc)
 

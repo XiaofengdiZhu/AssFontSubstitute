@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import (CaptionLabel, ComboBox, MessageBoxBase,
-                            SearchLineEdit, SmoothScrollArea, SubtitleLabel)
+from PySide6.QtWidgets import QFrame
+from PySide6.QtWidgets import QHBoxLayout
+from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtWidgets import QWidget
+from qfluentwidgets import CaptionLabel
+from qfluentwidgets import ComboBox
+from qfluentwidgets import MessageBoxBase
+from qfluentwidgets import SearchLineEdit
+from qfluentwidgets import SmoothScrollArea
+from qfluentwidgets import SubtitleLabel
 
-from ass_font_substitute.gui.jobs import make_searcher, pull_chunk
+from ass_font_substitute.gui.jobs import make_searcher
+from ass_font_substitute.gui.jobs import pull_chunk
 from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.widgets.font_list import FontListWidget
 
@@ -119,9 +127,9 @@ class FontPickerDialog(MessageBoxBase):
         return ""
 
     def _fill_filters(self):
-        for cb, items in ((self.cb_cat, ["全部"] + self.pvm.categories()),
-                          (self.cb_script, ["全部"] + self.pvm.scripts()),
-                          (self.cb_weight, ["全部"] + self.pvm.weight_buckets())):
+        for cb, items in ((self.cb_cat, ["全部", *self.pvm.categories()]),
+                          (self.cb_script, ["全部", *self.pvm.scripts()]),
+                          (self.cb_weight, ["全部", *self.pvm.weight_buckets()])):
             cb.blockSignals(True)
             cb.clear()
             cb.addItems([str(x) for x in items])
@@ -138,7 +146,7 @@ class FontPickerDialog(MessageBoxBase):
 
     def _reload_all(self):
         self.pvm.name_query = self.name_edit.text()
-        rows = set(e.fingerprint for e in self.pvm.filtered())
+        rows = {e.fingerprint for e in self.pvm.filtered()}
         self.all_list.set_rows(self.pvm.filtered())
         self.rec_list.set_rows([e for e in self._reco or []
                                 if e.fingerprint in rows])

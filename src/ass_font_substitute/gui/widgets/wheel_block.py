@@ -5,7 +5,8 @@
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject
+from PySide6.QtCore import QEvent
+from PySide6.QtCore import QObject
 
 
 class WheelBlock(QObject):

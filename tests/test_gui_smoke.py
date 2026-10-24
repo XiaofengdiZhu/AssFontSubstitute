@@ -33,6 +33,7 @@ def test_worker_init_failure_is_observable(qapp, tmp_path, monkeypatch):
     # 回归：Cache 初始化失败必须发 failed("worker:init") 且线程存活——
     # 后续任务逐个 failed，而不是静默死线程 + submit 永久悬挂
     import time
+
     from ass_font_substitute.gui.settings_store import Settings
     from ass_font_substitute.gui.workers import CoreWorker
 
@@ -80,7 +81,8 @@ def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
     d.mkdir()
     build_font(d / "a.ttf", chars="永宇", family="甲")
     (d / "b_bad.ttf").write_bytes(b"not a font")    # 坏文件：入 bad 表不计实体
-    from PySide6.QtTest import QTest          # 本版 PySide6 无模块级 qWait
+    from PySide6.QtTest import QTest  # 本版 PySide6 无模块级 qWait
+
     from ass_font_substitute.gui.app import AFSWindow
     from ass_font_substitute.gui.settings_store import Settings
 
@@ -128,6 +130,7 @@ def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
     build_font(d / "a.ttf", chars="永宇", family="甲")
     from PySide6.QtTest import QTest
     from qfluentwidgets import ToolButton
+
     from ass_font_substitute.gui.app import AFSWindow
     from ass_font_substitute.gui.settings_store import Settings
 
@@ -173,12 +176,13 @@ def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
 def test_dir_library_stats_maps_normalized_paths(qapp, tmp_path, monkeypatch):
     # 实体 dir_path 是 str(Path()) 规范形（反斜杠），目录表原样（可正斜杠）
     from types import SimpleNamespace
+
     from ass_font_substitute.gui.pages.library_page import _dir_library_stats
     ent = SimpleNamespace(dir_path=str(tmp_path), rel_path="a.ttf", script="简")
     fwd = str(tmp_path).replace("\\", "/")
     snap = SimpleNamespace(lib=SimpleNamespace(
         entities=lambda: [ent],
-        skipped=lambda: [f"{str(tmp_path)}\\a.ttf#1 旧版本"]))
+        skipped=lambda: [f"{tmp_path!s}\\a.ttf#1 旧版本"]))
     out = _dir_library_stats(snap, [fwd])
     assert out[fwd] == {"fonts": 1, "sc": 1, "tc": 0, "skipped": 1}
     # 未知目录（非本库目录）不进结果
@@ -187,7 +191,10 @@ def test_dir_library_stats_maps_normalized_paths(qapp, tmp_path, monkeypatch):
 
 def test_window_applies_stored_theme_and_effect(qapp, tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    from qfluentwidgets import Theme, qconfig, setTheme
+    from qfluentwidgets import Theme
+    from qfluentwidgets import qconfig
+    from qfluentwidgets import setTheme
+
     from ass_font_substitute.gui.app import AFSWindow
     from ass_font_substitute.gui.settings_store import Settings
 
@@ -211,7 +218,9 @@ def test_dark_theme_pages_are_dark(qapp, tmp_path, monkeypatch):
     # 实色（none 材质下 = 深色）
     monkeypatch.setenv("APPDATA", str(tmp_path))
     from PySide6.QtGui import QImage
-    from qfluentwidgets import Theme, setTheme
+    from qfluentwidgets import Theme
+    from qfluentwidgets import setTheme
+
     from ass_font_substitute.gui.app import AFSWindow
     from ass_font_substitute.gui.settings_store import Settings
 
@@ -241,7 +250,9 @@ def test_page_and_group_titles_follow_theme(qapp, tmp_path, monkeypatch):
     # 回归：页标题/设置组标题原为裸 QLabel（黑字死调色板），深色下不可读；
     # 换 BodyLabel 后 LABEL qss 黑/白随主题
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    from qfluentwidgets import Theme, setTheme
+    from qfluentwidgets import Theme
+    from qfluentwidgets import setTheme
+
     from ass_font_substitute.gui.app import AFSWindow
     from ass_font_substitute.gui.settings_store import Settings
 
@@ -268,6 +279,7 @@ def test_failures_dialog_constructs(qapp, tmp_path, monkeypatch):
     # MaskDialogBase 要有窗才有几何，裸 parent=None 会 AttributeError
     monkeypatch.setenv("APPDATA", str(tmp_path))
     from PySide6.QtWidgets import QWidget
+
     from ass_font_substitute.gui.pages.library_page import _FailuresDialog
 
     host = QWidget()

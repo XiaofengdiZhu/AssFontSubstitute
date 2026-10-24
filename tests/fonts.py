@@ -71,7 +71,7 @@ def _make(spec: dict):
     fb.setupGlyphOrder(glyph_order)
     fb.setupCharacterMap(cmap)
     fb.setupGlyf(glyphs)
-    fb.setupHorizontalMetrics({g: (500, 0) for g in glyph_order})
+    fb.setupHorizontalMetrics(dict.fromkeys(glyph_order, (500, 0)))
     fb.setupHorizontalHeader(ascent=800, descent=-200)
     fb.setupOS2(sTypoAscender=800, sTypoDescender=-200, usWeightClass=weight,
                 usWidthClass=width, fsSelection=(1 if italic else 64))
@@ -95,9 +95,9 @@ def build_font(path: Path, chars: str, family: str = DEFAULT_FAMILY,
                version: str = "Version 1.000", weight: int = 400,
                width: int = 5, italic: bool = False, shape: str = "box",
                scale: float = 1.0) -> None:
-    spec = dict(chars=chars, family=family, extra_aliases=extra_aliases,
-                psname=psname, version=version, weight=weight, width=width,
-                italic=italic, shape=shape, scale=scale)
+    spec = {"chars": chars, "family": family, "extra_aliases": extra_aliases,
+                "psname": psname, "version": version, "weight": weight, "width": width,
+                "italic": italic, "shape": shape, "scale": scale}
     _make(spec).save(path)
 
 

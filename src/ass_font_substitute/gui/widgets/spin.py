@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import shiboken6
-from PySide6.QtCore import QEvent, QTimer
+from PySide6.QtCore import QEvent
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QSpinBox
 from qfluentwidgets.common.font import setFont
 from qfluentwidgets.common.style_sheet import FluentStyleSheet
-from qfluentwidgets.components.widgets.spin_box import SpinButton, SpinIcon
+from qfluentwidgets.components.widgets.spin_box import SpinButton
+from qfluentwidgets.components.widgets.spin_box import SpinIcon
 
 _BTN_W, _BTN_H, _GAP, _RIGHT = 31, 23, 5, 4   # qfw InlineSpinBox 的按钮几何
 _EDIT_RESERVE = _BTN_W * 2 + _GAP + _RIGHT + 14   # 按钮区 + 边框预留

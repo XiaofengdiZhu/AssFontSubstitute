@@ -1,10 +1,8 @@
-from ass_font_substitute.core.fontindex.probes import (
-    PROBE_PAIRS,
-    PROBE_SC,
-    PROBE_TC,
-    classify_category,
-    classify_script,
-)
+from ass_font_substitute.core.fontindex.probes import PROBE_PAIRS
+from ass_font_substitute.core.fontindex.probes import PROBE_SC
+from ass_font_substitute.core.fontindex.probes import PROBE_TC
+from ass_font_substitute.core.fontindex.probes import classify_category
+from ass_font_substitute.core.fontindex.probes import classify_script
 from ass_font_substitute.core.models import CmapRanges
 
 _COMMON = "的一是我"

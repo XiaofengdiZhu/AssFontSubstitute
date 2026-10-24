@@ -1,6 +1,7 @@
 from fontTools.ttLib import TTFont
 
-from tests.fonts import build_font, build_ttc
+from tests.fonts import build_font
+from tests.fonts import build_ttc
 
 
 def test_build_font_roundtrip(tmp_path):
@@ -18,7 +19,7 @@ def test_build_font_roundtrip(tmp_path):
 
 def test_build_ttc(tmp_path):
     p = tmp_path / "c.ttc"
-    build_ttc(p, [dict(chars="永", family="A體"), dict(chars="中", family="B體")])
+    build_ttc(p, [{"chars": "永", "family": "A體"}, {"chars": "中", "family": "B體"}])
     assert len(TTFont(p, fontNumber=0)["name"].names) > 0
     from fontTools.ttLib import TTCollection
     assert len(TTCollection(p).fonts) == 2

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 
 from ass_font_substitute.core.assparse.extract import extract_usages
 from ass_font_substitute.core.assparse.rewrite import rewrite_file
 from ass_font_substitute.core.coverage.matcher import classify_usage
 from ass_font_substitute.core.fontindex.library import LibraryIndex
-from ass_font_substitute.core.fontindex.store import (open_db, scan_dir,
-                                                      update_index)
+from ass_font_substitute.core.fontindex.store import open_db
+from ass_font_substitute.core.fontindex.store import scan_dir
+from ass_font_substitute.core.fontindex.store import update_index
 from ass_font_substitute.core.models import FontUsage
 from ass_font_substitute.core.similarity.render import render_bundle
 from ass_font_substitute.core.similarity.search import FontSearcher
@@ -169,7 +171,7 @@ class FileParse:
 def parse_subtitle(path: str) -> FileParse:
     try:
         r = extract_usages(Path(path))
-    except Exception as e:  # noqa: BLE001  文件缺失/不可读折进 error，不中断批量
+    except Exception as e:
         return FileParse(path, f"{type(e).__name__}: {e}", [], [], [])
     if r.parse_error:
         return FileParse(path, r.parse_error, [], [], [])
@@ -237,7 +239,7 @@ def apply_to_file(path: str, mapping: dict[str, str], suffix: str,
         out = src.with_name(src.stem + suffix)
         r = rewrite_file(src, mapping, out=out)
         return ApplyFileResult(path, str(out), len(r.changed_lines))
-    except Exception as e:  # noqa: BLE001  单文件失败不拖垮整批
+    except Exception as e:
         return ApplyFileResult(path, error=f"{type(e).__name__}: {e}")
 
 

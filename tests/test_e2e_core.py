@@ -17,9 +17,12 @@ from ass_font_substitute.core.assparse.encoding import detect_encoding
 from ass_font_substitute.core.assparse.extract import extract_usages
 from ass_font_substitute.core.assparse.rewrite import rewrite_file
 from ass_font_substitute.core.coverage.matcher import classify_usage
-from ass_font_substitute.core.decision.store import latest_decision, record_decision
-from ass_font_substitute.core.fontindex.library import LibraryIndex, normalize_name
-from ass_font_substitute.core.fontindex.store import open_db, update_index
+from ass_font_substitute.core.decision.store import latest_decision
+from ass_font_substitute.core.decision.store import record_decision
+from ass_font_substitute.core.fontindex.library import LibraryIndex
+from ass_font_substitute.core.fontindex.library import normalize_name
+from ass_font_substitute.core.fontindex.store import open_db
+from ass_font_substitute.core.fontindex.store import update_index
 from ass_font_substitute.core.similarity.cache import Cache
 from ass_font_substitute.core.similarity.search import FontSearcher
 from tests.fonts import build_font
@@ -114,8 +117,8 @@ def test_core_e2e(tmp_path):
     new = out.read_bytes().decode(detect_encoding(out.read_bytes()))
     ol, nl = orig.splitlines(keepends=True), new.splitlines(keepends=True)
     assert len(ol) == len(nl)
-    diff = [i for i, (a, b) in enumerate(zip(ol, nl)) if a != b]
+    diff = [i for i, (a, b) in enumerate(zip(ol, nl, strict=False)) if a != b]
     assert diff == r.changed_lines  # 改动行集合与报告完全一致
-    for i, (a, b) in enumerate(zip(ol, nl)):
+    for i, (a, b) in enumerate(zip(ol, nl, strict=False)):
         if a != b:
             assert i in r.changed_lines  # 未报行绝不漂移（字节级）

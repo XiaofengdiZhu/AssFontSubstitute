@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 
 import opencc
 
-from ass_font_substitute.core.fontindex.library import (FontEntity, LibraryIndex,
-                                                        normalize_name)
-from ass_font_substitute.core.models import CmapRanges, FontUsage
+from ass_font_substitute.core.fontindex.library import FontEntity
+from ass_font_substitute.core.fontindex.library import LibraryIndex
+from ass_font_substitute.core.fontindex.library import normalize_name
+from ass_font_substitute.core.models import CmapRanges
+from ass_font_substitute.core.models import FontUsage
 
 _CC = {"t2s": opencc.OpenCC("t2s"), "s2t": opencc.OpenCC("s2t")}
 

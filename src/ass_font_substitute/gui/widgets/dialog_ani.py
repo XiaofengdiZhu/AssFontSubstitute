@@ -12,9 +12,18 @@ showEvent/done，开/关动画改由覆盖整个弹窗的 AnimationLayer 逐帧�
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QEasingCurve, QPoint, QRect, Qt, QVariantAnimation
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QRegion
-from PySide6.QtWidgets import QDialog, QWidget
+from PySide6.QtCore import QEasingCurve
+from PySide6.QtCore import QPoint
+from PySide6.QtCore import QRect
+from PySide6.QtCore import Qt
+from PySide6.QtCore import QVariantAnimation
+from PySide6.QtGui import QColor
+from PySide6.QtGui import QImage
+from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QRegion
+from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QWidget
 from qfluentwidgets.common.animation import FluentAnimation
 from qfluentwidgets.components.dialog_box.mask_dialog_base import MaskDialogBase
 

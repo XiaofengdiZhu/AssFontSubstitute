@@ -1,4 +1,5 @@
-from ass_font_substitute.core.assparse.extract import extract_usages, merge_usages
+from ass_font_substitute.core.assparse.extract import extract_usages
+from ass_font_substitute.core.assparse.extract import merge_usages
 
 
 def _write(tmp_path, style_font, inline_font):

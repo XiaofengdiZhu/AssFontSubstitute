@@ -2,7 +2,8 @@
 import os
 
 import pytest
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject
+from PySide6.QtCore import Signal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -39,8 +40,9 @@ def _ent(fp, name):
 
 def test_picker_close_cancels_reco_and_none_payload_hides_rec(qapp, tmp_path):
     from PySide6.QtWidgets import QWidget
-    from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+
     from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
 
     s = Settings(tmp_path / "s.json")
     w = _FakeWorker()

@@ -1,9 +1,11 @@
 import ass_font_substitute.core.similarity.search as search_mod
 from ass_font_substitute.core.fontindex.library import LibraryIndex
-from ass_font_substitute.core.fontindex.store import open_db, update_index
+from ass_font_substitute.core.fontindex.store import open_db
+from ass_font_substitute.core.fontindex.store import update_index
 from ass_font_substitute.core.similarity.cache import Cache
 from ass_font_substitute.core.similarity.metrics import CompareResult
-from ass_font_substitute.core.similarity.search import FontSearcher, text_version
+from ass_font_substitute.core.similarity.search import FontSearcher
+from ass_font_substitute.core.similarity.search import text_version
 from tests.fonts import build_font
 
 CHARS = "永中木水火土石田8Aa0?"
@@ -46,9 +48,9 @@ def _drain(s):
 
 def test_search_pauses_and_ranking(tmp_path):
     lib = _lib(tmp_path,
-               dict(name="c0", chars=CHARS, family="圓體0"),
-               dict(name="c1", chars=CHARS, family="圓體1"),
-               dict(name="c2", chars=CHARS, family="圓體2"))
+               {"name": "c0", "chars": CHARS, "family": "圓體0"},
+               {"name": "c1", "chars": CHARS, "family": "圓體1"},
+               {"name": "c2", "chars": CHARS, "family": "圓體2"})
     target = next(e for e in lib.entities() if e.psname == "TGT")
     s = _searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=3)
     found = _drain(s)
@@ -60,7 +62,7 @@ def test_search_pauses_and_ranking(tmp_path):
 
 def test_low_coverage_never_returned(tmp_path):
     # 严格门槛：覆盖率低于阈值的候选一律跳过，即使配额没攒满也绝不列出
-    lib = _lib(tmp_path, dict(name="c0", chars=CHARS, family="圓體0"))
+    lib = _lib(tmp_path, {"name": "c0", "chars": CHARS, "family": "圓體0"})
     target = next(e for e in lib.entities() if e.psname == "TGT")
     s = _searcher(tmp_path, lib, target, cov_threshold=0.98)
     found = _drain(s)
@@ -71,8 +73,8 @@ def test_low_coverage_never_returned(tmp_path):
 def test_min_sim_gate(tmp_path):
     # 同形（box）过门槛；异形（circle）相似率低于 85% 被拒
     lib = _lib(tmp_path,
-               dict(name="cbox", chars=CHARS, family="同形體", shape="box"),
-               dict(name="cround", chars=CHARS, family="圓形體", shape="circle"))
+               {"name": "cbox", "chars": CHARS, "family": "同形體", "shape": "box"},
+               {"name": "cround", "chars": CHARS, "family": "圓形體", "shape": "circle"})
     target = next(e for e in lib.entities() if e.psname == "TGT")
     s = _searcher(tmp_path, lib, target, cov_threshold=0.98)
     found = _drain(s)
@@ -83,8 +85,8 @@ def test_min_sim_gate(tmp_path):
 def test_size_range_gate(tmp_path):
     # 同形但小一号：相似率高、size_ratio≈0.5 出区间 → 拒
     lib = _lib(tmp_path,
-               dict(name="cfit", chars=CHARS, family="合適體"),
-               dict(name="csmall", chars=CHARS, family="小號體", scale=0.5))
+               {"name": "cfit", "chars": CHARS, "family": "合適體"},
+               {"name": "csmall", "chars": CHARS, "family": "小號體", "scale": 0.5})
     target = next(e for e in lib.entities() if e.psname == "TGT")
     s = _searcher(tmp_path, lib, target, cov_threshold=0.98)
     found = _drain(s)
@@ -94,7 +96,7 @@ def test_size_range_gate(tmp_path):
 
 def test_miss_path_render_failure_skips(tmp_path, monkeypatch):
     # 未命中路径：候选无缓存 → 需渲染 → 渲染失败 → 跳过；耗尽而非崩溃
-    lib = _lib(tmp_path, dict(name="c0", chars=CHARS, family="圓體0"))
+    lib = _lib(tmp_path, {"name": "c0", "chars": CHARS, "family": "圓體0"})
     target = next(e for e in lib.entities() if e.psname == "TGT")
     cache = Cache(tmp_path / "cache.db")
 
@@ -112,7 +114,7 @@ def test_miss_path_render_failure_skips(tmp_path, monkeypatch):
 def test_rejected_results_still_cached(tmp_path, monkeypatch):
     # 门槛拒绝的结果也必须先入缓存：放宽阈值重算时零渲染复用（spec §9 步骤5）
     lib = _lib(tmp_path,
-               dict(name="cround", chars=CHARS, family="圓形體", shape="circle"))
+               {"name": "cround", "chars": CHARS, "family": "圓形體", "shape": "circle"})
     target = next(e for e in lib.entities() if e.psname == "TGT")
     cache = Cache(tmp_path / "cache.db")
     s = FontSearcher(target, set("永中木水火土石田"), lib, cache,
@@ -153,7 +155,7 @@ def test_cache_hit_path_coverage_gate(tmp_path, monkeypatch):
 def test_target_render_failure_flagged(tmp_path, monkeypatch):
     # 目标渲染失败 → target_error（区别于 exhausted），只解析一次不逐候选重试，
     # 不伪装成「库里没有相似字体」
-    lib = _lib(tmp_path, dict(name="c0", chars=CHARS, family="圓體0"))
+    lib = _lib(tmp_path, {"name": "c0", "chars": CHARS, "family": "圓體0"})
     target = next(e for e in lib.entities() if e.psname == "TGT")
     tpath = str(search_mod._entity_path(target))
     calls: list[str] = []
@@ -175,7 +177,7 @@ def test_target_render_failure_flagged(tmp_path, monkeypatch):
 def test_cache_hit_accepted_without_render(tmp_path, monkeypatch):
     # 预埋 pair 缓存（相似率/大小/覆盖率全达标）→ 整轮搜索零渲染
     from ass_font_substitute.core.similarity.metrics import CompareResult
-    lib = _lib(tmp_path, dict(name="c0", chars=CHARS, family="圓體0"))
+    lib = _lib(tmp_path, {"name": "c0", "chars": CHARS, "family": "圓體0"})
     target = next(e for e in lib.entities() if e.psname == "TGT")
     c0 = next(e for e in lib.entities() if e.psname == "C0")
     cache = Cache(tmp_path / "cache.db")
@@ -197,9 +199,9 @@ def test_cache_hit_accepted_without_render(tmp_path, monkeypatch):
 def test_render_failure_skipped(tmp_path, monkeypatch):
     # 严格门槛：渲染失败的候选无法证明达标 → 跳过，不置灰列出，不中断搜索
     lib = _lib(tmp_path,
-               dict(name="c0", chars=CHARS, family="圓體0"),
-               dict(name="c1", chars=CHARS, family="壞形體"),
-               dict(name="c2", chars=CHARS, family="圓體2"))
+               {"name": "c0", "chars": CHARS, "family": "圓體0"},
+               {"name": "c1", "chars": CHARS, "family": "壞形體"},
+               {"name": "c2", "chars": CHARS, "family": "圓體2"})
     target = next(e for e in lib.entities() if e.psname == "TGT")
     broken = next(e for e in lib.entities() if e.psname == "C1")
     broken_path = str(search_mod._entity_path(broken))
@@ -221,7 +223,7 @@ def test_render_failure_skipped(tmp_path, monkeypatch):
 
 
 def test_resume_then_exhausted(tmp_path):
-    lib = _lib(tmp_path, dict(name="c0", chars=CHARS, family="圓體0"))
+    lib = _lib(tmp_path, {"name": "c0", "chars": CHARS, "family": "圓體0"})
     target = next(e for e in lib.entities() if e.psname == "TGT")
     s = _searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=1)
     first = s.next()

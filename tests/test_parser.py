@@ -1,8 +1,10 @@
 import pytest
 from fontTools.ttLib import TTCollection
 
-from ass_font_substitute.core.fontindex.parser import FontParseError, parse_font_file
-from tests.fonts import build_font, build_ttc
+from ass_font_substitute.core.fontindex.parser import FontParseError
+from ass_font_substitute.core.fontindex.parser import parse_font_file
+from tests.fonts import build_font
+from tests.fonts import build_ttc
 
 
 def test_parse_single(tmp_path):
@@ -24,7 +26,7 @@ def test_parse_single(tmp_path):
 
 def test_parse_ttc(tmp_path):
     p = tmp_path / "a.ttc"
-    build_ttc(p, [dict(chars="永", family="A體"), dict(chars="中", family="B體")])
+    build_ttc(p, [{"chars": "永", "family": "A體"}, {"chars": "中", "family": "B體"}])
     recs = parse_font_file(p)
     assert [r.face_index for r in recs] == [0, 1]
     assert {r.aliases[0] for r in recs} >= {"A體", "B體"}
@@ -33,7 +35,7 @@ def test_parse_ttc(tmp_path):
 def test_parse_ttc_partial_face_failure(tmp_path):
     # spec §11：TTC 个别子字体解析失败 → 跳过该子字体，文件其余照常
     p = tmp_path / "a.ttc"
-    build_ttc(p, [dict(chars="永", family="A體"), dict(chars="中", family="B體")])
+    build_ttc(p, [{"chars": "永", "family": "A體"}, {"chars": "中", "family": "B體"}])
     coll = TTCollection(str(p))
     for f in coll.fonts:                 # 强制读完，避免惰性句柄
         for tag in list(f.keys()):
@@ -49,7 +51,7 @@ def test_parse_ttc_partial_face_failure(tmp_path):
 
 def test_parse_ttc_all_faces_broken_raises(tmp_path):
     p = tmp_path / "a.ttc"
-    build_ttc(p, [dict(chars="永", family="A體"), dict(chars="中", family="B體")])
+    build_ttc(p, [{"chars": "永", "family": "A體"}, {"chars": "中", "family": "B體"}])
     coll = TTCollection(str(p))
     for f in coll.fonts:
         for tag in list(f.keys()):

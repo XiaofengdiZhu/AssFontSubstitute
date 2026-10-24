@@ -1,7 +1,11 @@
 import numpy as np
 
-from ass_font_substitute.core.similarity.metrics import CHAR_WEIGHT, compare, ncc, phash
-from ass_font_substitute.core.similarity.render import RenderBundle, render_bundle
+from ass_font_substitute.core.similarity.metrics import CHAR_WEIGHT
+from ass_font_substitute.core.similarity.metrics import compare
+from ass_font_substitute.core.similarity.metrics import ncc
+from ass_font_substitute.core.similarity.metrics import phash
+from ass_font_substitute.core.similarity.render import RenderBundle
+from ass_font_substitute.core.similarity.render import render_bundle
 from tests.fonts import build_font
 
 
