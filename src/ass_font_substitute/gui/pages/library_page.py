@@ -7,11 +7,12 @@ from PySide6.QtGui import QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
 from ass_font_substitute.gui.lastdir import pick_existing_dir
-from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, InfoBar,
-                            MessageBox, MessageBoxBase, PrimaryPushButton,
-                            PushButton, ScrollArea, StrongBodyLabel,
-                            SubtitleLabel, TextEdit, ToolButton, isDarkTheme,
-                            setFont)
+from ass_font_substitute.gui.pages.subs_page import _ElidedLabel
+from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, IconWidget,
+                            InfoBadge, InfoBar, MessageBox, MessageBoxBase,
+                            PrimaryPushButton, PushButton, ScrollArea,
+                            StrongBodyLabel, SubtitleLabel, TextEdit,
+                            ToolButton, isDarkTheme, setFont)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.jobs import (ensure_library, probe_dir_status,
@@ -99,6 +100,9 @@ class LibraryPage(ScrollArea):
         self.refresh_status()
 
     # ---- 目录列表 ----
+    _BADGE_MAKER = {"ok": InfoBadge.success, "stale": InfoBadge.warning,
+                    "indexing": InfoBadge.info, "offline": InfoBadge.error}
+
     def _rebuild_dir_rows(self):
         while self.dirs_box.count():
             item = self.dirs_box.takeAt(0)
@@ -107,20 +111,32 @@ class LibraryPage(ScrollArea):
         for d in self.vm.dirs:
             card = CardWidget()
             h = QHBoxLayout(card)
-            h.addWidget(StrongBodyLabel(d.path), 1)
-            badge = BodyLabel(d.badge)
-            badge.setObjectName("dirBadge")
-            h.addWidget(badge)
+            h.setContentsMargins(16, 10, 12, 10)
+            h.setSpacing(12)
+            icon = IconWidget(FIF.FOLDER, card)
+            icon.setFixedSize(22, 22)
+            h.addWidget(icon, 0, Qt.AlignVCenter)
+            mid = QVBoxLayout()
+            mid.setSpacing(1)
+            path_lbl = _ElidedLabel(d.path)     # 窄窗中部省略，tooltip 全路径
+            path_lbl.setToolTip(d.path)
+            mid.addWidget(path_lbl)
+            sub = CaptionLabel(f"文件 {d.files} · 字体 {d.fonts}"
+                               f" · 支持简体 {d.sc} · 支持繁体 {d.tc}")
+            mid.addWidget(sub)
+            h.addLayout(mid, 1)
+            badge = self._BADGE_MAKER.get(d.state, InfoBadge.info)(d.badge)
+            h.addWidget(badge, 0, Qt.AlignVCenter)
             upd = ToolButton(FIF.SYNC)
             upd.setToolTip("更新该目录索引")
             upd.setEnabled(self._index_worker is None and d.state != "indexing")
             upd.clicked.connect(lambda _=False, p=d.path: self._start_update_dir(p))
-            h.addWidget(upd)
+            h.addWidget(upd, 0, Qt.AlignVCenter)
             rm = ToolButton(FIF.DELETE)
             # 更新在途禁删：索引线程正写该目录 db，删后状态失配
             rm.setEnabled(self._index_worker is None)
             rm.clicked.connect(lambda _=False, p=d.path: self._remove_dir(p))
-            h.addWidget(rm)
+            h.addWidget(rm, 0, Qt.AlignVCenter)
             self.dirs_box.addWidget(card)
 
     def _add_dir(self):
@@ -164,9 +180,10 @@ class LibraryPage(ScrollArea):
 
     def _on_result(self, tag, payload):
         if tag == "lib":
-            snap, statuses = payload
+            snap, statuses, dir_stats = payload
             self.vm.refresh(statuses, snap.lib.stats(),
-                            snap.lib.dir_overlaps(), snap.offline_dirs)
+                            snap.lib.dir_overlaps(), snap.offline_dirs,
+                            dir_stats)
             self._apply_stats(snap.lib.stats())
             self._rebuild_dir_rows()
             self._warn_overlaps()
@@ -373,11 +390,32 @@ class _FailuresDialog(MessageBoxBase):
         return True
 
 
+def _dir_library_stats(snap, dirs: list[str]) -> dict:
+    """每目录库内统计（worker 线程纯数据）：文件/字体/支持简繁。
+
+    实体 dir_path 是 str(Path(dir)) 规范化形（反斜杠），目录表是原样
+    字符串（可能正斜杠），按 Path 归一映射回原键。"""
+    out = {d: {"files": set(), "fonts": 0, "sc": 0, "tc": 0} for d in dirs}
+    by_norm = {str(Path(d)): d for d in dirs}
+    for e in snap.lib.entities():
+        key = by_norm.get(e.dir_path)
+        if key is None:
+            continue
+        s = out[key]
+        s["fonts"] += 1
+        s["files"].add(e.rel_path)
+        if e.script in ("简", "简繁"):
+            s["sc"] += 1
+        if e.script in ("繁", "简繁"):
+            s["tc"] += 1
+    return {d: {**v, "files": len(v["files"])} for d, v in out.items()}
+
+
 def _lib_job(ctx, dirs):
     """worker 线程：聚合库快照 + 逐目录只读探测（probe 含逐文件 stat，
     移出 UI 线程；与 lib 构建同任务串行，无顺序竞态）。"""
     snap = ensure_library(ctx, dirs)
-    return snap, [probe_dir_status(d) for d in dirs]
+    return snap, [probe_dir_status(d) for d in dirs], _dir_library_stats(snap, dirs)
 
 
 def _failures_job(ctx, dirs):

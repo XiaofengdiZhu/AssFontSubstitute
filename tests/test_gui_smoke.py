@@ -161,3 +161,16 @@ def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
     assert w.browse_page.count_label.text() == "0 款字体"
     assert w.subs_page._gen == gen0 + 1
     w.close()
+
+
+def test_dir_library_stats_maps_normalized_paths(qapp, tmp_path, monkeypatch):
+    # 实体 dir_path 是 str(Path()) 规范形（反斜杠），目录表原样（可正斜杠）
+    from types import SimpleNamespace
+    from ass_font_substitute.gui.pages.library_page import _dir_library_stats
+    ent = SimpleNamespace(dir_path=str(tmp_path), rel_path="a.ttf", script="简")
+    fwd = str(tmp_path).replace("\\", "/")
+    snap = SimpleNamespace(lib=SimpleNamespace(entities=lambda: [ent]))
+    out = _dir_library_stats(snap, [fwd])
+    assert out[fwd] == {"files": 1, "fonts": 1, "sc": 1, "tc": 0}
+    # 未知目录（非本库目录）不进结果
+    assert _dir_library_stats(snap, ["X:/nowhere"])["X:/nowhere"]["fonts"] == 0

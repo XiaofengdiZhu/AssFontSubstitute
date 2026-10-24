@@ -12,6 +12,10 @@ class DirRow:
     state: str = "stale"        # ok / stale / indexing / offline
     added: int = 0
     changed: int = 0
+    files: int = 0              # 库内统计：已索引文件数
+    fonts: int = 0              # 字体实体数（版本去重后）
+    sc: int = 0                 # 支持简体
+    tc: int = 0                 # 支持繁体
 
     @property
     def badge(self) -> str:
@@ -50,7 +54,8 @@ class LibraryVM:
         self.persist_dirs()
 
     def refresh(self, statuses: list[DirStatus], snapshot_stats: dict,
-                overlaps: list[str], offline_dirs: list[str]) -> None:
+                overlaps: list[str], offline_dirs: list[str],
+                dir_stats: dict | None = None) -> None:
         by = {s.path: s for s in statuses}
         offline_set = {str(Path(p)) for p in offline_dirs}
         for d in self.dirs:
@@ -64,6 +69,10 @@ class LibraryVM:
                 d.state, d.added, d.changed = "offline", 0, 0
             else:
                 d.state, d.added, d.changed = s.state, s.added, s.changed
+            st = (dir_stats or {}).get(d.path)
+            if st:
+                d.files, d.fonts = st["files"], st["fonts"]
+                d.sc, d.tc = st["sc"], st["tc"]
         self.stats = snapshot_stats
         self.overlaps = list(overlaps)
         self.failed_dirs = [d.path for d in self.dirs if d.state == "offline"]
