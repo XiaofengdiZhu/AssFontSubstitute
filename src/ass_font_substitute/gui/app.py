@@ -4,6 +4,7 @@ import logging
 import sys
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF, FluentWindow, NavigationItemPosition
 
@@ -53,6 +54,13 @@ def main() -> int:
     # fontTools 解析怪字体喷大量 warning（post.stringData 等），界面程序静默
     logging.getLogger("fontTools").setLevel(logging.ERROR)
     app = QApplication(sys.argv)
+    if sys.platform == "win32":
+        # 默认 GDI 风格 hinting 在分数缩放（如 175%）下按像素网格对齐笔画，
+        # 小字号汉字笔画粘连发虚；PreferNoHinting 线性缩放笔画均匀且启用
+        # 亚像素定位（Ghost Downloader 同配方；A/B 证据 temp/hint_ab.py）
+        font = app.font()
+        font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
+        app.setFont(font)
     w = AFSWindow()
     w.show()
     return app.exec()
