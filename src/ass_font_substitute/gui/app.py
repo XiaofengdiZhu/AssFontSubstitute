@@ -13,6 +13,7 @@ from ass_font_substitute.gui.pages.library_page import LibraryPage
 from ass_font_substitute.gui.pages.settings_page import SettingsPage
 from ass_font_substitute.gui.pages.subs_page import SubsPage
 from ass_font_substitute.gui.settings_store import Settings
+from ass_font_substitute.gui.widgets.dialog_ani import patch_mask_dialog_animation
 from ass_font_substitute.gui.workers import CoreWorker
 
 
@@ -54,6 +55,9 @@ def main() -> int:
     # fontTools 解析怪字体喷大量 warning（post.stringData 等），界面程序静默
     logging.getLogger("fontTools").setLevel(logging.ERROR)
     app = QApplication(sys.argv)
+    # 弹窗开/关动画换自绘层（Ghost Downloader 方案）：顶层窗口零特效，
+    # 杜绝顶层特效引发的 native 窗口重建闪现带标题栏小窗
+    patch_mask_dialog_animation()
     if sys.platform == "win32":
         # 默认 GDI 风格 hinting 在分数缩放（如 175%）下按像素网格对齐笔画，
         # 小字号汉字笔画粘连发虚；PreferNoHinting 线性缩放笔画均匀且启用
