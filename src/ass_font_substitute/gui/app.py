@@ -62,12 +62,15 @@ _DEFAULT_THEME_COLOR = QColor("#009faa")
 
 
 def _system_accent() -> QColor | None:
-    """Windows/macOS 系统强调色；取不到（其他平台/注册表缺失）返回 None。"""
+    """Windows/macOS 系统强调色；取不到（其他平台/DWM 查询失败）返回
+    None。qframelesswindow 走 DWM DwmGetColorizationColor，失败时返回
+    无效 QColor 并 warn，这里一并拦成 None。"""
     if sys.platform not in ("win32", "darwin"):
         return None
     try:
         from qframelesswindow.utils import getSystemAccentColor
-        return getSystemAccentColor()
+        c = getSystemAccentColor()
+        return c if (c is not None and c.isValid()) else None
     except Exception:
         return None
 
@@ -206,13 +209,16 @@ class AFSWindow(FluentWindow):
         qconfig.themeChangedFinished.emit()
 
     def _poll_system_accent(self):
-        """「跟随系统」强调色在系统换色后 2s 内跟上；自定义颜色不受影响。"""
+        """「跟随系统」强调色在系统换色后 2s 内跟上；自定义颜色不受影响。
+        必须走 _apply_theme_color 统一入口：setThemeColor 重拼 qss 用的是
+        tune 时算好的静态覆盖串，深强调色时存的是空串，换浅色后重拼即
+        白字回归（审查 P0）——tune_all 必须跟着跑。"""
         if self.settings.get("theme_color"):
             return
         c = _system_accent()
         if c is not None and c != self._last_sys_accent:
             self._last_sys_accent = c
-            setThemeColor(c, save=False)
+            self._apply_theme_color("")
 
     def closeEvent(self, e):
         self.library_page.shutdown()        # 先汇合在途索引线程（写库中不能退）

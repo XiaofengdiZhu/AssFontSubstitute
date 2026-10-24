@@ -23,26 +23,48 @@ def _custom_qss(widget) -> str:
 
 def test_primary_text_adapts_to_accent_luma(qapp):
     # qfw 缺陷回归：BUTTON.qss 写死 primary 按钮白字，浅色强调色下不可读。
-    # tune 按主题色 luma 换深色字；正常深度清覆盖恢复白字；来回切换可撤销
+    # tune 按主题色 luma 换深色字；正常深度清覆盖恢复白字；来回切换可撤销。
+    # 文字像素哨兵（升级 canary）：qfw 若改选择器体系，custom-qss 字符串
+    # 断言会照常绿而真实渲染翻车——渲染层断言不依赖 qss 串细节
     from qfluentwidgets import PrimaryPushButton
     from qfluentwidgets import setThemeColor
 
     from ass_font_substitute.gui.widgets.primary_text import tune
 
     b = PrimaryPushButton("替换并保存")
+    b.resize(150, 34)
+
+    def glyph_pixels(light_bg: bool) -> int:
+        """文字笔画像素数：浅底数暗笔画，深底数亮笔画（背景色已知）"""
+        b.show()
+        qapp.processEvents()
+        img = b.grab().toImage()
+        if light_bg:
+            return sum(1 for y in range(8, 26) for x in range(30, 140)
+                       if 0 <= x < img.width() and 0 <= y < img.height()
+                       and img.pixelColor(x, y).red() < 120)
+        return sum(1 for y in range(8, 26) for x in range(30, 140)
+                   if 0 <= x < img.width() and 0 <= y < img.height()
+                   and min(img.pixelColor(x, y).red(),
+                           img.pixelColor(x, y).green(),
+                           img.pixelColor(x, y).blue()) > 200)
+
     try:
-        setThemeColor("#009faa", save=False)      # qfw 出厂青：luma≈0.44 白字合适
+        setThemeColor("#009faa", save=False)      # 出厂青：luma≈0.44 白字合适
         tune(b)
         assert _custom_qss(b) == ""               # 无覆盖
+        assert glyph_pixels(light_bg=False) > 0   # 白字在
 
         setThemeColor("#f2f2f2", save=False)      # 极浅强调色
         tune(b)
         qss = _custom_qss(b)
         assert "rgba(0, 0, 0" in qss and ":hover" in qss and ":pressed" in qss
+        assert glyph_pixels(light_bg=True) > 0    # 深字真实渲染
 
         setThemeColor("#009faa", save=False)      # 切回：覆盖必须撤销
         tune(b)
         assert _custom_qss(b) == ""
+        assert glyph_pixels(light_bg=False) > 0   # 白字回来
     finally:
         setThemeColor("#009faa", save=False)
         b.deleteLater()

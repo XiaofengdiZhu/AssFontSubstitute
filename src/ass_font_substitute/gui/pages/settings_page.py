@@ -462,6 +462,8 @@ class SettingsPage(ScrollArea):
         dlg.colorChanged.connect(
             lambda c: self.settings.set("theme_color", c.name()))
         dlg.exec()
+        dlg.deleteLater()                 # HuePanel 大 pixmap 别滞留到关窗
+        self._sync_accent_content()       # 确认后卡面色值跟上（审查 P1）
         if not self.settings.get("theme_color"):
             # 取消/原色确认而原本是跟随系统：选项回「跟随系统」
             self.accent_combo.blockSignals(True)
