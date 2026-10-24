@@ -91,8 +91,16 @@ class _AnimationLayer(QWidget):
         self._animation.stateChanged.connect(self._on_state_changed)
         # 对话框声明不透明，Qt 就不再重画底下的页面
         dialog.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
-        # 关闭时当场截图，窗口最小化时也能关掉
         if is_closing:
+            # 关闭时当场截图，窗口最小化时也能关掉
+            self._run()
+        else:
+            # 打开不能等首次 paintEvent 再截图：本层创建于 showEvent，
+            # 首帧绘制时 dialog 仍在 InPaintEvent 里，_build_panel 的
+            # render 会触发 Qt 递归重绘中止并废掉本帧画笔（终端刷
+            # Recursive repaint/painter not active）。showEvent 阶段
+            # 不在绘制过程内，render 合法；先强制激活布局再截。
+            self._dialog.layout().activate()
             self._run()
         self.show()
         # polish 会清掉这个属性，所以在 show 之后设置
