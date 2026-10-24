@@ -1,3 +1,4 @@
 temp/
 refs/
 __pycache__/
+.zcode/
