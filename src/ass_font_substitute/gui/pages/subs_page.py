@@ -92,7 +92,7 @@ class SubsPage(ScrollArea):
         self.seg_dir.setCurrentItem("t2s")
         pl.addWidget(_fld("孪生检测方向", self.seg_dir))
         self.preview_edit = LineEdit()
-        self.preview_edit.setPlaceholderText("预览字体（留空显示字体名）")
+        self.preview_edit.setPlaceholderText("预览文字（留空显示字体名）")
         self.preview_edit.setClearButtonEnabled(True)
         self.preview_edit.setFixedWidth(260)
         pl.addWidget(self.preview_edit)

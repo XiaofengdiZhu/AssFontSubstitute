@@ -20,7 +20,7 @@ class BrowsePage(ScrollArea):
         self.view = _inner_view(self)
         v = self.view.vbox
         self.preview_edit = SearchLineEdit()
-        self.preview_edit.setPlaceholderText("预览字体（留空显示字体名）")
+        self.preview_edit.setPlaceholderText("预览文字（留空显示字体名）")
         v.addWidget(self.preview_edit)
 
         filters = QHBoxLayout()
