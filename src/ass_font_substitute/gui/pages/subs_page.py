@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
-                            InfoBadge, InfoBar, LineEdit, PrimaryPushButton,
-                            PushButton, ScrollArea, SegmentedWidget,
-                            StrongBodyLabel, SwitchButton)
+                            FlowLayout, InfoBadge, InfoBar, LineEdit,
+                            PrimaryPushButton, PushButton, ScrollArea,
+                            SegmentedWidget, StrongBodyLabel, SwitchButton)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.jobs import (apply_to_file, classify_one,
@@ -47,29 +47,47 @@ class SubsPage(ScrollArea):
 
         self.view = QWidget(self)
         v = QVBoxLayout(self.view)
+        v.setSpacing(12)
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.view.setMinimumWidth(420)
 
         head = QHBoxLayout()
         head.addWidget(StrongBodyLabel("处理字幕"))
         head.addStretch(1)
-        self.summary = CaptionLabel("")
+        self.summary = _BadgeRow()
         head.addWidget(self.summary)
-        self.btn_add = PushButton(FIF.ADD, "添加文件")
-        self.btn_reload = PushButton(FIF.SYNC, "重新载入")
-        head.addWidget(self.btn_add)
-        head.addWidget(self.btn_reload)
         v.addLayout(head)
 
+        files_card = CardWidget()
+        fl = QVBoxLayout(files_card)
+        fl.setSpacing(6)
+        fhead = QHBoxLayout()
+        fhead.setSpacing(8)
+        fhead.addWidget(StrongBodyLabel("字幕文件"))
+        self.files_summary = CaptionLabel("0 / 0 个文件 · 0 种字体")
+        fhead.addWidget(self.files_summary)
+        fhead.addStretch(1)
+        self.btn_add = PushButton(FIF.ADD, "添加文件")
+        self.btn_reload = PushButton(FIF.SYNC, "重新载入")
+        fhead.addWidget(self.btn_add)
+        fhead.addWidget(self.btn_reload)
+        fl.addLayout(fhead)
         self.files_box = QVBoxLayout()
-        v.addLayout(self.files_box)
+        self.files_box.setSpacing(6)
+        fl.addLayout(self.files_box)
+        v.addWidget(files_card)
 
-        params = QHBoxLayout()
+        params = QWidget(self.view)
+        pl = FlowLayout(params, needAni=False, isTight=False)
+        pl.setContentsMargins(0, 0, 0, 0)
+        pl.setHorizontalSpacing(18)
+        pl.setVerticalSpacing(8)
         self.seg_dir = SegmentedWidget(self)
         self.seg_dir.addItem("t2s", "繁 → 简", lambda: self._set_direction("t2s"))
         self.seg_dir.addItem("s2t", "简 → 繁", lambda: self._set_direction("s2t"))
         self.seg_dir.setCurrentItem("t2s")
-        params.addWidget(self.seg_dir)
         self.spin_cov = _stepper(_pct_i(COV_BOUNDS[0]), _pct_i(COV_BOUNDS[1]), 1,
                                  _pct_i(self.settings.get("cov_threshold")), "%")
         self.spin_sim = _stepper(_pct_i(SIM_BOUNDS[0]), _pct_i(SIM_BOUNDS[1]), 5,
@@ -78,16 +96,17 @@ class SubsPage(ScrollArea):
                                   _pct_i(self.settings.get("size_min")), "%")
         self.spin_smax = _stepper(_pct_i(SIZE_BOUNDS[0]), _pct_i(SIZE_BOUNDS[1]), 1,
                                   _pct_i(self.settings.get("size_max")), "%")
-        for label, spin in (("覆盖率", self.spin_cov), ("最低相似率", self.spin_sim),
-                            ("大小下限", self.spin_smin), ("大小上限", self.spin_smax)):
-            params.addWidget(CaptionLabel(label))
-            params.addWidget(spin)
-        params.addWidget(_vline())
+        pl.addWidget(_fld("孪生检测方向", self.seg_dir))
+        pl.addWidget(_fld("覆盖率", self.spin_cov))
+        pl.addWidget(_fld("最低相似率", self.spin_sim))
+        pl.addWidget(_fld("大小下限", self.spin_smin))
+        pl.addWidget(_fld("大小上限", self.spin_smax))
         self.preview_edit = LineEdit()
         self.preview_edit.setPlaceholderText("预览字体（留空显示字体名）")
-        self.preview_edit.setFixedWidth(220)
-        params.addWidget(self.preview_edit)
-        v.addLayout(params)
+        self.preview_edit.setClearButtonEnabled(True)
+        self.preview_edit.setFixedWidth(260)
+        pl.addWidget(self.preview_edit)
+        v.addWidget(params)
 
         self.cards_box = QVBoxLayout()
         v.addLayout(self.cards_box)
@@ -153,7 +172,9 @@ class SubsPage(ScrollArea):
             cb.setChecked(f.checked)
             cb.toggled.connect(lambda on, p=f.path: self._on_file_checked(p, on))
             h.addWidget(cb)
-            h.addWidget(BodyLabel(Path(f.path).name), 1)
+            name = _ElidedLabel(Path(f.path).name)
+            name.setToolTip(f.path)
+            h.addWidget(name, 1)
             if f.error:
                 h.addWidget(InfoBadge.error("解析失败"))
                 row.setToolTip(f.error)
@@ -162,9 +183,17 @@ class SubsPage(ScrollArea):
                 if f.unknown_styles:
                     h.addWidget(InfoBadge.warning("未知样式"))
             self.files_box.addWidget(row)
+        self._update_files_summary()
+
+    def _update_files_summary(self):
+        checked = len(self.vm.checked_parses())
+        total = len(self.vm.files)
+        n_fonts = len(self.vm.merged_usages())
+        self.files_summary.setText(f"{checked} / {total} 个文件 · {n_fonts} 种字体")
 
     def _on_file_checked(self, path, on):
         self.vm.set_checked(path, on)
+        self._update_files_summary()
         self._reclassify()
 
     # ---- 结果分发（UI 线程；vm 一切变更都在此）----
@@ -396,9 +425,7 @@ class SubsPage(ScrollArea):
         for c in self.vm.cards:
             if c.kind in kinds:
                 kinds[c.kind] += 1
-        self.summary.setText(
-            f"保留 {kinds['keep']} / 孪生对应 {kinds['twin']} / "
-            f"需替换 {kinds['replace']} / 库中没有 {kinds['missing']}")
+        self.summary.set_counts(kinds)
         n, total = self.vm.replacement_counts()
         self.replace_label.setText(f"将替换 {n} / {total} 种字体")
         self.btn_apply.setEnabled(bool(self.vm.checked_parses())
@@ -434,21 +461,77 @@ def _pct_i(x) -> int:
     return round(x * 100)
 
 
+def _fld(label: str, w: QWidget) -> QWidget:
+    """参数工具条的字段对：标签+控件，交 FlowLayout 换行排布。"""
+    box = QWidget()
+    h = QHBoxLayout(box)
+    h.setContentsMargins(0, 0, 0, 0)
+    h.setSpacing(8)
+    h.addWidget(CaptionLabel(label))
+    h.addWidget(w)
+    return box
+
+
 def _stepper(lo, hi, step, val, suffix):
     s = SpinBox()
     s.setRange(lo, hi)
     s.setSingleStep(step)
     s.setValue(val)
     s.setSuffix(suffix)
+    s.setFixedWidth(140)
     return s
 
 
-def _vline():
-    w = QWidget()
-    w.setFixedWidth(1)
-    w.setFixedHeight(24)
-    w.setStyleSheet("background: rgba(128,128,128,0.4);")
-    return w
+class _ElidedLabel(BodyLabel):
+    """中间省略号文件名：随宽度重算，长名不撑横向。"""
+
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self._full = text
+        self._update()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._update()
+
+    def _update(self):
+        fm = self.fontMetrics()
+        self.setText(fm.elidedText(self._full, Qt.ElideMiddle,
+                                   max(120, self.width())))
+
+
+class _BadgeRow(QWidget):
+    """页头分类计数徽章行（线框配色）；text() 供测试回读。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._h = QHBoxLayout(self)
+        self._h.setContentsMargins(0, 0, 0, 0)
+        self._h.setSpacing(8)
+        self._counts = {"keep": 0, "twin": 0, "replace": 0, "missing": 0}
+        self._rebuild()
+
+    def set_counts(self, kinds: dict):
+        self._counts = {k: kinds.get(k, 0) for k in self._counts}
+        self._rebuild()
+
+    def text(self) -> str:
+        c = self._counts
+        return (f"保留 {c['keep']} / 孪生对应 {c['twin']} / "
+                f"需替换 {c['replace']} / 库中没有 {c['missing']}")
+
+    def _rebuild(self):
+        while self._h.count():
+            it = self._h.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+        c = self._counts
+        for text, mk in ((f"保留 {c['keep']}", InfoBadge.success),
+                         (f"孪生对应 {c['twin']}", InfoBadge.info),
+                         (f"需替换 {c['replace']}", InfoBadge.warning),
+                         (f"库中没有 {c['missing']}", InfoBadge.error)):
+            self._h.addWidget(mk(text))
+        self._h.addStretch(1)
 
 
 # ---- worker 任务（纯数据进出；ctx 由 CoreWorker 提供）----
