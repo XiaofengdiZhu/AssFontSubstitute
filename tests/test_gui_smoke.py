@@ -114,6 +114,8 @@ def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
     row = page.vm.dirs[0]
     # 目录行统计：文件=盘上全部支持后缀（含坏文件）；失败/旧版=bad 表
     assert (row.files, row.fonts, row.fail) == (2, 1, 1)
+    # 失败清单卡动态计数（PushSettingCard 无 content() 读口，走 contentLabel）
+    assert "坏文件 1" in page.failures_card.contentLabel.text()
     w.close()
 
 
@@ -148,11 +150,13 @@ def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
             break
     assert len(w.browse_page.pvm.entities) == 1
 
-    # 更新在途：行内按钮禁用（_index_worker 先于重排行赋值）
+    # 更新在途：行内按钮禁用（_index_worker 先于重排行赋值）；
+    # ToolButton 含标题栏刷新钮（常 enabled），禁用的是行内更新+删除两枚
     page._index_worker = object()
     page._rebuild_dir_rows()
     row = page.dirs_box.itemAt(0).widget()
-    assert all(not b.isEnabled() for b in row.findChildren(ToolButton))
+    assert len([b for b in row.findChildren(ToolButton)
+                if not b.isEnabled()]) == 2
     page._index_worker = None
     page._rebuild_dir_rows()
     row = page.dirs_box.itemAt(0).widget()

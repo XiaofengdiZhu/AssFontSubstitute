@@ -16,7 +16,9 @@ class DirRow:
     fonts: int = 0              # 字体实体数（版本去重后）
     sc: int = 0                 # 支持简体
     tc: int = 0                 # 支持繁体
-    fail: int = 0               # 失败/旧版 = 坏文件表行数 + 版本去重跳过数
+    bad: int = 0                # 坏文件表行数
+    skipped: int = 0            # 版本去重跳过数
+    fail: int = 0               # 失败/旧版 = bad + skipped
 
     @property
     def badge(self) -> str:
@@ -64,19 +66,21 @@ class LibraryVM:
                 continue                        # 更新进行中不被探测结果覆盖
             if str(Path(d.path)) in offline_set:
                 d.state, d.added, d.changed = "offline", 0, 0
-                d.files, d.fail = 0, 0
+                d.files, d.bad, d.skipped, d.fail = 0, 0, 0, 0
                 continue
             s = by.get(d.path)
             if s is None or s.state in ("missing", "offline"):
                 d.state, d.added, d.changed = "offline", 0, 0
-                d.files, d.fail = 0, 0
+                d.files, d.bad, d.skipped, d.fail = 0, 0, 0, 0
             else:
                 d.state, d.added, d.changed = s.state, s.added, s.changed
-                d.files, d.fail = s.total, s.bad
+                d.files, d.bad = s.total, s.bad
+                d.skipped = 0
             st = (dir_stats or {}).get(d.path)
             if st:
                 d.fonts, d.sc, d.tc = st["fonts"], st["sc"], st["tc"]
-                d.fail += st.get("skipped", 0)
+                d.skipped = st.get("skipped", 0)
+            d.fail = d.bad + d.skipped
         self.stats = snapshot_stats
         self.overlaps = list(overlaps)
         self.failed_dirs = [d.path for d in self.dirs if d.state == "offline"]

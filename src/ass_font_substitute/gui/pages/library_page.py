@@ -4,16 +4,17 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.pages.subs_page import _ElidedLabel
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget,
                             GroupHeaderCardWidget, InfoBadge,
                             InfoBar, MessageBox, MessageBoxBase,
-                            PrimaryPushButton, PushButton, ScrollArea,
-                            SubtitleLabel, TextEdit,
-                            ToolButton, isDarkTheme, setFont)
+                            PrimaryPushButton, PushButton, PushSettingCard,
+                            ScrollArea, TextEdit,
+                            ToolButton, TransparentToolButton, isDarkTheme,
+                            setFont)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.jobs import (ensure_library, probe_dir_status,
@@ -41,6 +42,10 @@ class LibraryPage(ScrollArea):
         v = QVBoxLayout(self.view)
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+
+        page_title = QLabel("字体库管理")
+        setFont(page_title, 20)     # 与设置页 SettingCardGroup 标题同款（Normal 字重）
+        v.addWidget(page_title)
 
         # 统计条置顶、操作条其下：打开页先读库概况再看到操作
         self.stat_cards: dict[str, BodyLabel] = {}
@@ -70,16 +75,13 @@ class LibraryPage(ScrollArea):
             stat_row.addLayout(col, 1)
         v.addWidget(stat_card)
 
-        head = QHBoxLayout()
-        self.btn_add = PushButton(FIF.FOLDER_ADD, "添加字体目录")
-        self.btn_refresh = PushButton(FIF.SYNC, "刷新状态")
-        self.btn_failures = PushButton(FIF.INFO, "查看失败清单")
-        self.btn_update = PrimaryPushButton(FIF.UPDATE, "更新全部索引")
-        for b in (self.btn_add, self.btn_refresh, self.btn_failures):
-            head.addWidget(b)
-        head.addStretch(1)
-        head.addWidget(self.btn_update)     # 主操作靠右
-        v.addLayout(head)
+        # 按钮初始无布局，_rebuild_dir_rows 时装进分组卡标题栏/失败卡
+        self.btn_add = PushButton(FIF.FOLDER_ADD, "添加目录")
+        self.btn_add.setToolTip("选择一个字体目录加入列表")
+        self.btn_refresh = TransparentToolButton(FIF.SYNC)
+        self.btn_refresh.setToolTip("刷新状态")
+        self.btn_update = PrimaryPushButton(FIF.UPDATE, "更新全部")
+        self.btn_update.setToolTip("更新全部目录的索引")
 
         # 更新态：按钮原地变「[旋转环]取消更新」，宽度锁定防文字变短塌缩
         self._busy_timer = QTimer(self)
@@ -90,12 +92,16 @@ class LibraryPage(ScrollArea):
 
         self.dirs_box = QVBoxLayout()
         v.addLayout(self.dirs_box)
+
+        self.failures_card = PushSettingCard("打开", FIF.INFO, "查看失败清单",
+                                             "暂无失败文件")
+        v.addWidget(self.failures_card)
         v.addStretch(1)
 
         self.btn_add.clicked.connect(self._add_dir)
         self.btn_refresh.clicked.connect(self.refresh_status)
         self.btn_update.clicked.connect(self._on_update_clicked)
-        self.btn_failures.clicked.connect(self._show_failures)
+        self.failures_card.clicked.connect(self._show_failures)
         self.worker.result.connect(self._on_result)
         self.worker.failed.connect(self._on_failed)
         self.refresh_status()
@@ -109,13 +115,14 @@ class LibraryPage(ScrollArea):
             item = self.dirs_box.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        if not self.vm.dirs:
-            return
-        # 一张 GroupHeaderCardWidget 框住全部目录行（行间分隔线由组件管），
-        # 自带 48px 标题头不显示——只借「一卡多行」框架
+        # 一张 GroupHeaderCardWidget 框住全部目录行（行间分隔线由组件管）；
+        # 标题栏当工具条：左=标题+刷新图标，右=添加目录+更新全部
         card = GroupHeaderCardWidget(self)
-        card.headerView.hide()
-        card.separator.hide()
+        card.setTitle("字体目录")
+        card.headerLayout.addWidget(self.btn_refresh)
+        card.headerLayout.addStretch(1)
+        card.headerLayout.addWidget(self.btn_add)
+        card.headerLayout.addWidget(self.btn_update)
         for d in self.vm.dirs:
             right = QWidget()
             rh = QHBoxLayout(right)
@@ -143,7 +150,23 @@ class LibraryPage(ScrollArea):
             path_lbl.setToolTip(d.path)
             group.textLayout.insertWidget(0, path_lbl)
             group.titleLabel.hide()
+        if not self.vm.dirs:
+            ph = CaptionLabel("（请添加字体目录）")
+            ph.setAlignment(Qt.AlignCenter)
+            wrap = QWidget()
+            wh = QHBoxLayout(wrap)
+            wh.setContentsMargins(24, 10, 24, 14)
+            wh.addWidget(ph)
+            card.viewLayout.addWidget(wrap)
         self.dirs_box.addWidget(card)
+        self._update_failures_card()
+
+    def _update_failures_card(self):
+        bad = sum(d.bad for d in self.vm.dirs)
+        skipped = sum(d.skipped for d in self.vm.dirs)
+        self.failures_card.setContent(
+            f"坏文件 {bad} · 旧版跳过 {skipped}" if bad or skipped
+            else "暂无失败文件")
 
     def _add_dir(self):
         d = pick_existing_dir(self, self.settings, "选择字体目录", "library")
