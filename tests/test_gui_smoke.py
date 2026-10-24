@@ -155,7 +155,7 @@ def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
     assert all(b.isEnabled() for b in row.findChildren(ToolButton))
 
     gen0 = w.subs_page._gen
-    page._remove_dir(str(d))                    # → libraryChanged 广播
+    page._remove_dir_confirmed(str(d))          # → libraryChanged 广播（确认弹窗路径 offscreen 不测，直接走确认后段）
     assert w.browse_page.pvm.entities == []
     assert not w.browse_page.hint.isHidden()
     assert w.browse_page.count_label.text() == "0 款字体"

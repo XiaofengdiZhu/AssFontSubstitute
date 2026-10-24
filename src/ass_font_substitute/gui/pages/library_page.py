@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from ass_font_substitute.gui.lastdir import pick_existing_dir
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget,
-                            InfoBar, MessageBoxBase, PrimaryPushButton,
-                            PushButton, ScrollArea, StrongBodyLabel,
-                            SubtitleLabel, TextEdit, ToolButton)
+                            InfoBar, MessageBox, MessageBoxBase,
+                            PrimaryPushButton, PushButton, ScrollArea,
+                            StrongBodyLabel, SubtitleLabel, TextEdit,
+                            ToolButton)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.jobs import (ensure_library, probe_dir_status,
@@ -118,6 +121,18 @@ class LibraryPage(ScrollArea):
         self.refresh_status()
 
     def _remove_dir(self, path):
+        """二次确认后移除：手滑即删太危险（目录行删除按钮紧邻更新按钮）。"""
+        box = MessageBox(
+            "删除字体目录",
+            f"确定从列表移除以下目录吗？\n\n{path}\n\n"
+            "仅移出列表：字体文件与已建索引不会被删除。",
+            self.window())
+        box.yesButton.setText("删除")
+        box.cancelButton.setText("取消")
+        if box.exec():
+            self._remove_dir_confirmed(path)
+
+    def _remove_dir_confirmed(self, path):
         self.vm.remove_dir(path)
         self._rebuild_dir_rows()
         self.refresh_status()
