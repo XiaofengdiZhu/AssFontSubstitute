@@ -3,15 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtGui import QFont, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
 from ass_font_substitute.gui.lastdir import pick_existing_dir
-from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget,
-                            InfoBar, MessageBox, MessageBoxBase,
-                            PrimaryPushButton, PushButton, ScrollArea,
-                            StrongBodyLabel, SubtitleLabel, TextEdit,
-                            ToolButton)
+from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, InfoBar,
+                            MessageBox, MessageBoxBase, PrimaryPushButton,
+                            PushButton, ScrollArea, StrongBodyLabel,
+                            SubtitleLabel, TextEdit, ToolButton, isDarkTheme,
+                            setFont)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.jobs import (ensure_library, probe_dir_status,
@@ -60,18 +60,31 @@ class LibraryPage(ScrollArea):
         v.addWidget(self.btn_failures, 0, Qt.AlignLeft)
 
         self.stat_cards: dict[str, BodyLabel] = {}
-        stat_row = QHBoxLayout()
-        for key, label in _STAT_KEYS:
-            card = CardWidget()
-            cv = QVBoxLayout(card)
+        stat_card = CardWidget()
+        stat_row = QHBoxLayout(stat_card)
+        stat_row.setContentsMargins(24, 14, 24, 14)
+        stat_row.setSpacing(0)
+        for i, (key, label) in enumerate(_STAT_KEYS):
+            if i:
+                dark = isDarkTheme()
+                sep = QFrame()
+                sep.setFixedSize(1, 30)
+                sep.setStyleSheet(
+                    f"background-color: rgba({'255,255,255' if dark else '0,0,0'},"
+                    f"{36 if dark else 18});")
+                stat_row.addWidget(sep, 0, Qt.AlignVCenter)
+            col = QVBoxLayout()
+            col.setSpacing(2)
             title = CaptionLabel(label)
+            title.setAlignment(Qt.AlignCenter)
             val = BodyLabel("—")
             val.setAlignment(Qt.AlignCenter)
+            setFont(val, 18, QFont.Weight.DemiBold)   # 数值层级高于标题
             self.stat_cards[key] = val
-            cv.addWidget(title)
-            cv.addWidget(val)
-            stat_row.addWidget(card)
-        v.addLayout(stat_row)
+            col.addWidget(title)
+            col.addWidget(val)
+            stat_row.addLayout(col, 1)
+        v.addWidget(stat_card)
 
         self.dirs_box = QVBoxLayout()
         v.addLayout(self.dirs_box)
