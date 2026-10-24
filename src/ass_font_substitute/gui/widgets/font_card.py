@@ -70,12 +70,19 @@ class FontCard(CardWidget):
             v.addLayout(foot)
 
     # ---- 头部 ----
+    def _ekind(self) -> str:
+        """展示用 kind：0 字的 keep（空库/无对白用字）按零用字态展示，
+        不冒充「库中有 · 覆盖足够」。"""
+        return ("zero" if self.card.kind == "keep" and not self.card.n_chars
+                else self.card.kind)
+
     def _build_head(self) -> QWidget:
         head = QWidget(self)
         h = QHBoxLayout(head)
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(8)
-        name, light, dark = _KIND_STYLE.get(self.card.kind, _KIND_STYLE["zero"])
+        kind = self._ekind()
+        name, light, dark = _KIND_STYLE.get(kind, _KIND_STYLE["zero"])
         if name is None:
             dot = BodyLabel("●")
             dot.setStyleSheet(f"color: {light};")
@@ -86,11 +93,11 @@ class FontCard(CardWidget):
         h.addWidget(StrongBodyLabel(self.card.raw_name))
         h.addWidget(CaptionLabel(self.card.header))
         h.addStretch(1)
-        if self.card.kind == "zero":
+        if kind == "zero":
             h.addWidget(InfoBadge.custom(_STATUS_TEXT["zero"],
                                          QColor("#f0f0f0"), QColor("#3f3f3f")))
         else:
-            h.addWidget(_BADGE_MAKER[self.card.kind](_STATUS_TEXT[self.card.kind]))
+            h.addWidget(_BADGE_MAKER[kind](_STATUS_TEXT[kind]))
         return head
 
     def _build_missing_strip(self) -> QFrame:
@@ -205,6 +212,7 @@ class FontCard(CardWidget):
     # ---- 底部随状态 ----
     def _build_foot(self) -> QHBoxLayout | None:
         card = self.card
+        ekind = self._ekind()
         foot = QHBoxLayout()
         foot.setSpacing(6)
         if card.searching:
@@ -219,8 +227,8 @@ class FontCard(CardWidget):
             more.clicked.connect(
                 lambda: self.continue_clicked.emit(self.card.norm_name))
             foot.addWidget(more)
-        elif card.search_state == "exhausted" and card.kind not in ("zero",
-                                                                   "missing"):
+        elif card.search_state == "exhausted" and ekind not in ("zero",
+                                                               "missing"):
             foot.addWidget(CaptionLabel(
                 "无更多相似字体"
                 + (f"（当前最低相似率 {_pct(card.min_sim)}）" if card.min_sim else "")))
@@ -231,7 +239,8 @@ class FontCard(CardWidget):
             foot.addWidget(relax)
         elif card.search_state == "target_error":
             foot.addWidget(CaptionLabel("原字体无法渲染，无法比较相似度"))
-        elif card.kind in ("replace", "twin", "keep"):
+        elif (ekind in ("replace", "twin", "keep") and card.n_chars > 0):
+            # 0 字卡无可比字型：不给搜索入口（空池/全池放行都无意义）
             cont = TransparentPushButton("继续找其他相似字体")
             cont.clicked.connect(
                 lambda: self.continue_clicked.emit(self.card.norm_name))

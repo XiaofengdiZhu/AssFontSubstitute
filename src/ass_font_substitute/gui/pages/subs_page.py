@@ -212,7 +212,9 @@ class SubsPage(ScrollArea):
             self._append_card(card)
         elif tag == "slib":
             self.vm.set_entities(payload.lib.entities())
-        elif isinstance(tag, str) and tag.startswith("searcher:"):
+        elif isinstance(tag, str) and (tag.startswith("searcher:")
+                                       or tag.startswith("newsearcher:")):
+            # worker 回发提交时的原 tag：建新搜索器是 newsearcher:，续搜无回执
             norm = tag.split(":", 1)[1]
             card = self._card(norm)
             if card is not None:
@@ -341,6 +343,8 @@ class SubsPage(ScrollArea):
     def _continue_search(self, norm):
         card = self._card(norm)
         if card is None or card.searching:
+            return
+        if not card.n_chars:          # 0 字卡无可比字型：不给搜索（UI 已藏入口）
             return
         if card.searcher is not None and card.search_state == "paused":
             card.searching = True

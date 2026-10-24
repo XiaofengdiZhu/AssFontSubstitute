@@ -127,7 +127,7 @@ def test_search_chain_pause_resume_exhaust_and_relax(qapp, tmp_path, monkeypatch
     assert size_range == (0.9, 1.1) and direction == "t2s"
 
     searcher = SimpleNamespace(min_sim=0.85, paused=True, target_error=False)
-    page._on_result(f"searcher:{norm}", searcher)   # 挂接后立即拉第一批
+    page._on_result(f"newsearcher:{norm}", searcher)   # 挂接后立即拉第一批
     assert card.searcher is searcher and card.min_sim == 0.85
     assert page.worker.submits[-1][0] == f"pull:{norm}"
 
@@ -245,3 +245,24 @@ def test_preview_text_and_mutually_exclusive_switches(qapp, tmp_path, monkeypatc
     assert not page.btn_apply.isEnabled()
     page.sw_save.setChecked(True)                   # 恢复另存 → 重新可用
     assert page.btn_apply.isEnabled()
+
+
+def test_zero_usage_keep_card_presentation_and_no_search(qapp, tmp_path, monkeypatch):
+    # 回归：空库下 0 字用法分类出 kind=keep——不得冒充「库中有」徽章，
+    # 也不给搜索入口（无可比字型，误触发会空转）
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    from qfluentwidgets import InfoBadge, TransparentPushButton
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=0, chars=set(), variants={"甲字体"})
+    page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0", (usage, UsageClass(kind="keep")))
+    fc = page._cards_ui["甲字体"]
+    assert "保留（无对白用字）" in [b.text() for b in fc.findChildren(InfoBadge)]
+    assert not [b for b in fc.findChildren(TransparentPushButton)
+                if "继续找" in b.text()]
+    page._continue_search("甲字体")            # 兜底：无字卡不派搜索工
+    assert not [s for s in page.worker.submits
+                if s[0].startswith("newsearcher:")]
