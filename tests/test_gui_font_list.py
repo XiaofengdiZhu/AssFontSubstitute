@@ -113,3 +113,60 @@ def test_pill_follows_theme(qapp):
     finally:
         setTheme(Theme.AUTO)
         p.deleteLater()
+
+
+def _solid_tile():
+    import numpy as np
+    return np.full((48, 48), 255, dtype=np.uint8)
+
+
+def test_preview_tile_colors_follow_theme(qapp):
+    # 灰度掩码 → RGBA：字形色暗白亮黑、底全透明（露卡面底色）
+    import numpy as np
+    from qfluentwidgets import Theme
+    from qfluentwidgets import setTheme
+
+    from ass_font_substitute.gui.widgets.preview_bar import tiles_to_pixmap
+
+    tile = np.zeros((48, 48), dtype=np.uint8)
+    tile[10:38, 10:38] = 255
+    try:
+        setTheme(Theme.DARK)
+        img = tiles_to_pixmap([tile]).toImage()
+        ink, bg = img.pixelColor(24, 24), img.pixelColor(2, 2)
+        assert (ink.red(), ink.green(), ink.blue()) == (255, 255, 255)
+        assert ink.alpha() == 255 and bg.alpha() == 0
+        setTheme(Theme.LIGHT)
+        img = tiles_to_pixmap([tile]).toImage()
+        ink = img.pixelColor(24, 24)
+        assert (ink.red(), ink.green(), ink.blue()) == (0, 0, 0)
+    finally:
+        setTheme(Theme.AUTO)
+
+
+def test_preview_bar_reapplies_tiles_on_theme_flip(qapp):
+    # 已上屏的贴图在 setTheme 后用缓存 tiles 原地重贴（不派渲染任务）
+    from PySide6.QtCore import QPoint
+    from qfluentwidgets import Theme
+    from qfluentwidgets import setTheme
+
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
+
+    pvm = PreviewVM()
+    pvm.put_tiles(("fp1", "永"), [_solid_tile()])
+    bar = None
+    try:
+        setTheme(Theme.DARK)
+        bar = PreviewBar(_FakeWorker(), pvm, _ent("fp1", "甲"), "永", "t")
+        dark_ink = bar.pixmap().toImage().pixelColor(QPoint(10, 10))
+        assert (dark_ink.red(), dark_ink.green(), dark_ink.blue()) == (255, 255, 255)
+        setTheme(Theme.LIGHT)
+        qapp.processEvents()
+        light_ink = bar.pixmap().toImage().pixelColor(QPoint(10, 10))
+        assert (light_ink.red(), light_ink.green(), light_ink.blue()) == (0, 0, 0)
+        assert not bar._worker.submits                     # 全程零新渲染任务
+    finally:
+        setTheme(Theme.AUTO)
+        if bar is not None:
+            bar.deleteLater()

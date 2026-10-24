@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtGui import QImage
-from PySide6.QtGui import QPainter
-from PySide6.QtGui import QPainterPath
 from PySide6.QtGui import QPixmap
 from qfluentwidgets import CaptionLabel
+from qfluentwidgets import isDarkTheme
+from qfluentwidgets import qconfig
 
 from ass_font_substitute.core.similarity.render import RenderBundle
 
@@ -16,27 +17,20 @@ _MAX_BAR_W = 360
 
 
 def tiles_to_pixmap(tiles: list[np.ndarray]) -> QPixmap:
-    """48×48 灰度 tile 横排成条；空列表返回空 QPixmap。"""
+    """48×48 灰度 tile 横排成条；空列表返回空 QPixmap。
+
+    掩码值作 alpha、字形色随主题（暗白亮黑）、底全透明——贴在哪种卡面
+    （预览页/选择器/替换卡）都露底色，换肤时 PreviewBar 重贴即可换色。"""
     if not tiles:
         return QPixmap()
     row = np.concatenate([np.pad(t, ((0, 0), (0, 1))) for t in tiles], axis=1)
     h, w = row.shape
-    img = QImage(row.data, w, h, w, QImage.Format_Grayscale8)
+    c = QColor(255, 255, 255) if isDarkTheme() else QColor(0, 0, 0)
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    rgba[..., 0], rgba[..., 1], rgba[..., 2] = c.red(), c.green(), c.blue()
+    rgba[..., 3] = row
+    img = QImage(rgba.data, w, h, w * 4, QImage.Format_RGBA8888)
     return QPixmap.fromImage(img)
-
-
-def _rounded(pm: QPixmap, radius: int = 6) -> QPixmap:
-    """圆角化贴图条：黑底方角在浅色卡面上太硬，圆角软化观感。"""
-    out = QPixmap(pm.size())
-    out.fill(Qt.transparent)
-    p = QPainter(out)
-    p.setRenderHint(QPainter.Antialiasing)
-    path = QPainterPath()
-    path.addRoundedRect(0, 0, pm.width(), pm.height(), radius, radius)
-    p.setClipPath(path)
-    p.drawPixmap(0, 0, pm)
-    p.end()
-    return out
 
 
 def _bundle_tiles(payload):
@@ -60,7 +54,14 @@ class PreviewBar(CaptionLabel):
         self._worker, self._pvm = worker, pvm
         self._entity, self._text, self._tag = entity, text, tag
         self._inflight = False
+        self._tiles = None                   # 最近一次贴上的 tiles，换肤重贴用
+        qconfig.themeChanged.connect(self._on_theme_changed)
         self._render()
+
+    def _on_theme_changed(self, _theme):
+        # 贴图字形色按主题取：换肤用已缓存的 tiles 原地重贴（零渲染开销）
+        if self._tiles is not None:
+            self._apply(self._tiles)
 
     def _render(self):
         if not self._text.strip() or self._entity is None:
@@ -103,10 +104,11 @@ class PreviewBar(CaptionLabel):
         if pm.isNull():
             self.setText("（无可渲染字形）")
             return
+        self._tiles = tiles
         pm = pm.scaledToHeight(self.height(), Qt.SmoothTransformation)
         if pm.width() > _MAX_BAR_W:
             pm = pm.scaledToWidth(_MAX_BAR_W, Qt.SmoothTransformation)
-        self.setPixmap(_rounded(pm))
+        self.setPixmap(pm)
 
 
 def _render_job(ctx, entity, text):
