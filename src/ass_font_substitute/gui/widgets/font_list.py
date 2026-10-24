@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint
 from PySide6.QtCore import QSize
+from PySide6.QtCore import Qt
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QAbstractItemView
 from PySide6.QtWidgets import QListWidget
@@ -9,6 +10,7 @@ from PySide6.QtWidgets import QListWidgetItem
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import CaptionLabel
+from qfluentwidgets import SmoothScrollBar
 from qfluentwidgets import StrongBodyLabel
 
 from ass_font_substitute.core.fontindex.library import FontEntity
@@ -43,6 +45,10 @@ class FontListWidget(QListWidget):
         self.setUniformItemSizes(True)
         self.setSpacing(ROW_SPACING)
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
+        # 裸 QListWidget 画调色板底（深色主题下白块）+ 原生 QScrollBar 深色
+        # 不透明白条：底透明露卡面色，滚动条换 qfw SmoothScrollBar（随主题）
+        self.setStyleSheet("QListWidget{border:none;background:transparent}")
+        self._v_scroll = SmoothScrollBar(Qt.Vertical, self)
         self.itemClicked.connect(self._on_click)
         self.verticalScrollBar().valueChanged.connect(
             lambda _: self._materialize_visible())

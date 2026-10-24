@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
@@ -9,7 +7,6 @@ from qfluentwidgets import CaptionLabel
 from qfluentwidgets import ComboBox
 from qfluentwidgets import MessageBoxBase
 from qfluentwidgets import SearchLineEdit
-from qfluentwidgets import SmoothScrollArea
 from qfluentwidgets import SubtitleLabel
 
 from ass_font_substitute.gui.jobs import make_searcher
@@ -85,17 +82,10 @@ class FontPickerDialog(MessageBoxBase):
         if not self.pvm.entities:
             # 空库态列表全隐：不给 stretch 的话剩余高度会摊到各标签上
             body_v.addStretch(1)
-        scroll = SmoothScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setWidget(body)
-        # win11 默认样式会给 QScrollArea viewport 涂 rgb(243,243,243) 灰底
-        scroll.enableTransparentBackground()
-        scroll.viewport().setAutoFillBackground(False)
-        self.viewLayout.addWidget(scroll, 1)
+        # 不套外层滚动区：all_list 自滚（细条随主题），外层再滚会出右缘双条
+        self.viewLayout.addWidget(body, 1)
 
-        # 按钮区钉在 widget 底部：高度封在窗口内，内容装不下由 scroll 兜底；
+        # 按钮区钉在 widget 底部：高度封在窗口内，列表超出交给 all_list 自滚；
         # 空库态只有标题+提示，收到 280 免得撑满整窗。dialog 尺寸 = 所在页面
         if self.pvm.entities:
             h = max(min(self.height() - 48, 620), 320)
