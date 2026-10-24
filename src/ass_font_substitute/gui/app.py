@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF, FluentWindow, NavigationItemPosition
 
@@ -29,6 +30,7 @@ class AFSWindow(FluentWindow):
         self.addSubInterface(self.subs_page, FIF.DOCUMENT, "处理字幕")
         self.addSubInterface(self.settings_page, FIF.SETTING, "设置",
                              NavigationItemPosition.BOTTOM)
+        self.setWindowTitle("Ass 字体替补")
         self.resize(1100, 750)
 
     def closeEvent(self, e):
@@ -39,6 +41,15 @@ class AFSWindow(FluentWindow):
 
 
 def main() -> int:
+    # 分数缩放（如 175%）下按系统比例原生渲染；取整会让 DWM 拉伸整窗导致文字发虚。
+    # 必须在 QApplication 创建前设置。
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    if sys.platform == "win32":
+        # 任务栏归属自身 AUMID，而不是显示/分组在 python.exe 下
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "AssFontSubstitute.App")
     # fontTools 解析怪字体喷大量 warning（post.stringData 等），界面程序静默
     logging.getLogger("fontTools").setLevel(logging.ERROR)
     app = QApplication(sys.argv)
