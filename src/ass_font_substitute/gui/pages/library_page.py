@@ -166,7 +166,10 @@ class LibraryPage(ScrollArea):
             rh.addWidget(badge, 0, Qt.AlignVCenter)
             upd = ToolButton(FIF.SYNC)
             upd.setToolTip("更新该目录索引")
-            upd.setEnabled(self._index_worker is None and d.state != "indexing")
+            # pending=首个探测在途（尚不知盘上实况），indexing=更新在途：
+            # 两者再点更新都是瞎打，禁用
+            upd.setEnabled(self._index_worker is None
+                           and d.state not in ("indexing", "pending"))
             upd.clicked.connect(lambda _=False, p=d.path: self._start_update_dir(p))
             rh.addWidget(upd, 0, Qt.AlignVCenter)
             rm = ToolButton(FIF.DELETE)

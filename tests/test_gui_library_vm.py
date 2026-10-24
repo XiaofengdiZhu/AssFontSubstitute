@@ -17,6 +17,18 @@ def test_add_remove_persist(tmp_path):
     assert Settings(tmp_path / "s.json").get("font_dirs") == []
 
 
+def test_new_dir_pending_until_first_probe(tmp_path):
+    # 回归：新加目录在首个探测结果未到时显示「更新中」而非「需更新」
+    # （盘上实况未知，谈不上需不需要更新）；探测结果照常覆盖 pending
+    vm = _vm(tmp_path)
+    vm.add_dir("J:/new")
+    d = vm.dirs[0]
+    assert d.state == "pending" and d.badge == "更新中"
+    vm.refresh([DirStatus("J:/new", "stale", added=5, changed=0, total=5)],
+               {}, [], [])
+    assert d.state == "stale" and "需更新" in d.badge
+
+
 def test_badge_texts(tmp_path):
     vm = _vm(tmp_path)
     vm.add_dir("J:/a")

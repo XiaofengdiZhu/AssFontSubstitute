@@ -9,7 +9,7 @@ from ass_font_substitute.gui.jobs import DirStatus
 @dataclass
 class DirRow:
     path: str
-    state: str = "stale"        # ok / stale / indexing / offline
+    state: str = "pending"      # pending / ok / stale / indexing / offline
     added: int = 0
     changed: int = 0
     files: int = 0              # 盘上全部支持后缀文件数（含坏文件，probe total）
@@ -24,6 +24,8 @@ class DirRow:
     def badge(self) -> str:
         if self.state == "indexing":
             return "索引中"
+        if self.state == "pending":
+            return "更新中"      # 新加入/启动中，首个探测结果未到
         if self.state == "offline":
             return "不可用"
         if self.state == "stale":
