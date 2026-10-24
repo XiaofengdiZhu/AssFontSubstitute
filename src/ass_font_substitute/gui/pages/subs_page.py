@@ -41,6 +41,7 @@ class SubsPage(ScrollArea):
         self._pvm = PreviewVM()                    # 字体卡预览条共享 tile LRU
         self._cards_ui: dict[str, FontCard] = {}
         self._cancels: dict[str, dict] = {}        # norm → 取消标志（pull 任务读）
+        self._parsing: set[str] = set()            # 批次解析中（收齐才重算）
         self._direction = "t2s"
         self._gen = 0                              # 分类代次：弃置旧代结果
         self._apply_total = 0
@@ -154,12 +155,21 @@ class SubsPage(ScrollArea):
                                 "ASS 字幕 (*.ass *.ssa)")
         if not paths:
             return
+        self._parsing.update(paths)
         for p in paths:
             self.worker.submit(f"parse:{p}", _parse_job, p)
 
     def _reload_files(self):
+        self._parsing.update(f.path for f in self.vm.files)
         for f in self.vm.files:
             self.worker.submit(f"parse:{f.path}", _parse_job, f.path)
+
+    def _parse_arrived(self, path: str):
+        """批内一份结果到达：先记账，整批收齐才重算——逐份重算会把
+        N 个文件放大成 1+2+…+N 次分类（全卡拆除重建 N-1 次，白算）。"""
+        self._parsing.discard(path)
+        if not self._parsing:
+            self._reclassify()
 
     def _rebuild_file_rows(self):
         while self.files_box.count():
@@ -195,14 +205,17 @@ class SubsPage(ScrollArea):
     def _on_file_checked(self, path, on):
         self.vm.set_checked(path, on)
         self._update_files_summary()
-        self._reclassify()
+        # 批次解析中不立即重算：勾选变化会在批末统一重算时生效，
+        # 免得半批数据先拆一次卡
+        if not self._parsing:
+            self._reclassify()
 
     # ---- 结果分发（UI 线程；vm 一切变更都在此）----
     def _on_result(self, tag, payload):
         if isinstance(tag, str) and tag.startswith("parse:"):
             self.vm.add_files([payload])
             self._rebuild_file_rows()
-            self._reclassify()
+            self._parse_arrived(payload.path)
         elif isinstance(tag, str) and tag.startswith("classify:"):
             if not tag.startswith(f"classify:{self._gen}:"):
                 return                     # 旧代结果：勾选/方向/参数已变，弃置
@@ -243,6 +256,8 @@ class SubsPage(ScrollArea):
             self._on_apply_done(payload)
 
     def _on_failed(self, tag, err):
+        if isinstance(tag, str) and tag.startswith("parse:"):
+            self._parse_arrived(tag.split(":", 1)[1])   # 批次对齐：失败也算到达
         # 搜索链任务失败：解卡片的 searching 状态，避免转圈挂死
         if isinstance(tag, str) and (tag.startswith("newsearcher:")
                                      or tag.startswith("pull:")):

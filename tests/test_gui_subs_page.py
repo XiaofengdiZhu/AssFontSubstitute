@@ -273,6 +273,41 @@ def test_reload_keeps_unchecked_state(qapp, tmp_path, monkeypatch):
     assert [f.checked for f in page.vm.files if f.path == "p.ass"] == [False]
 
 
+def test_parse_batch_gates_reclassify(qapp, tmp_path, monkeypatch):
+    # 批次语义：整批文件解析收齐才重算一次——逐份到达不得触发分类
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+
+    def parse_payload(path):
+        return FileParse(path, None, [FontUsage(
+            raw_name="甲字体", norm_name="甲字体", style_count=1,
+            inline_count=1, chars=set("永宇"), variants={"甲字体"})], [], [])
+
+    page._parsing.update(("a.ass", "b.ass"))
+    page._on_result("parse:a.ass", parse_payload("a.ass"))
+    assert not any(t == "slib" or str(t).startswith("classify:")
+                   for t, *_ in page.worker.submits)   # 批未收齐：不分类
+    page._on_result("parse:b.ass", parse_payload("b.ass"))
+    tags = [t for t, *_ in page.worker.submits]
+    assert tags.count("slib") == 1                     # 收齐：一次重算
+    assert sum(1 for t in tags if str(t).startswith("classify:")) == 1
+
+    # 批内失败也按到达计：不卡批次
+    page._parsing.update(("c.ass",))
+    page._on_failed("parse:c.ass", "boom")
+    assert page._parsing == set()
+    assert [t for t, *_ in page.worker.submits].count("slib") == 2
+
+    # 批中的勾选变化延迟到批末生效（不半批拆卡）
+    page._parsing.update(("d.ass",))
+    page.vm.add_files([FileParse("d.ass", None, [], [], [])])
+    page._on_file_checked("d.ass", False)
+    assert [t for t, *_ in page.worker.submits].count("slib") == 2
+    page._on_result("parse:d.ass", FileParse("d.ass", None, [], [], []))
+    assert [t for t, *_ in page.worker.submits].count("slib") == 3
+
+
 def test_apply_late_result_after_failed_reset_is_dropped(qapp, tmp_path, monkeypatch):
     # 派工中断复位后，迟到的 apply 回执不得再触发收尾（重复 InfoBar/record_all）
     page = _make_page(qapp, tmp_path, monkeypatch)
