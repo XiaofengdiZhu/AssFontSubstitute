@@ -1,9 +1,7 @@
-import sqlite3
 
-import numpy as np
 import pytest
 
-from ass_font_substitute.gui.jobs import (DirStatus, apply_to_file, ensure_library,
+from ass_font_substitute.gui.jobs import (apply_to_file, ensure_library,
                                           lib_key, load_library, parse_subtitle,
                                           probe_dir_status, pull_chunk,
                                           render_preview, update_dir)
@@ -113,7 +111,6 @@ def test_pull_chunk_states(ctx_stub, font_dir):
 
 
 def test_render_preview_skips_missing(font_dir):
-    from ass_font_substitute.gui.jobs import ensure_library as _el
     # 独立 ctx 以免与其它用例共享
     class C:
         pass

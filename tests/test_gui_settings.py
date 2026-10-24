@@ -166,7 +166,6 @@ def test_nan_and_bad_legacy_values_filtered(tmp_path):
     assert s.get("cov_threshold") == DEFAULTS["cov_threshold"]   # NaN 拒收
     assert s.get("min_sim") == DEFAULTS["min_sim"]               # Inf 拒收
     assert s.get("save_suffix") == DEFAULTS["save_suffix"]       # 存量后缀复验
-    import math
     with pytest.raises(ValueError):
         s.set("cov_threshold", float("nan"))
     with pytest.raises(ValueError):

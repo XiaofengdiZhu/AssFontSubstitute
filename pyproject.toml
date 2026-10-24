@@ -19,7 +19,10 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.12.0"]
@@ -27,3 +30,8 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+# 默认规则集（pyflakes F + 少量 pycodestyle E）：F821 未定义名
+# （误删 import 一类）、F401 未用 import、F841 未用变量等硬错优先
+select = ["E4", "E7", "E9", "F"]

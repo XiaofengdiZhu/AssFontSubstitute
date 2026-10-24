@@ -1,6 +1,5 @@
 """字体选择弹窗：pickreco 取消通路（弹窗关闭即置标志，任务提前退出）。"""
 import os
-from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QObject, Signal

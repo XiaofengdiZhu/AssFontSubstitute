@@ -17,7 +17,6 @@ def qapp():
 def test_main_window_boots(qapp, tmp_path, monkeypatch):
     # 隔离 APPDATA：Cache/设置不落真实用户目录
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    from PySide6.QtWidgets import QApplication
     from ass_font_substitute.gui.app import AFSWindow
     from ass_font_substitute.gui.settings_store import Settings
 
@@ -254,10 +253,10 @@ def test_page_and_group_titles_follow_theme(qapp, tmp_path, monkeypatch):
         assert "color: white" in w.subs_page.page_title.styleSheet()
         assert "color: white" in w.library_page.page_title.styleSheet()
         cls = type(w.subs_page.page_title)
-        titles = [l for l in w.settings_page.view.findChildren(cls)
-                  if l.text() in ("常规", "相似候选", "输出", "相似度缓存", "关于")]
+        titles = [lab for lab in w.settings_page.view.findChildren(cls)
+                  if lab.text() in ("常规", "相似候选", "输出", "相似度缓存", "关于")]
         assert len(titles) == 5
-        assert all("color: white" in l.styleSheet() for l in titles)
+        assert all("color: white" in lab.styleSheet() for lab in titles)
     finally:
         setTheme(Theme.AUTO)
         w.close()

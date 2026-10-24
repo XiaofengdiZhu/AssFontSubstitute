@@ -7,7 +7,7 @@ from ass_font_substitute.core.models import CmapRanges
 from ass_font_substitute.core.similarity.cache import Cache
 from ass_font_substitute.gui.jobs import FileParse, classify_one, make_searcher, pull_chunk
 from ass_font_substitute.gui.settings_store import Settings
-from ass_font_substitute.gui.subs_vm import KEEP, OptionItem, SubsVM
+from ass_font_substitute.gui.subs_vm import KEEP, SubsVM
 from tests.fonts import build_font
 
 
@@ -287,7 +287,7 @@ def test_attach_pick_dedupes_and_checks(lib_env):
     e = next(e for e in lib.entities() if e.display_name == "NEAR圆")
     o = vm.attach_pick(card, e)
     assert card.checked_key == e.fingerprint and o.source == "pick"
-    o2 = vm.attach_pick(card, e)
+    vm.attach_pick(card, e)
     assert len([x for x in card.options if x.key == e.fingerprint]) == 1
 
 

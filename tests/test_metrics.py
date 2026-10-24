@@ -74,8 +74,9 @@ def test_phash_batch_matches_single():
 
 def test_compare_deterministic_and_symmetric():
     rng = np.random.default_rng(2)
-    mk = lambda seed: {(c): rng.integers(0, 255, (48, 48)).astype(np.uint8)
-                       for c in "永中木8A"}
+    def mk(seed):
+        return {c: rng.integers(0, 255, (48, 48)).astype(np.uint8)
+                for c in "永中木8A"}
     b1, b2 = _bundle(mk(0)), _bundle(mk(1))
     r12, r21 = compare(b1, b2), compare(b2, b1)
     assert r12.score == r21.score

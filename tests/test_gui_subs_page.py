@@ -337,10 +337,10 @@ def test_zero_usage_keep_card_presentation_and_no_search(qapp, tmp_path, monkeyp
     fc = page._cards_ui["甲字体"]
     # 零字卡徽章是自绘药丸（QLabel），不是 InfoBadge（白字浅底隐形问题）
     texts = ([b.text() for b in fc.findChildren(InfoBadge)]
-             + [l.text() for l in fc.findChildren(QLabel)])
+             + [lab.text() for lab in fc.findChildren(QLabel)])
     assert "保留（无对白用字）" in texts
-    assert not [b for b in fc.findChildren(TransparentPushButton)
-                if "继续找" in b.text()]
+    assert not [btn for btn in fc.findChildren(TransparentPushButton)
+                if "继续找" in btn.text()]
     page._continue_search("甲字体")            # 兜底：无字卡不派搜索工
     assert not [s for s in page.worker.submits
                 if s[0].startswith("newsearcher:")]

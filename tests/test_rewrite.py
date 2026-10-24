@@ -49,7 +49,7 @@ def test_encoding_preserved(tmp_path):
 
 
 def test_at_variant(tmp_path):
-    p = _mk(tmp_path)
+    _mk(tmp_path)
     out = tmp_path / "out.ass"
     p2 = tmp_path / "at.ass"
     p2.write_bytes(ASS.replace("Main,華康主體W5,", "Main,@華康主體W5,").encode("utf-8-sig"))
