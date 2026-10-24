@@ -29,6 +29,70 @@ def test_main_window_boots(qapp, tmp_path, monkeypatch):
     w.close()
 
 
+def test_load_completed_signal_fires_once(qapp, tmp_path):
+    # 启动画面收幕信号：无目录同步就绪；有目录首个 lib 结果/失败收幕；
+    # 后续刷新不再发（_lib_reported 一次性）
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Signal
+
+    from ass_font_substitute.gui.pages.library_page import LibraryPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, object)
+
+        def submit(self, *a):
+            pass
+
+    class _Lib:
+        @staticmethod
+        def stats():
+            return {}
+
+        @staticmethod
+        def dir_overlaps():
+            return []
+
+    class _Snap:
+        lib = _Lib
+        offline_dirs = ()
+
+    # 无目录：构造即就绪（singleShot(0) 挂事件循环，drain 后可见——
+    # 生产里 main() 先 connect 再 exec，无竞态）
+    lp = LibraryPage(Settings(tmp_path / "s1.json"), _FakeWorker())
+    got = []
+    lp.loadCompleted.connect(lambda: got.append(1))
+    qapp.processEvents()
+    assert got == [1]
+
+    # 有目录：lib 结果到达收幕一次，再刷不发
+    s2 = Settings(tmp_path / "s2.json")
+    s2.set("font_dirs", [r"D:\fonts"])
+    w2 = _FakeWorker()
+    lp2 = LibraryPage(s2, w2)
+    got2 = []
+    lp2.loadCompleted.connect(lambda: got2.append(1))
+    assert got2 == []                        # 在途未就绪
+    w2.result.emit("lib", (_Snap, [], {}))
+    qapp.processEvents()
+    assert got2 == [1]
+    w2.result.emit("lib", (_Snap, [], {}))
+    qapp.processEvents()
+    assert got2 == [1]                       # 只发一次
+
+    # 失败路径也要收幕（不能卡死在启动画面后）
+    s3 = Settings(tmp_path / "s3.json")
+    s3.set("font_dirs", [r"D:\fonts2"])
+    w3 = _FakeWorker()
+    lp3 = LibraryPage(s3, w3)
+    got3 = []
+    lp3.loadCompleted.connect(lambda: got3.append(1))
+    w3.failed.emit("lib", "boom")
+    qapp.processEvents()
+    assert got3 == [1]
+
+
 def test_worker_init_failure_is_observable(qapp, tmp_path, monkeypatch):
     # 回归：Cache 初始化失败必须发 failed("worker:init") 且线程存活——
     # 后续任务逐个 failed，而不是静默死线程 + submit 永久悬挂

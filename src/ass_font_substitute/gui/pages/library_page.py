@@ -52,6 +52,9 @@ class LibraryPage(ScrollArea):
     libraryChanged = Signal()
     """目录增删或索引更新完成：订阅页重拉库数据（browse 清单/ subs 重分类）"""
 
+    loadCompleted = Signal()
+    """首个 lib 任务收尾（成功/失败/无目录）一次性发射：启动画面收幕"""
+
     def __init__(self, settings, worker, parent=None):
         super().__init__(parent)
         self.settings, self.worker = settings, worker
@@ -59,6 +62,7 @@ class LibraryPage(ScrollArea):
         self.vm = LibraryVM(settings)
         self._index_worker: IndexWorker | None = None
         self._pending_failures = None       # "failures" 任务结果到达后的弹窗回调
+        self._lib_reported = False          # loadCompleted 只发一次
 
         self.view = QWidget(self)
         v = QVBoxLayout(self.view)
@@ -234,8 +238,16 @@ class LibraryPage(ScrollArea):
         self._rebuild_dir_rows()
         if not dirs:
             self._apply_stats({})
+            self._report_loaded()           # 无目录：同步就算就绪
             return
         self.worker.submit("lib", _lib_job, dirs)
+
+    def _report_loaded(self):
+        # singleShot(0)：空目录路径在 __init__ 里同步走到这里，直接 emit
+        # 落在 main() connect 之前；挂到事件循环下一拍，装配永远先于发射
+        if not self._lib_reported:
+            self._lib_reported = True
+            QTimer.singleShot(0, self.loadCompleted.emit)
 
     def _on_result(self, tag, payload):
         if tag == "lib":
@@ -246,6 +258,7 @@ class LibraryPage(ScrollArea):
             self._apply_stats(snap.lib.stats())
             self._rebuild_dir_rows()
             self._warn_overlaps()
+            self._report_loaded()
         elif tag == "failures":
             if self._pending_failures is not None:
                 show, self._pending_failures = self._pending_failures, None
@@ -256,6 +269,7 @@ class LibraryPage(ScrollArea):
     def _on_failed(self, tag, err):
         if tag == "lib":
             InfoBar.error("字体库加载失败", err, parent=self)
+            self._report_loaded()           # 失败也要收启动画面，不能卡死在盖板后
         elif tag == "failures":
             self._pending_failures = None      # 允许再次点开失败清单
             InfoBar.error("失败清单读取失败", err, parent=self)

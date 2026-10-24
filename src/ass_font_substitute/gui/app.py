@@ -9,15 +9,19 @@ from PySide6.QtCore import QTimer
 from PySide6.QtCore import qInstallMessageHandler
 from PySide6.QtGui import QColor
 from PySide6.QtGui import QFont
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
+from qfluentwidgets import BodyLabel
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import FluentWindow
+from qfluentwidgets import IndeterminateProgressRing
 from qfluentwidgets import NavigationItemPosition
 from qfluentwidgets import Theme
 from qfluentwidgets import isDarkTheme
 from qfluentwidgets import qconfig
 from qfluentwidgets import setTheme
 from qfluentwidgets.common.style_sheet import updateStyleSheet
+from qfluentwidgets.window import SplashScreen
 
 from ass_font_substitute.gui.pages.browse_page import BrowsePage
 from ass_font_substitute.gui.pages.library_page import LibraryPage
@@ -48,6 +52,25 @@ def _forward_qt_messages(_type, ctx, message: str) -> None:
 
 # 设置页 theme 值 → qfw Theme
 _THEME_OF = {"auto": Theme.AUTO, "light": Theme.LIGHT, "dark": Theme.DARK}
+
+
+class _Splash(SplashScreen):
+    """启动画面：空图标（图标待设计）+ 加载环 + 文案，盖住首帧到库就绪。
+    qfw SplashScreen 无布局（icon 手动定位），环与文案在 resizeEvent 跟随。"""
+
+    def __init__(self, parent):
+        super().__init__(QIcon(), parent)
+        self.ring = IndeterminateProgressRing(self)
+        self.ring.setFixedSize(28, 28)
+        self.tip = BodyLabel("正在加载字体库…", self)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.ring.move((self.width() - self.ring.width()) // 2,
+                       self.height() - 110)
+        self.tip.adjustSize()
+        self.tip.move((self.width() - self.tip.width()) // 2,
+                      self.ring.y() + 44)
 
 
 class AFSWindow(FluentWindow):
@@ -171,5 +194,17 @@ def main() -> int:
         font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
         app.setFont(font)
     w = AFSWindow()
-    w.show()
+    # 启动画面：库加载（开库 + 逐目录探测，大库数秒）期间盖住窗口，
+    # loadCompleted（首个 lib 结果/失败）收幕；30s 兜底防卡死盖板。
+    # 无目录没有可等的加载，直接进主界面
+    if w.settings.get("font_dirs"):
+        splash = _Splash(w)
+        splash.resize(w.size())
+        w.show()
+        splash.raise_()
+        splash.show()
+        w.library_page.loadCompleted.connect(splash.finish)
+        QTimer.singleShot(30_000, splash.finish)
+    else:
+        w.show()
     return app.exec()
