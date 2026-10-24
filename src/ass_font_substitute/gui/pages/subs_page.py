@@ -6,7 +6,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
                             InfoBadge, InfoBar, LineEdit, PrimaryPushButton,
-                            PushButton, ScrollArea, SegmentedWidget, SpinBox,
+                            PushButton, ScrollArea, SegmentedWidget,
                             StrongBodyLabel, SwitchButton)
 from qfluentwidgets import FluentIcon as FIF
 
@@ -18,6 +18,7 @@ from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.settings_store import (COV_BOUNDS, SIM_BOUNDS,
                                                     SIZE_BOUNDS)
 from ass_font_substitute.gui.subs_vm import SubsVM
+from ass_font_substitute.gui.widgets.spin import SpinBox
 from ass_font_substitute.gui.widgets.font_card import FontCard
 from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
 

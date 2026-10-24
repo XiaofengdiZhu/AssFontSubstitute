@@ -3,25 +3,82 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFileDialog
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import (BodyLabel, CaptionLabel, Dialog, InfoBar, LineEdit,
-                            PushButton, ScrollArea, StrongBodyLabel, TextEdit)
+from PySide6.QtWidgets import QVBoxLayout, QWidget
+from qfluentwidgets import (BodyLabel, Dialog, InfoBar, LineEdit,
+                            PrimaryPushSettingCard, PushSettingCard, ScrollArea,
+                            SettingCard, SettingCardGroup, Slider, TextEdit)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.settings_store import (COV_BOUNDS, SIM_BOUNDS,
                                                     SIZE_BOUNDS)
+from ass_font_substitute.gui.widgets.spin import SpinBox
+
+_SPACING = 24          # 控件与卡片右缘间距（Ghost Downloader 同款）
 
 
-def _stepper(lo, hi, step, val, suffix=""):
-    from qfluentwidgets import SpinBox
-    s = SpinBox()
-    s.setRange(lo, hi)
-    s.setSingleStep(step)
-    s.setValue(val)
-    s.setSuffix(suffix)
-    return s
+def _sample_brief(text: str) -> str:
+    """对比文字卡片只展示前段，全文进编辑对话框看。"""
+    return text if len(text) <= 28 else text[:28] + "…"
+
+
+class _WheelFreeCard(SettingCard):
+    """滚轮事件拦截：卡片内控件不响应滚轮，避免滚动设置页时误改数值。"""
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Wheel and watched in (
+                getattr(self, "slider", None), getattr(self, "spin", None),
+                getattr(self, "spin_max", None)):
+            return True
+        return super().eventFilter(watched, event)
+
+
+class _PercentCard(_WheelFreeCard):
+    """百分比门槛卡：滑杆 + 数值标签，值以百分数提交（/100 存回设置）。"""
+
+    def __init__(self, icon, title, content, lo_pct, hi_pct, step, value,
+                 on_commit, parent=None):
+        super().__init__(icon, title, content, parent)
+        self._on_commit = on_commit
+        self.slider = Slider(Qt.Orientation.Horizontal, self)
+        self.slider.setRange(lo_pct, hi_pct)
+        self.slider.setSingleStep(step)
+        self.slider.setPageStep(step)
+        self.slider.setValue(value)
+        self.slider.setFixedWidth(180)
+        self.valueLabel = BodyLabel(self)
+        self.hBoxLayout.addWidget(self.slider, 0, Qt.AlignmentFlag.AlignRight)
+        self.hBoxLayout.addSpacing(10)
+        self.hBoxLayout.addWidget(self.valueLabel, 0, Qt.AlignmentFlag.AlignRight)
+        self.hBoxLayout.addSpacing(_SPACING)
+        self.slider.installEventFilter(self)
+        self.slider.valueChanged.connect(self._on_value)
+        self._on_value(value)
+
+    def _on_value(self, v):
+        self.valueLabel.setText(f"{v}%")
+        self._on_commit(v)
+
+
+class _SpinBoxCard(_WheelFreeCard):
+    """整数 SpinBox 卡。"""
+
+    def __init__(self, icon, title, content, lo, hi, value, on_commit,
+                 suffix="", step=1, parent=None):
+        super().__init__(icon, title, content, parent)
+        self._on_commit = on_commit
+        self.spin = SpinBox(self)
+        self.spin.setRange(lo, hi)
+        self.spin.setSingleStep(step)
+        self.spin.setValue(value)
+        if suffix:
+            self.spin.setSuffix(suffix)
+        self.spin.setMinimumWidth(140)
+        self.hBoxLayout.addWidget(self.spin, 0, Qt.AlignmentFlag.AlignRight)
+        self.hBoxLayout.addSpacing(_SPACING)
+        self.spin.installEventFilter(self)
+        self.spin.valueChanged.connect(on_commit)
 
 
 class SettingsPage(ScrollArea):
@@ -31,84 +88,116 @@ class SettingsPage(ScrollArea):
         self.setObjectName("settingsPage")
 
         self.view = QWidget(self)
-        v = QVBoxLayout(self.view)
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.enableTransparentBackground()
+        v = QVBoxLayout(self.view)
+        v.setContentsMargins(36, 24, 36, 36)
+        v.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        v.addWidget(StrongBodyLabel("默认参数（处理字幕页初始值）"))
-        self.spin_cov = _stepper(round(COV_BOUNDS[0] * 100), round(COV_BOUNDS[1] * 100),
-                                 1, round(settings.get("cov_threshold") * 100), "%")
-        self.spin_sim = _stepper(round(SIM_BOUNDS[0] * 100), round(SIM_BOUNDS[1] * 100),
-                                 5, round(settings.get("min_sim") * 100), "%")
-        self.spin_smin = _stepper(round(SIZE_BOUNDS[0] * 100), round(SIZE_BOUNDS[1] * 100),
-                                  1, round(settings.get("size_min") * 100), "%")
-        self.spin_smax = _stepper(round(SIZE_BOUNDS[0] * 100), round(SIZE_BOUNDS[1] * 100),
-                                  1, round(settings.get("size_max") * 100), "%")
-        self.spin_pause = _stepper(1, 50, 1, int(settings.get("n_pause")))
-        self.spin_threads = _stepper(1, max(1, os.cpu_count() or 4), 1,
-                                     int(settings.get("max_threads")))
-        self.spin_threads.setToolTip("建索引并行解析上限（并行解析尚未启用，当前仅存储）")
-        rows = [("覆盖率阈值", self.spin_cov), ("最低相似率", self.spin_sim),
-                ("相对大小下限", self.spin_smin), ("相对大小上限", self.spin_smax),
-                ("找到几个相似字体后暂停", self.spin_pause),
-                ("最大使用线程数", self.spin_threads)]
-        for label, w in rows:
-            h = QHBoxLayout()
-            h.addWidget(BodyLabel(label))
-            h.addStretch(1)
-            h.addWidget(w)
-            v.addLayout(h)
-        self.spin_cov.valueChanged.connect(
+        # ── 替换门槛（处理字幕页初始值）──────────────────────────
+        g1 = SettingCardGroup("替换门槛", self.view)
+        self.cov_card = _PercentCard(
+            FIF.FILTER, "覆盖率门槛",
+            "在库字形对字幕用字的覆盖达到该值即直接采用，否则进入相似度搜索",
+            round(COV_BOUNDS[0] * 100), round(COV_BOUNDS[1] * 100), 1,
+            round(settings.get("cov_threshold") * 100),
             lambda x: self.settings.set("cov_threshold", x / 100))
-        self.spin_sim.valueChanged.connect(
+        self.sim_card = _PercentCard(
+            FIF.SPEED_HIGH, "相似率门槛",
+            "候选字体与原字体的相似率低于该值将不列出",
+            round(SIM_BOUNDS[0] * 100), round(SIM_BOUNDS[1] * 100), 5,
+            round(settings.get("min_sim") * 100),
             lambda x: self.settings.set("min_sim", x / 100))
+        self.size_card = self._make_size_card()
+        self.pause_card = _SpinBoxCard(
+            FIF.PAUSE, "相似字体暂停数量",
+            "每找到该数量的相似字体就暂停等待确认，之后可继续搜索",
+            1, 50, int(settings.get("n_pause")),
+            lambda x: self.settings.set("n_pause", x))
+        self.threads_card = _SpinBoxCard(
+            FIF.IOT, "最大使用线程数",
+            "建索引并行解析的上限（并行解析尚未启用，当前仅存储）",
+            1, max(1, os.cpu_count() or 4), int(settings.get("max_threads")),
+            lambda x: self.settings.set("max_threads", x))
+        g1.addSettingCard(self.cov_card)
+        g1.addSettingCard(self.sim_card)
+        g1.addSettingCard(self.size_card)
+        g1.addSettingCard(self.pause_card)
+        g1.addSettingCard(self.threads_card)
+        v.addWidget(g1)
+
+        # ── 输出 ─────────────────────────────────────────────
+        g2 = SettingCardGroup("输出", self.view)
+        self.suffix_card = _WheelFreeCard(
+            FIF.SAVE, "另存后缀", "替换结果另存的文件名后缀，须以点开头",
+            self)
+        # qfluentwidgets 1.11.3：LineEdit 只接受 parent，文字经 setText
+        self.suffix_edit = LineEdit(self.suffix_card)
+        self.suffix_edit.setText(settings.get("save_suffix"))
+        self.suffix_edit.setMinimumWidth(160)
+        self.suffix_card.hBoxLayout.addWidget(self.suffix_edit, 0,
+                                              Qt.AlignmentFlag.AlignRight)
+        self.suffix_card.hBoxLayout.addSpacing(16)
+        self.suffix_edit.editingFinished.connect(self._save_suffix)
+        self.sample_card = PushSettingCard(
+            "编辑…", FIF.FONT, "对比文字", _sample_brief(settings.get("sample_text")), self)
+        self.sample_card.clicked.connect(self._edit_sample)
+        g2.addSettingCard(self.suffix_card)
+        g2.addSettingCard(self.sample_card)
+        v.addWidget(g2)
+
+        # ── 相似度缓存 ────────────────────────────────────────
+        g3 = SettingCardGroup("相似度缓存", self.view)
+        self.cache_card = SettingCard(FIF.ALBUM, "缓存状态", "…", self)
+        self.clear_card = PrimaryPushSettingCard(
+            "清除", FIF.DELETE, "清除缓存",
+            "删除全部字形预览与相似度记录，下次搜索重新计算", self)
+        self.clear_card.clicked.connect(self._clear_cache)
+        self.move_card = PushSettingCard(
+            "更改…", FIF.FOLDER, "更改缓存位置", "迁移到其他磁盘或目录", self)
+        self.move_card.clicked.connect(self._move_cache)
+        g3.addSettingCard(self.cache_card)
+        g3.addSettingCard(self.move_card)
+        g3.addSettingCard(self.clear_card)
+        v.addWidget(g3)
+
+        self.worker.result.connect(self._on_result)
+        self.worker.failed.connect(self._on_failed)
+        self._refresh_cache_stats()
+
+    def _make_size_card(self):
+        card = _WheelFreeCard(FIF.TILES, "相对大小区间",
+                              "候选字形相对原字体的大小允许范围", self)
+        lo = round(self.settings.get("size_min") * 100)
+        hi = round(self.settings.get("size_max") * 100)
+        self.spin_smin = SpinBox(card)
+        self.spin_smax = SpinBox(card)
+        for s in (self.spin_smin, self.spin_smax):
+            s.setRange(round(SIZE_BOUNDS[0] * 100), round(SIZE_BOUNDS[1] * 100))
+            s.setSingleStep(1)
+            s.setSuffix("%")
+            s.setMinimumWidth(96)
+            s.installEventFilter(card)
+        self.spin_smin.setValue(lo)
+        self.spin_smax.setValue(hi)
+        self.spin_smin.setMaximum(hi)
+        self.spin_smax.setMinimum(lo)
         self.spin_smin.valueChanged.connect(
             lambda x: (self.settings.set("size_min", x / 100),
                        self.spin_smax.setMinimum(x)))
         self.spin_smax.valueChanged.connect(
             lambda x: (self.settings.set("size_max", x / 100),
                        self.spin_smin.setMaximum(x)))
-        self.spin_pause.valueChanged.connect(
-            lambda x: self.settings.set("n_pause", x))
-        self.spin_threads.valueChanged.connect(
-            lambda x: self.settings.set("max_threads", x))
-
-        v.addWidget(StrongBodyLabel("输出"))
-        h = QHBoxLayout()
-        h.addWidget(BodyLabel("另存后缀"))
-        h.addStretch(1)
-        # qfluentwidgets 1.11.3：LineEdit 只接受 parent，文字经 setText
-        self.suffix_edit = LineEdit()
-        self.suffix_edit.setText(settings.get("save_suffix"))
-        h.addWidget(self.suffix_edit)
-        v.addLayout(h)
-        self.suffix_edit.editingFinished.connect(self._save_suffix)
-
-        v.addWidget(StrongBodyLabel("相似度对比文字"))
-        self.sample_preview = CaptionLabel(settings.get("sample_text"))
-        self.sample_preview.setWordWrap(True)
-        v.addWidget(self.sample_preview)
-        btn_edit = PushButton(FIF.EDIT, "编辑…")
-        btn_edit.clicked.connect(self._edit_sample)
-        v.addWidget(btn_edit, 0, Qt.AlignLeft)
-
-        v.addWidget(StrongBodyLabel("相似度缓存"))
-        self.cache_label = CaptionLabel("…")
-        v.addWidget(self.cache_label)
-        h = QHBoxLayout()
-        btn_clear = PushButton("清除缓存")
-        btn_move = PushButton("更改位置…")
-        for b in (btn_clear, btn_move):
-            h.addWidget(b)
-        h.addStretch(1)
-        v.addLayout(h)
-        btn_clear.clicked.connect(self._clear_cache)
-        btn_move.clicked.connect(self._move_cache)
-        v.addStretch(1)
-
-        self.worker.result.connect(self._on_result)
-        self.worker.failed.connect(self._on_failed)
-        self._refresh_cache_stats()
+        card.hBoxLayout.addWidget(self.spin_smin, 0, Qt.AlignmentFlag.AlignRight)
+        card.hBoxLayout.addSpacing(6)
+        card.hBoxLayout.addWidget(BodyLabel("–", card), 0,
+                                  Qt.AlignmentFlag.AlignRight)
+        card.hBoxLayout.addSpacing(6)
+        card.hBoxLayout.addWidget(self.spin_smax, 0, Qt.AlignmentFlag.AlignRight)
+        card.hBoxLayout.addSpacing(_SPACING)
+        return card
 
     def _save_suffix(self):
         try:
@@ -136,7 +225,7 @@ class SettingsPage(ScrollArea):
         if dlg.exec():
             try:
                 self.settings.set("sample_text", edit.toPlainText())
-                self.sample_preview.setText(edit.toPlainText())
+                self.sample_card.setContent(_sample_brief(edit.toPlainText()))
             except ValueError:
                 InfoBar.error("对比文字不能为空", "", parent=self)
 
@@ -146,7 +235,7 @@ class SettingsPage(ScrollArea):
     def _on_result(self, tag, payload):
         if tag == "cachestat":
             mb = payload["render_bytes"] / 1024 / 1024
-            self.cache_label.setText(
+            self.cache_card.setContent(
                 f"位置 {payload['path']} · 字形预览 {mb:.1f} MB · 相似度记录 {payload['pair_count']} 条")
         elif tag == "cacheclear":
             InfoBar.success("缓存已清除", "", parent=self)
