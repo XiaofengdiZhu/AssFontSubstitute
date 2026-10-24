@@ -113,9 +113,13 @@ class SubsPage(ScrollArea):
         v.addStretch(1)
 
         bottom = QHBoxLayout()
-        self.sw_save = SwitchButton("另存勾选")
+        # SwitchButton 构造参数是 Off 态文案、勾上显示 onText（默认 "On"）——
+        # 双态同文案才能当常驻标签用
+        self.sw_save = SwitchButton("另存替换后文件")
+        self.sw_save.setOnText("另存替换后文件")
         self.sw_save.setChecked(True)
         self.sw_overwrite = SwitchButton("覆盖原文件")
+        self.sw_overwrite.setOnText("覆盖原文件")
         self.sw_save.checkedChanged.connect(self._on_save_toggle)
         self.sw_overwrite.checkedChanged.connect(self._on_overwrite_toggle)
         bottom.addWidget(self.sw_save)
