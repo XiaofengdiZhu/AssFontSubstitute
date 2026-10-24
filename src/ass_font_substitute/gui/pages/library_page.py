@@ -12,7 +12,7 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget,
                             GroupHeaderCardWidget, InfoBadge,
                             InfoBar, MessageBox, MessageBoxBase,
                             PrimaryPushButton, PushButton, PushSettingCard,
-                            ScrollArea, TextEdit, ToolButton,
+                            ScrollArea, SubtitleLabel, TextEdit, ToolButton,
                             TransparentToolButton, VerticalSeparator,
                             setFont)
 from qfluentwidgets import FluentIcon as FIF

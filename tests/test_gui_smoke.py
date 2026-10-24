@@ -261,3 +261,23 @@ def test_page_and_group_titles_follow_theme(qapp, tmp_path, monkeypatch):
     finally:
         setTheme(Theme.AUTO)
         w.close()
+
+
+def test_failures_dialog_constructs(qapp, tmp_path, monkeypatch):
+    # 回归：library_page 收编 import 时误删 SubtitleLabel，失败清单一点就崩。
+    # 挂宿主窗构造两种载荷的对话框（不 exec，exec 走模态循环会挂测试）；
+    # MaskDialogBase 要有窗才有几何，裸 parent=None 会 AttributeError
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from PySide6.QtWidgets import QWidget
+    from ass_font_substitute.gui.pages.library_page import _FailuresDialog
+
+    host = QWidget()
+    host.resize(1100, 750)
+    for data in ({"bad": {}, "skipped": []},
+                 {"bad": {"J:/fonts": [("a.ttf", "PostScript 名解析失败")],
+                          "K:/x": [("b.otf", "坏表")]},
+                  "skipped": ["J:/fonts/old.ttf#旧版 1.0"]}):
+        dlg = _FailuresDialog(data, retry=lambda dr, rel: None, parent=host)
+        assert dlg.titleLabel.text() == "失败清单"
+        dlg.deleteLater()
+    host.deleteLater()
