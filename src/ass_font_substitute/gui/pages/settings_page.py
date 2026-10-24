@@ -385,7 +385,7 @@ class SettingsPage(ScrollArea):
             self.worker.submit("cacheclear", _clear_job)
 
     def _move_cache(self):
-        d = pick_existing_dir(self, self.settings, "选择新缓存位置")
+        d = pick_existing_dir(self, self.settings, "选择新缓存位置", "cache")
         if not d:
             return
         new = Path(d) / "cache.db"

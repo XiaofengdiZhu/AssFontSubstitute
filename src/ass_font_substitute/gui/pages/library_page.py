@@ -101,7 +101,7 @@ class LibraryPage(ScrollArea):
             self.dirs_box.addWidget(card)
 
     def _add_dir(self):
-        d = pick_existing_dir(self, self.settings, "选择字体目录")
+        d = pick_existing_dir(self, self.settings, "选择字体目录", "library")
         if not d:
             return
         if not self.vm.add_dir(d):

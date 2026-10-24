@@ -152,7 +152,7 @@ class SubsPage(ScrollArea):
     # ---- 文件层 ----
     def _add_files(self):
         paths = pick_open_files(self, self.settings, "添加字幕文件",
-                                "ASS 字幕 (*.ass *.ssa)")
+                                "ASS 字幕 (*.ass *.ssa)", "subs")
         if not paths:
             return
         self._parsing.update(paths)

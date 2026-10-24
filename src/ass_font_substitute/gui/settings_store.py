@@ -28,7 +28,7 @@ DEFAULTS: dict = {
     "overwrite_default": False,
     "sample_text": SAMPLE_TEXT,
     "cache_path": "",                              # 空 = paths.default_cache_path()
-    "last_dir": "",                                # 上次文件/目录对话框的目录
+    "last_dirs": {},                               # 各对话框上次目录 {scope: 路径}
 }
 
 _BOOL_KEYS = {"overwrite_default"}
@@ -84,8 +84,12 @@ class Settings:
                 elif k == "save_suffix" and isinstance(v, str) \
                         and _SUFFIX_RE.match(v):
                     self._data[k] = v           # 存量后缀复验，与 set 同规则
-                elif k in ("cache_path", "last_dir") and isinstance(v, str):
+                elif k in ("cache_path",) and isinstance(v, str):
                     self._data[k] = v
+                elif k == "last_dirs" and isinstance(v, dict) \
+                        and all(isinstance(kk, str) and isinstance(vv, str)
+                                for kk, vv in v.items()):
+                    self._data[k] = dict(v)        # 深一层不做路径校验，种子时兜底
                 else:
                     dirty = True                # 未知键或类型不符
             if dirty:

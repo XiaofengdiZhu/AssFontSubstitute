@@ -1,7 +1,7 @@
-"""文件/目录对话框统一入口：以设置里的 last_dir 为初始目录并随手回记。
+"""文件/目录对话框统一入口：按 scope 各自记忆上次目录（settings.last_dirs）。
 
-用户要求：记住上次选择文件、目录时的目录——三种对话框（字幕文件、
-字体目录、缓存位置）共用同一 last_dir，任一处选定即更新。
+scope 是调用点自定义字符串：字幕文件 "subs"、字体目录 "library"、缓存位置
+"cache"——互不串扰，选字幕不该把字体目录对话框带到字幕文件夹去。
 """
 from __future__ import annotations
 
@@ -10,27 +10,31 @@ import os
 from PySide6.QtWidgets import QFileDialog
 
 
-def _seed(settings) -> str:
-    d = settings.get("last_dir")
+def _seed(settings, scope: str) -> str:
+    d = (settings.get("last_dirs") or {}).get(scope, "")
     return d if d and os.path.isdir(d) else ""
 
 
-def _remember(settings, d: str) -> None:
+def _remember(settings, scope: str, d: str) -> None:
     if d and os.path.isdir(d):
         if len(d) == 2 and d[1] == ":":
             d += os.sep        # 盘符根：os.path.dirname 给的是盘相对路径
-        settings.set("last_dir", d)
+        dirs = dict(settings.get("last_dirs"))
+        dirs[scope] = d
+        settings.set("last_dirs", dirs)
 
 
-def pick_existing_dir(parent, settings, title: str) -> str:
-    d = QFileDialog.getExistingDirectory(parent, title, _seed(settings))
-    _remember(settings, d)
+def pick_existing_dir(parent, settings, title: str, scope: str) -> str:
+    d = QFileDialog.getExistingDirectory(parent, title, _seed(settings, scope))
+    _remember(settings, scope, d)
     return d
 
 
-def pick_open_files(parent, settings, title: str, name_filter: str) -> list:
-    paths, _ = QFileDialog.getOpenFileNames(parent, title, _seed(settings),
+def pick_open_files(parent, settings, title: str, name_filter: str,
+                    scope: str) -> list:
+    paths, _ = QFileDialog.getOpenFileNames(parent, title,
+                                            _seed(settings, scope),
                                             name_filter)
     if paths:
-        _remember(settings, os.path.dirname(paths[0]))
+        _remember(settings, scope, os.path.dirname(paths[0]))
     return paths

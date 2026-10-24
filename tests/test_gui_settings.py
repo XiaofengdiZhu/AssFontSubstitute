@@ -84,49 +84,60 @@ def test_atomic_write_no_tmp_leftover(tmp_path):
     assert not (tmp_path / "s.json.tmp").exists()
 
 
-def test_last_dir_roundtrip_and_dialog_seed(tmp_path, monkeypatch, qapp):
+def test_last_dir_scoped_roundtrip_and_independence(tmp_path, monkeypatch, qapp):
     pytest.importorskip("PySide6")
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from ass_font_substitute.gui import lastdir
 
     s = Settings(tmp_path / "s.json")
-    assert s.get("last_dir") == ""                 # 缺省空：不预置目录
-    old = tmp_path / "old"
-    new = tmp_path / "new"
-    old.mkdir()
-    new.mkdir()
-    monkeypatch.setattr(lastdir.QFileDialog, "getExistingDirectory",
-                        lambda *a, **kw: str(new))
-    assert lastdir.pick_existing_dir(None, s, "选目录") == str(new)
-    assert s.get("last_dir") == str(new)           # 选定即回记
+    assert s.get("last_dirs") == {}                 # 缺省空：不预置目录
+    lib_dir, sub_dir = tmp_path / "fonts", tmp_path / "subs"
+    lib_dir.mkdir()
+    sub_dir.mkdir()
 
     seen = {}
 
+    def fake_dir(parent, title, d):
+        seen["d"] = d
+        return str(lib_dir)
+
+    monkeypatch.setattr(lastdir.QFileDialog, "getExistingDirectory",
+                        lambda *a: fake_dir(*a))
     monkeypatch.setattr(lastdir.QFileDialog, "getOpenFileNames",
                         lambda parent, title, d, f: (
                             seen.__setitem__("files_d", d) or
-                            ([str(new / "a.ass")], "")))
-    assert lastdir.pick_open_files(None, s, "选文件", "f") == [str(new / "a.ass")]
-    assert s.get("last_dir") == str(new)           # 文件所在目录回记
-    assert seen["files_d"] == str(new)             # 上次目录作为初始目录传入
+                            ([str(sub_dir / "a.ass")], "")))
 
+    # library scope：选定回记
+    assert lastdir.pick_existing_dir(None, s, "选目录", "library") == str(lib_dir)
+    assert s.get("last_dirs")["library"] == str(lib_dir)
+
+    # subs scope：回记自己的目录，不碰 library
+    assert lastdir.pick_open_files(None, s, "选文件", "f", "subs") ==         [str(sub_dir / "a.ass")]
+    assert s.get("last_dirs") == {"library": str(lib_dir), "subs": str(sub_dir)}
+    assert seen["files_d"] == ""                    # subs 首次：种子为空
+
+    # 种子按 scope 取：library 再开落在 fonts，subs 落在 subs
+    lastdir.pick_existing_dir(None, s, "选目录", "library")
+    assert seen["d"] == str(lib_dir)
+    lastdir.pick_open_files(None, s, "选文件", "f", "subs")
+    assert seen["files_d"] == str(sub_dir)
+
+    # 取消不改记忆
     monkeypatch.setattr(lastdir.QFileDialog, "getOpenFileNames",
                         lambda *a, **kw: ([], ""))
-    lastdir.pick_open_files(None, s, "选文件", "f")   # 取消不改记忆
-    assert s.get("last_dir") == str(new)
+    lastdir.pick_open_files(None, s, "选文件", "f", "subs")
+    assert s.get("last_dirs")["subs"] == str(sub_dir)
 
-    stale = tmp_path / "gone"                      # 记忆目录已删：种子回退为空
-    s.set("last_dir", str(stale))
-    seen = {}
-
-    def fake_seed_call(parent, title, d):
-        seen["d"] = d
-        return ""
-
-    monkeypatch.setattr(lastdir.QFileDialog, "getExistingDirectory",
-                        lambda *a: fake_seed_call(*a))
-    lastdir.pick_existing_dir(None, s, "选目录")
-    assert seen["d"] == ""
+    # 记忆目录已删：种子回退为空，其他 scope 不受影响
+    import shutil
+    shutil.rmtree(sub_dir)
+    monkeypatch.setattr(lastdir.QFileDialog, "getOpenFileNames",
+                        lambda parent, title, d, f: (
+                            seen.__setitem__("files_d2", d) or ([], "")))
+    lastdir.pick_open_files(None, s, "选文件", "f", "subs")
+    assert seen["files_d2"] == ""
+    assert s.get("last_dirs")["library"] == str(lib_dir)
 
 
 def test_last_dir_drive_root_gets_separator(tmp_path, monkeypatch, qapp):
@@ -138,12 +149,12 @@ def test_last_dir_drive_root_gets_separator(tmp_path, monkeypatch, qapp):
     drive = tmp_path.drive or "C:"
     # 真实对话框返回反斜杠路径：根目录文件的 dirname 已带分隔符
     monkeypatch.setattr(lastdir.QFileDialog, "getOpenFileNames",
-                        lambda *a, **kw: ([f"{drive}\\a.ass"], ""))
-    lastdir.pick_open_files(None, s, "选文件", "f")
-    assert s.get("last_dir") == drive + "\\"
+                        lambda *a, **kw: ([f"{drive}\a.ass"], ""))
+    lastdir.pick_open_files(None, s, "选文件", "f", "subs")
+    assert s.get("last_dirs")["subs"] == drive + "\\"
     # 盘相对路径（dirname 剥成裸 "C:"）经 _remember 归一成根
-    lastdir._remember(s, drive)
-    assert s.get("last_dir") == drive + "\\"
+    lastdir._remember(s, "library", drive)
+    assert s.get("last_dirs")["library"] == drive + "\\"
 
 
 def test_nan_and_bad_legacy_values_filtered(tmp_path):
