@@ -26,7 +26,11 @@ class _FluentSpinMixin:
         setFont(self)
         self.setFixedHeight(33)
         self.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        # 构造期建按钮：首个 resize 前若 setEnabled(False)，changeEvent 的
+        # 可用态同步会因按钮未建而落空——懒创建窗口期按钮停在可用态，
+        # stepUp 是公共槽不查 isEnabled，禁用的 SpinBox 仍会被点改
         self.upButton = self.downButton = None
+        self._ensure_buttons()
         self.lineEdit().installEventFilter(self)
 
     def _ensure_buttons(self):
@@ -55,7 +59,6 @@ class _FluentSpinMixin:
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        self._ensure_buttons()
         y = (self.height() - _BTN_H) // 2
         self.downButton.move(self.width() - _RIGHT - _BTN_W, y)
         self.upButton.move(self.width() - _RIGHT - _BTN_W - _GAP - _BTN_W, y)
@@ -74,7 +77,7 @@ class _FluentSpinMixin:
 
     def changeEvent(self, e):
         super().changeEvent(e)
-        if e.type() == QEvent.Type.EnabledChange and self.upButton is not None:
+        if e.type() == QEvent.Type.EnabledChange:
             on = self.isEnabled()
             self.upButton.setEnabled(on)
             self.downButton.setEnabled(on)
