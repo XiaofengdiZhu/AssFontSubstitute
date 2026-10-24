@@ -231,7 +231,7 @@ class _FailuresDialog(MessageBoxBase):
         hint.setWordWrap(True)
         text = TextEdit()
         text.setReadOnly(True)
-        text.setFixedHeight(320)
+        text.setMinimumHeight(140)
         lines = []
         if not self._bad:
             lines.append("各目录暂无解析失败文件。")
@@ -246,8 +246,12 @@ class _FailuresDialog(MessageBoxBase):
         text.setPlainText("\n".join(lines))
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(hint)
-        self.viewLayout.addWidget(text)
+        self.viewLayout.addWidget(text, 1)
         self.widget.setMinimumWidth(640)
+        # 按钮区钉在 widget 底部：高度封在窗口内，正文超出交给 TextEdit 滚动
+        win_h = self.window().height() if self.window() is not None else 0
+        if win_h > 350:
+            self.widget.setMaximumHeight(win_h - 32)
         if self._bad:
             self.yesButton.setText("重试全部")
             self.cancelButton.setText("关闭")

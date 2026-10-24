@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (CaptionLabel, ComboBox, MessageBoxBase,
-                            SearchLineEdit, SubtitleLabel)
+                            SearchLineEdit, SmoothScrollArea, SubtitleLabel)
 
 from ass_font_substitute.gui.jobs import make_searcher, pull_chunk
 from ass_font_substitute.gui.preview_vm import PreviewVM
@@ -23,19 +24,15 @@ class FontPickerDialog(MessageBoxBase):
         self.pvm.set_entities(entities)
 
         self.titleLabel = SubtitleLabel("从字体库选择")
-        self.viewLayout.addWidget(self.titleLabel)
 
         self.rec_title = SubtitleLabel("推荐（覆盖达标）")
         self.rec_list = FontListWidget(worker, self.pvm, lambda: self._preview())
         self.rec_list.entity_picked.connect(self._pick)
-        self.rec_list.setFixedHeight(150)
+        self.rec_list.setFixedHeight(120)
         self.rec_title.hide()
         self.rec_list.hide()
-        self.viewLayout.addWidget(self.rec_title)
-        self.viewLayout.addWidget(self.rec_list)
 
-        self.viewLayout.addWidget(SubtitleLabel("全部字体"))
-        filters = QHBoxLayout()
+        all_title = SubtitleLabel("全部字体")
         self.name_edit = SearchLineEdit()
         self.name_edit.setPlaceholderText("搜索字体名")
         self.cb_cat, self.cb_script, self.cb_weight = ComboBox(), ComboBox(), ComboBox()
@@ -43,23 +40,55 @@ class FontPickerDialog(MessageBoxBase):
                        (self.cb_weight, "字重")):
             cb.setPlaceholderText(ph)
             cb.currentIndexChanged.connect(self._apply_filters)
+        filters = QHBoxLayout()
         for w in (self.name_edit, self.cb_cat, self.cb_script, self.cb_weight):
             filters.addWidget(w)
-        self.viewLayout.addLayout(filters)
+        self.filter_bar = QWidget()
+        self.filter_bar.setLayout(filters)
 
         self.all_list = FontListWidget(worker, self.pvm, lambda: self._preview())
         self.all_list.entity_picked.connect(self._pick)
-        self.all_list.setMinimumHeight(220)
-        self.viewLayout.addWidget(self.all_list, 1)
+        self.all_list.setMinimumHeight(120)
 
         self.hint = CaptionLabel("未选择")
-        self.viewLayout.addWidget(self.hint)
+        self.empty_label = CaptionLabel(
+            "字体库为空：先到「字体库」页添加目录并建立索引，再回到这里选择。")
+        self.empty_label.setWordWrap(True)
+        self.empty_label.hide()
+        if not self.pvm.entities:
+            all_title.hide()
+            self.filter_bar.hide()
+            self.all_list.hide()
+            self.empty_label.show()
+
+        body = QWidget()
+        body_v = QVBoxLayout(body)
+        body_v.setContentsMargins(0, 0, 0, 0)
+        body_v.setSpacing(12)
+        body_v.addWidget(self.titleLabel)
+        body_v.addWidget(self.rec_title)
+        body_v.addWidget(self.rec_list)
+        body_v.addWidget(all_title)
+        body_v.addWidget(self.filter_bar)
+        body_v.addWidget(self.all_list, 1)
+        body_v.addWidget(self.empty_label)
+        body_v.addWidget(self.hint)
+        if not self.pvm.entities:
+            # 空库态列表全隐：不给 stretch 的话剩余高度会摊到各标签上
+            body_v.addStretch(1)
+        scroll = SmoothScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(body)
+        self.viewLayout.addWidget(scroll, 1)
 
         self.widget.setMinimumWidth(720)
-        # 窗口高度有限（内容按布局自适应），超出会把按钮区顶出窗口外
+        # 按钮区钉在 widget 底部：widget 高度必须封在窗口内，
+        # 内容装不下由 scroll 兜底，否则按钮被顶出窗口外
         win_h = self.window().height() if self.window() is not None else 0
-        if win_h > 300:
-            self.widget.setMaximumHeight(win_h - 24)
+        if win_h > 350:
+            self.widget.setFixedHeight(max(min(win_h - 48, 620), 320))
         self.yesButton.setText("选定")
         self.yesButton.setEnabled(False)
         self.cancelButton.setText("取消")
@@ -107,6 +136,8 @@ class FontPickerDialog(MessageBoxBase):
             return
         self.worker.result.disconnect(self._on_reco)
         self._reco = payload
+        if not payload:                 # 无达标候选：不出「推荐」空框
+            return
         self.rec_title.show()
         self.rec_list.show()
         self._reload_all()
