@@ -59,13 +59,20 @@ class PreviewBar(CaptionLabel):
     def _on_result(self, tag, payload):
         if tag != self._tag:
             return
-        text, bundle = payload
+        # 回传 text：结果按 (tag, text) 双重匹配，防换文字后旧在途结果错配
+        # 缓存键；渲染失败也折进本通路（err 字段）——failed 信号不带 text
+        # 无法做同样的护栏，同 tag 旧任务的失败会错标新行
+        text, bundle, err = payload
         if text != self._text:
             # 同 tag（fp + 列表实例）的在途旧任务——行已随 set_rows 重建：
             # 结果的文字与本行不符，直接丢弃，不清缓存不置位
             return
         self._worker.result.disconnect(self._on_result)
         self._inflight = False
+        if err is not None:
+            self.setText("（渲染失败）")
+            self.setToolTip(err)        # hover 可见具体异常，排查怪字体
+            return
         tiles = _bundle_tiles(bundle)
         self._pvm.put_tiles((self._entity.fingerprint, self._text), tiles)
         self._apply(tiles)
@@ -73,7 +80,7 @@ class PreviewBar(CaptionLabel):
     def _apply(self, tiles):
         pm = tiles_to_pixmap(tiles)
         if pm.isNull():
-            self.setText("(无可渲染字形)")
+            self.setText("（无可渲染字形）")
             return
         self.setPixmap(pm.scaledToHeight(self.height(),
                                          Qt.SmoothTransformation))
@@ -81,5 +88,8 @@ class PreviewBar(CaptionLabel):
 
 def _render_job(ctx, entity, text):
     from ass_font_substitute.gui.jobs import render_preview
-    # 回传 text：结果按 (tag, text) 双重匹配，防换文字后旧在途结果错配缓存键
-    return text, render_preview(entity, text)
+    try:
+        bundle = render_preview(entity, text)
+    except Exception as e:  # noqa: BLE001 损坏字体渲染抛异常折进结果通路
+        return text, None, f"{type(e).__name__}: {e}"
+    return text, bundle, None
