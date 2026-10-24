@@ -1,21 +1,32 @@
 from __future__ import annotations
 
 import os
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFileDialog
 from PySide6.QtWidgets import QVBoxLayout, QWidget
-from qfluentwidgets import (BodyLabel, Dialog, InfoBar, LineEdit,
-                            PrimaryPushSettingCard, PushSettingCard, ScrollArea,
-                            SettingCard, SettingCardGroup, Slider, TextEdit)
+from qfluentwidgets import (BodyLabel, ComboBox, Dialog, HyperlinkCard,
+                            InfoBar, LineEdit, PrimaryPushSettingCard,
+                            PushSettingCard, ScrollArea, SettingCard,
+                            SettingCardGroup, Slider, TextEdit, ToolButton)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.settings_store import (COV_BOUNDS, SIM_BOUNDS,
                                                     SIZE_BOUNDS)
 from ass_font_substitute.gui.widgets.spin import SpinBox
 
+REPO_URL = "https://github.com/XiaofengdiZhu/AssFontSubstitute"
+
 _SPACING = 24          # 控件与卡片右缘间距（Ghost Downloader 同款）
+
+
+def _app_version() -> str:
+    try:
+        return _pkg_version("ass-font-substitute")
+    except PackageNotFoundError:
+        return "dev"
 
 
 def _sample_brief(text: str) -> str:
@@ -94,10 +105,11 @@ class SettingsPage(ScrollArea):
         self.enableTransparentBackground()
         v = QVBoxLayout(self.view)
         v.setContentsMargins(36, 24, 36, 36)
+        v.setSpacing(32)                 # 组标题与上组卡片拉开距离
         v.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # ── 替换门槛（处理字幕页初始值）──────────────────────────
-        g1 = SettingCardGroup("替换门槛", self.view)
+        # ── 相似候选（处理字幕页初始值）──────────────────────────
+        g1 = SettingCardGroup("相似候选", self.view)
         self.cov_card = _PercentCard(
             FIF.FILTER, "覆盖率门槛",
             "在库字形对字幕用字的覆盖达到该值即直接采用，否则进入相似度搜索",
@@ -151,17 +163,36 @@ class SettingsPage(ScrollArea):
         # ── 相似度缓存 ────────────────────────────────────────
         g3 = SettingCardGroup("相似度缓存", self.view)
         self.cache_card = SettingCard(FIF.ALBUM, "缓存状态", "…", self)
+        self.path_card = SettingCard(FIF.FOLDER, "缓存位置",
+                                     "字形预览与相似度记录存放位置", self)
+        self.path_combo = ComboBox(self.path_card)
+        self.path_combo.addItem("…")
+        self.path_combo.setMinimumWidth(240)
+        self.path_pick = ToolButton(FIF.FOLDER, self.path_card)
+        self.path_pick.clicked.connect(self._move_cache)
+        self.path_card.hBoxLayout.addWidget(self.path_combo, 0,
+                                            Qt.AlignmentFlag.AlignRight)
+        self.path_card.hBoxLayout.addSpacing(8)
+        self.path_card.hBoxLayout.addWidget(self.path_pick, 0,
+                                            Qt.AlignmentFlag.AlignRight)
+        self.path_card.hBoxLayout.addSpacing(_SPACING)
         self.clear_card = PrimaryPushSettingCard(
             "清除", FIF.DELETE, "清除缓存",
             "删除全部字形预览与相似度记录，下次搜索重新计算", self)
         self.clear_card.clicked.connect(self._clear_cache)
-        self.move_card = PushSettingCard(
-            "更改…", FIF.FOLDER, "更改缓存位置", "迁移到其他磁盘或目录", self)
-        self.move_card.clicked.connect(self._move_cache)
         g3.addSettingCard(self.cache_card)
-        g3.addSettingCard(self.move_card)
+        g3.addSettingCard(self.path_card)
         g3.addSettingCard(self.clear_card)
         v.addWidget(g3)
+
+        # ── 关于 ─────────────────────────────────────────────
+        g4 = SettingCardGroup("关于", self.view)
+        ver_card = SettingCard(FIF.INFO, "版本", _app_version(), self)
+        repo_card = HyperlinkCard(REPO_URL, "打开", FIF.GITHUB, "项目仓库",
+                                  "获取更新 / 反馈问题（GitHub）", self)
+        g4.addSettingCard(ver_card)
+        g4.addSettingCard(repo_card)
+        v.addWidget(g4)
 
         self.worker.result.connect(self._on_result)
         self.worker.failed.connect(self._on_failed)
@@ -178,7 +209,7 @@ class SettingsPage(ScrollArea):
             s.setRange(round(SIZE_BOUNDS[0] * 100), round(SIZE_BOUNDS[1] * 100))
             s.setSingleStep(1)
             s.setSuffix("%")
-            s.setMinimumWidth(96)
+            s.setFixedWidth(132)
             s.installEventFilter(card)
         self.spin_smin.setValue(lo)
         self.spin_smax.setValue(hi)
@@ -236,13 +267,21 @@ class SettingsPage(ScrollArea):
         if tag == "cachestat":
             mb = payload["render_bytes"] / 1024 / 1024
             self.cache_card.setContent(
-                f"位置 {payload['path']} · 字形预览 {mb:.1f} MB · 相似度记录 {payload['pair_count']} 条")
+                f"字形预览 {mb:.1f} MB · 相似度记录 {payload['pair_count']} 条")
+            self._sync_path(payload["path"])
         elif tag == "cacheclear":
             InfoBar.success("缓存已清除", "", parent=self)
             self._refresh_cache_stats()
         elif tag == "cachemove":
             InfoBar.success("缓存位置已更改", payload, parent=self)
             self._refresh_cache_stats()
+
+    def _sync_path(self, path: str):
+        self.path_combo.blockSignals(True)
+        if self.path_combo.count():
+            self.path_combo.clear()
+        self.path_combo.addItem(path)
+        self.path_combo.blockSignals(False)
 
     def _on_failed(self, tag, err):
         # 缓存类任务失败浮泡（初始化/统计/清除/迁移）；其它页签的任务由

@@ -40,9 +40,13 @@ class _FluentSpinMixin:
             b.setAutoRepeatInterval(70)
 
     def _fix_edit(self):
-        """QSS 下 Qt 可能把内部 lineEdit 算成 1px——按自身宽度兜底重设。"""
+        """QSS 下 Qt 可能把内部 lineEdit 算成 1px——按自身宽度兜底重设。
+        右侧预留按钮区（31+5+31+4+边框），窄框（<140）退回全宽：
+        那时数值必然很短，不会滑进按钮底下。"""
         le = self.lineEdit()
-        want = self.width() - 4
+        want = self.width() - 84
+        if want <= 20:
+            want = self.width() - 4
         if want > 20 and le.width() != want:
             le.setGeometry(2, (self.height() - le.height()) // 2, want,
                            le.height())
