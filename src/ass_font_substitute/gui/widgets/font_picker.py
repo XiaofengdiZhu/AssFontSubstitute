@@ -105,8 +105,14 @@ class FontPickerDialog(MessageBoxBase):
 
         if chars:
             worker.result.connect(self._on_reco)
+            self._reco_cancel = {"cancelled": False}
             worker.submit("pickreco", _reco_job, chars,
-                          float(settings.get("cov_threshold")), direction)
+                          float(settings.get("cov_threshold")), direction,
+                          self._reco_cancel)
+            # 关弹窗（取消/选定/ESC/宿主窗口关闭，均经 done→finished）即
+            # 置取消标志：任务在 pull_chunk 每候选处检查，提前退出不白算
+            self.finished.connect(lambda _: self._reco_cancel.__setitem__(
+                "cancelled", True))
         # 复用字体库预览的文字；对话框自己不发 blib（实体由调用方传入）
 
     def _preview(self):
@@ -142,7 +148,7 @@ class FontPickerDialog(MessageBoxBase):
             return
         self.worker.result.disconnect(self._on_reco)
         self._reco = payload
-        if not payload:                 # 无达标候选：不出「推荐」空框
+        if not payload:                 # 无达标候选或已取消：不出「推荐」空框
             return
         self.rec_title.show()
         self.rec_list.show()
@@ -156,11 +162,14 @@ class FontPickerDialog(MessageBoxBase):
     _reco = None
 
 
-def _reco_job(ctx, chars, cov_threshold, direction):
-    """target=None：无暂停语义一次搜穿整池（元数据 + 覆盖率，~15µs/候选）。"""
+def _reco_job(ctx, chars, cov_threshold, direction, cancel=None):
+    """target=None：无暂停语义一次搜穿整池（元数据 + 覆盖率，~15µs/候选）。
+    cancel 与 pull 任务同款标志字典：弹窗已关则提前退出，不白算。"""
     s = make_searcher(ctx, target=None, chars=set(chars),
                       threshold=cov_threshold, n_pause=10 ** 9,
                       min_sim=0.0, size_range=(0.0, 10.0), direction=direction)
-    cands, _ = pull_chunk(s, chunk=10 ** 9)
+    cands, state = pull_chunk(s, cancel=cancel, chunk=10 ** 9)
+    if state == "cancelled":
+        return None                    # 跳过 fp2e 全池倒排的构建
     fp2e = {e.fingerprint: e for e in ctx.lib.entities()}
     return [fp2e[c.fingerprint] for c in cands]
