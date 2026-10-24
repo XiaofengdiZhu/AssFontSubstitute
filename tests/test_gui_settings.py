@@ -234,3 +234,73 @@ def test_percent_card_init_does_not_commit(qapp):
     calls = []
     _PercentCard(FIF.FILTER, "t", "c", 90, 100, 1, 96, calls.append)
     assert calls == []                              # 构造不提交，存量值不被改写
+
+
+def test_general_group_language_theme_bg(qapp, tmp_path, monkeypatch):
+    # 常规组三卡：初值、改动落盘并发信号、繁体模式选项名换正體中文
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from PySide6.QtCore import QObject, Signal
+    from ass_font_substitute.gui.pages.settings_page import SettingsPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def __init__(self):
+            super().__init__()
+            self.submits = []
+
+        def submit(self, tag, fn, *a, **k):
+            self.submits.append((tag, fn, a, k))
+
+    s = Settings(tmp_path / "settings.json")
+    page = SettingsPage(s, _FakeWorker())
+    assert page.lang_combo.currentText() == "简体中文"
+    assert page.theme_combo.currentText() == "跟随系统设置"
+    assert page.bg_combo.currentText() == "Mica"
+
+    themes, effects = [], []
+    page.themeChanged.connect(themes.append)
+    page.bgEffectChanged.connect(effects.append)
+    page.theme_combo.setCurrentIndex(2)           # 深色
+    page.bg_combo.setCurrentIndex(4)              # 无
+    assert themes == ["dark"] and effects == ["none"]
+    assert s.get("theme") == "dark" and s.get("bg_effect") == "none"
+
+    page.lang_combo.setCurrentIndex(1)
+    assert s.get("language") == "zh-Hant"
+    assert [page.lang_combo.itemText(i)
+            for i in range(page.lang_combo.count())] == ["简体中文", "正體中文"]
+    assert page.lang_combo.currentIndex() == 1
+    page.lang_combo.setCurrentIndex(0)
+    assert s.get("language") == "zh-Hans"
+    assert [page.lang_combo.itemText(i)
+            for i in range(page.lang_combo.count())] == ["简体中文", "繁体中文"]
+    page.deleteLater()
+
+
+def test_enum_keys_roundtrip_and_reject(tmp_path):
+    # 语言/主题/窗口材质：枚举键合法值可回读，非法值 set 拒收
+    s = Settings(tmp_path / "s.json")
+    assert (s.get("language"), s.get("theme"),
+            s.get("bg_effect")) == ("zh-Hans", "auto", "mica")
+    s.set("language", "zh-Hant")
+    s.set("theme", "dark")
+    s.set("bg_effect", "acrylic")
+    s2 = Settings(tmp_path / "s.json")
+    assert (s2.get("language"), s2.get("theme"),
+            s2.get("bg_effect")) == ("zh-Hant", "dark", "acrylic")
+    for key, bad in (("language", "en"), ("theme", "blue"),
+                     ("bg_effect", "glass")):
+        with pytest.raises(ValueError):
+            s.set(key, bad)
+
+
+def test_enum_keys_out_of_range_fall_back(tmp_path):
+    f = tmp_path / "s.json"
+    f.write_text(json.dumps({"language": "en", "theme": "blue",
+                             "bg_effect": 3}), "utf-8")
+    s = Settings(f)
+    assert (s.get("language"), s.get("theme"),
+            s.get("bg_effect")) == ("zh-Hans", "auto", "mica")

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
                             ComboBox, FlowLayout, InfoBadge, InfoBar, LineEdit,
                             PrimaryPushButton, PushButton, ScrollArea,
@@ -57,12 +57,14 @@ class SubsPage(ScrollArea):
         self.setWidget(self.view)
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.enableTransparentBackground()   # 默认画调色板底，深色主题下亮块
         self.view.setMinimumWidth(420)
 
         head = QHBoxLayout()
-        page_title = QLabel("处理字幕")
-        setFont(page_title, 20)     # 与字体库页标题同款（QLabel 20px Normal）
-        head.addWidget(page_title)
+        # BodyLabel 而非裸 QLabel：LABEL qss 黑/白随主题（裸 QLabel 黑字死调色板）
+        self.page_title = BodyLabel("处理字幕")
+        setFont(self.page_title, 20)   # qfw setFont：20px Normal 字重不变
+        head.addWidget(self.page_title)
         head.addStretch(1)
         self.summary = _BadgeRow()
         head.addWidget(self.summary)

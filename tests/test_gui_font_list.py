@@ -79,3 +79,32 @@ def test_font_list_lazy_materialization(qapp):
     fl.entity_picked.connect(picked.append)
     fl._on_click(fl.item(150))
     assert picked and picked[0].fingerprint == "150"    # _on_click 用 _rows
+
+
+def test_pill_follows_theme(qapp):
+    # 药丸 paintEvent 现取主题色（qfw VerticalSeparator 同法）：渲染像素验证
+    # 暗浅两套底色 alpha 不同，setTheme 后旧实例自动换装
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QImage
+    from qfluentwidgets import Theme, setTheme
+    from ass_font_substitute.gui.widgets.font_card import _pill
+
+    def bg_alpha(w):
+        img = QImage(w.size(), QImage.Format_ARGB32_Premultiplied)
+        img.fill(0)
+        w.render(img)
+        return img.pixelColor(QPoint(2, w.height() // 2)).alpha()
+
+    try:
+        setTheme(Theme.DARK)
+        p = _pill("W400")
+        # render 会先铺不透明调色板底，挂半透明属性让药丸自身 alpha 露出
+        p.setAttribute(Qt.WA_TranslucentBackground)
+        p.resize(p.sizeHint())
+        a_dark = bg_alpha(p)
+        setTheme(Theme.LIGHT)
+        a_light = bg_alpha(p)
+        assert a_dark > a_light >= 0     # 暗 26α 白底 / 亮 15α 黑底
+    finally:
+        setTheme(Theme.AUTO)
+        p.deleteLater()

@@ -184,3 +184,80 @@ def test_dir_library_stats_maps_normalized_paths(qapp, tmp_path, monkeypatch):
     assert out[fwd] == {"fonts": 1, "sc": 1, "tc": 0, "skipped": 1}
     # 未知目录（非本库目录）不进结果
     assert _dir_library_stats(snap, ["X:/nowhere"])["X:/nowhere"]["fonts"] == 0
+
+
+def test_window_applies_stored_theme_and_effect(qapp, tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from qfluentwidgets import Theme, qconfig, setTheme
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    s = Settings(tmp_path / "settings.json")
+    s.set("theme", "dark")
+    s.set("bg_effect", "none")
+    try:
+        w = AFSWindow(s)
+        assert qconfig.theme == Theme.DARK        # 建页前已定主题
+        assert not w.isMicaEffectEnabled()        # none：FluentWindow 出厂 Mica 已关
+        w.settings_page.bgEffectChanged.emit("mica")
+        assert w.isMicaEffectEnabled()
+    finally:
+        setTheme(Theme.AUTO)                      # 还原全局主题，防污染后续测试
+        w.close()
+
+
+def test_dark_theme_pages_are_dark(qapp, tmp_path, monkeypatch):
+    # 回归：subs/library/browse 三页 ScrollArea 默认画调色板底（浅色），
+    # 深色主题下整页亮块；enableTransparentBackground 后页面底透出窗口
+    # 实色（none 材质下 = 深色）
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from PySide6.QtGui import QImage
+    from qfluentwidgets import Theme, setTheme
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    s = Settings(tmp_path / "settings.json")
+    s.set("theme", "dark")
+    s.set("bg_effect", "none")
+    try:
+        w = AFSWindow(s)
+        w.resize(1100, 750)
+        w.show()
+        qapp.processEvents()
+        img = QImage(w.size(), QImage.Format_ARGB32_Premultiplied)
+        for name in ("subs_page", "library_page", "browse_page",
+                     "settings_page"):
+            w.switchTo(getattr(w, name))
+            qapp.processEvents()
+            img.fill(0)
+            w.render(img)
+            r, g, b, _a = img.pixelColor(600, 500).getRgb()
+            assert (r + g + b) / 3 < 80, f"{name} 底色未随深色主题变暗"
+    finally:
+        setTheme(Theme.AUTO)                      # 还原全局主题
+        w.close()
+
+
+def test_page_and_group_titles_follow_theme(qapp, tmp_path, monkeypatch):
+    # 回归：页标题/设置组标题原为裸 QLabel（黑字死调色板），深色下不可读；
+    # 换 BodyLabel 后 LABEL qss 黑/白随主题
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from qfluentwidgets import Theme, setTheme
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    s = Settings(tmp_path / "settings.json")
+    try:
+        w = AFSWindow(s)
+        setTheme(Theme.DARK)
+        qapp.processEvents()
+        assert "color: white" in w.subs_page.page_title.styleSheet()
+        assert "color: white" in w.library_page.page_title.styleSheet()
+        cls = type(w.subs_page.page_title)
+        titles = [l for l in w.settings_page.view.findChildren(cls)
+                  if l.text() in ("常规", "相似候选", "输出", "相似度缓存", "关于")]
+        assert len(titles) == 5
+        assert all("color: white" in l.styleSheet() for l in titles)
+    finally:
+        setTheme(Theme.AUTO)
+        w.close()

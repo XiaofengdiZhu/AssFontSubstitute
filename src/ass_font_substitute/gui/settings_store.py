@@ -29,12 +29,21 @@ DEFAULTS: dict = {
     "sample_text": SAMPLE_TEXT,
     "cache_path": "",                              # 空 = paths.default_cache_path()
     "last_dirs": {},                               # 各对话框上次目录 {scope: 路径}
+    "language": "zh-Hans",                         # 界面语言（国际化待接入，暂存储值）
+    "theme": "auto",                               # auto/light/dark
+    "bg_effect": "mica",                           # 窗口材质；Win10 下 Mica 类自动退化为实色
 }
 
 _BOOL_KEYS = {"overwrite_default"}
 _LIST_KEYS = {"font_dirs"}
 _INT_KEYS = {"n_pause", "max_threads"}
 _FLOAT_KEYS = {"cov_threshold", "min_sim", "size_min", "size_max"}
+# 枚举键：取值必须落在集合内，存量越界值按默认处理
+_ENUM_KEYS = {
+    "language": {"zh-Hans", "zh-Hant"},
+    "theme": {"auto", "light", "dark"},
+    "bg_effect": {"mica", "mica_alt", "acrylic", "aero", "none"},
+}
 _SUFFIX_RE = re.compile(r"^\..+$")
 
 
@@ -86,6 +95,8 @@ class Settings:
                     self._data[k] = v           # 存量后缀复验，与 set 同规则
                 elif k in ("cache_path",) and isinstance(v, str):
                     self._data[k] = v
+                elif k in _ENUM_KEYS and v in _ENUM_KEYS[k]:
+                    self._data[k] = v
                 elif k == "last_dirs" and isinstance(v, dict) \
                         and all(isinstance(kk, str) and isinstance(vv, str)
                                 for kk, vv in v.items()):
@@ -106,6 +117,8 @@ class Settings:
         if key in _FLOAT_KEYS and isinstance(value, float) \
                 and not math.isfinite(value):
             raise ValueError(f"{key} 必须是有限数值")
+        if key in _ENUM_KEYS and value not in _ENUM_KEYS[key]:
+            raise ValueError(f"{key} 必须是 {'/'.join(sorted(_ENUM_KEYS[key]))} 之一")
         with self._lock:
             self._data[key] = value
             self.save()

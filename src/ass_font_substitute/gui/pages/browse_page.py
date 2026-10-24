@@ -126,4 +126,5 @@ def _inner_view(page):
     w.vbox = QVBoxLayout(w)
     page.setWidget(w)
     page.setWidgetResizable(True)
+    page.enableTransparentBackground()   # 默认画调色板底，深色主题下亮块
     return w

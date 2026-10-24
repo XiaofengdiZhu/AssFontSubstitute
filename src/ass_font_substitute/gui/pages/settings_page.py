@@ -11,7 +11,7 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, Dialog,
                             MessageBoxBase, PrimaryPushSettingCard,
                             PushSettingCard, ScrollArea, SettingCard,
                             SettingCardGroup, Slider, SubtitleLabel, TextEdit,
-                            ToolButton)
+                            ToolButton, setFont)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.lastdir import pick_existing_dir
@@ -23,6 +23,13 @@ from ass_font_substitute.gui.widgets.spin import SpinBox
 REPO_URL = "https://github.com/XiaofengdiZhu/AssFontSubstitute"
 
 _SPACING = 24          # 控件与卡片右缘间距（Ghost Downloader 同款）
+
+_LANG_LABELS = {
+    "zh-Hans": ("简体中文", "繁体中文"),
+    "zh-Hant": ("简体中文", "正體中文"),
+}
+_THEME_VALUES = ("auto", "light", "dark")
+_BG_VALUES = ("mica", "mica_alt", "acrylic", "aero", "none")
 
 
 def _app_version() -> str:
@@ -125,9 +132,23 @@ class _SampleEditBox(MessageBoxBase):
         self.yesButton.setEnabled(bool(text.strip()))
 
 
+def _theme_aware_title(group) -> None:
+    """qfw SettingCardGroup 标题是裸 QLabel：黑字死调色板，深色主题不跟随。
+    原位换成 BodyLabel（FluentLabelBase，LABEL qss 黑/白按主题）+同款 20px
+    Normal（qfw setFont 只改字号字重不变）。"""
+    old = group.titleLabel
+    title = BodyLabel(old.text(), old.parentWidget())
+    setFont(title, 20)
+    group.titleLabel = title
+    group.vBoxLayout.replaceWidget(old, title)
+    old.deleteLater()
+
+
 class SettingsPage(ScrollArea):
     saveModeChanged = Signal(bool)       # 覆盖原文件？（处理字幕页同步）
     suffixChanged = Signal(str)          # 另存后缀变更（处理字幕页同步）
+    themeChanged = Signal(str)           # 主题模式 auto/light/dark（主窗口应用）
+    bgEffectChanged = Signal(str)        # 窗口背景材质（主窗口应用）
 
     def __init__(self, settings, worker, parent=None):
         super().__init__(parent)
@@ -143,6 +164,50 @@ class SettingsPage(ScrollArea):
         v.setContentsMargins(36, 24, 36, 36)
         v.setSpacing(32)                 # 组标题与上组卡片拉开距离
         v.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        # ── 常规 ─────────────────────────────────────────────
+        g0 = SettingCardGroup("常规", self.view)
+        # 繁体模式下「繁体中文」选项以繁方惯称「正體中文」显示
+        lang = settings.get("language")
+        self.lang_card = _WheelFreeCard(
+            FIF.LANGUAGE, "语言", "设置界面语言（国际化尚未完成，暂只保存选择）", self)
+        self.lang_combo = ComboBox(self.lang_card)
+        self.lang_combo.addItems(list(_LANG_LABELS[lang]))
+        self.lang_combo.setCurrentIndex(0 if lang == "zh-Hans" else 1)
+        self.lang_combo.setFixedWidth(150)
+        self.lang_combo.installEventFilter(self.lang_card)
+        self.lang_combo.currentIndexChanged.connect(self._on_language)
+        self.lang_card.hBoxLayout.addWidget(self.lang_combo, 0,
+                                            Qt.AlignmentFlag.AlignRight)
+        self.lang_card.hBoxLayout.addSpacing(_SPACING)
+        self.theme_card = _WheelFreeCard(
+            FIF.BRUSH, "主题", "更改应用程序的外观", self)
+        self.theme_combo = ComboBox(self.theme_card)
+        self.theme_combo.addItems(["跟随系统设置", "浅色", "深色"])
+        self.theme_combo.setCurrentIndex(_THEME_VALUES.index(settings.get("theme")))
+        self.theme_combo.setFixedWidth(150)
+        self.theme_combo.installEventFilter(self.theme_card)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme)
+        self.theme_card.hBoxLayout.addWidget(self.theme_combo, 0,
+                                             Qt.AlignmentFlag.AlignRight)
+        self.theme_card.hBoxLayout.addSpacing(_SPACING)
+        self.bg_card = _WheelFreeCard(
+            FIF.TRANSPARENT, "窗口背景", "设置窗口背景的透明材质"
+            "（Win10 不支持 Mica 类材质，自动退化为实色）", self)
+        self.bg_combo = ComboBox(self.bg_card)
+        self.bg_combo.addItems(["Mica", "MicaAlt", "Acrylic", "Aero", "无"])
+        self.bg_combo.setCurrentIndex(
+            _BG_VALUES.index(settings.get("bg_effect")))
+        self.bg_combo.setFixedWidth(150)
+        self.bg_combo.installEventFilter(self.bg_card)
+        self.bg_combo.currentIndexChanged.connect(self._on_bg_effect)
+        self.bg_card.hBoxLayout.addWidget(self.bg_combo, 0,
+                                          Qt.AlignmentFlag.AlignRight)
+        self.bg_card.hBoxLayout.addSpacing(_SPACING)
+        g0.addSettingCard(self.lang_card)
+        g0.addSettingCard(self.theme_card)
+        g0.addSettingCard(self.bg_card)
+        v.addWidget(g0)
 
         # ── 相似候选（处理字幕页初始值）──────────────────────────
         g1 = SettingCardGroup("相似候选", self.view)
@@ -244,6 +309,10 @@ class SettingsPage(ScrollArea):
         g4.addSettingCard(repo_card)
         v.addWidget(g4)
 
+        # 组标题换主题跟随色（须在 _add_sim_pending_hint 前：后者要搬 titleLabel）
+        for g in (g0, g1, g2, g3, g4):
+            _theme_aware_title(g)
+
         self.worker.result.connect(self._on_result)
         self.worker.failed.connect(self._on_failed)
         self._refresh_cache_stats()
@@ -313,6 +382,30 @@ class SettingsPage(ScrollArea):
     def _mark_sim_pending(self):
         if self._search_active:
             self.sim_pending_hint.show()
+
+    # ---- 常规（语言/主题/窗口背景）----
+    def _on_language(self, index):
+        lang = "zh-Hant" if index == 1 else "zh-Hans"
+        self.settings.set("language", lang)
+        # 繁体模式下选项名换成简方/繁方惯称：重灌选项文案（索引不变）
+        labels = list(_LANG_LABELS[lang])
+        if labels != [self.lang_combo.itemText(i)
+                      for i in range(self.lang_combo.count())]:
+            self.lang_combo.blockSignals(True)
+            self.lang_combo.clear()
+            self.lang_combo.addItems(labels)
+            self.lang_combo.setCurrentIndex(index)
+            self.lang_combo.blockSignals(False)
+
+    def _on_theme(self, index):
+        value = _THEME_VALUES[index]
+        self.settings.set("theme", value)
+        self.themeChanged.emit(value)
+
+    def _on_bg_effect(self, index):
+        value = _BG_VALUES[index]
+        self.settings.set("bg_effect", value)
+        self.bgEffectChanged.emit(value)
 
     # ---- 保存方式/后缀（与处理字幕页双向同步）----
     def _on_save_mode(self, index):

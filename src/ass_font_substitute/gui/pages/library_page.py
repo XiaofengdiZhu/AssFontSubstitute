@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.pages.subs_page import _ElidedLabel
@@ -12,8 +12,8 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget,
                             GroupHeaderCardWidget, InfoBadge,
                             InfoBar, MessageBox, MessageBoxBase,
                             PrimaryPushButton, PushButton, PushSettingCard,
-                            ScrollArea, TextEdit,
-                            ToolButton, TransparentToolButton, isDarkTheme,
+                            ScrollArea, TextEdit, ToolButton,
+                            TransparentToolButton, VerticalSeparator,
                             setFont)
 from qfluentwidgets import FluentIcon as FIF
 
@@ -42,14 +42,16 @@ class LibraryPage(ScrollArea):
         v = QVBoxLayout(self.view)
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+        self.enableTransparentBackground()   # 默认画调色板底，深色主题下亮块
         # 间距节奏对齐设置页：页边距 (36,24,36,36)，区块间 16（区块间
         # 无组标题，32 空得没道理），标题→卡片 12
         v.setContentsMargins(36, 24, 36, 36)
         v.setSpacing(0)
 
-        page_title = QLabel("字体库管理")
-        setFont(page_title, 20)     # 与设置页 SettingCardGroup 标题同款（Normal 字重）
-        v.addWidget(page_title)
+        # BodyLabel 而非裸 QLabel：LABEL qss 黑/白随主题（裸 QLabel 黑字死调色板）
+        self.page_title = BodyLabel("字体库管理")
+        setFont(self.page_title, 20)   # qfw setFont：20px Normal 字重不变
+        v.addWidget(self.page_title)
         v.addSpacing(12)
 
         # 统计条置顶、操作条其下：打开页先读库概况再看到操作
@@ -60,12 +62,8 @@ class LibraryPage(ScrollArea):
         stat_row.setSpacing(0)
         for i, (key, label) in enumerate(_STAT_KEYS):
             if i:
-                dark = isDarkTheme()
-                sep = QFrame()
-                sep.setFixedSize(1, 30)
-                sep.setStyleSheet(
-                    f"background-color: rgba({'255,255,255' if dark else '0,0,0'},"
-                    f"{36 if dark else 18});")
+                sep = VerticalSeparator()      # qfw 自取主题色，换肤免刷
+                sep.setFixedHeight(30)
                 stat_row.addWidget(sep, 0, Qt.AlignVCenter)
             col = QVBoxLayout()
             col.setSpacing(2)

@@ -3,10 +3,14 @@ from __future__ import annotations
 import logging
 import sys
 
-from PySide6.QtCore import Qt, qInstallMessageHandler
-from PySide6.QtGui import QFont
+import darkdetect
+from PySide6.QtCore import Qt, QTimer, qInstallMessageHandler
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QApplication
-from qfluentwidgets import FluentIcon as FIF, FluentWindow, NavigationItemPosition
+from qfluentwidgets import (FluentIcon as FIF, FluentWindow,
+                            NavigationItemPosition, Theme, isDarkTheme,
+                            qconfig, setTheme)
+from qfluentwidgets.common.style_sheet import updateStyleSheet
 
 from ass_font_substitute.gui.pages.browse_page import BrowsePage
 from ass_font_substitute.gui.pages.library_page import LibraryPage
@@ -35,10 +39,17 @@ def _forward_qt_messages(_type, ctx, message: str) -> None:
     sys.stderr.flush()
 
 
+# 设置页 theme 值 → qfw Theme
+_THEME_OF = {"auto": Theme.AUTO, "light": Theme.LIGHT, "dark": Theme.DARK}
+
+
 class AFSWindow(FluentWindow):
     def __init__(self, settings: Settings | None = None):
         super().__init__()
         self.settings = settings or Settings()
+        # 先定主题再建页：页面里有按当前主题取色的自绘控件（统计分隔线/药丸）
+        setTheme(_THEME_OF[self.settings.get("theme")])
+        self._apply_bg_effect(self.settings.get("bg_effect"))
         self.worker = CoreWorker(self.settings)
         self.worker.start()
         self.library_page = LibraryPage(self.settings, self.worker)
@@ -65,8 +76,61 @@ class AFSWindow(FluentWindow):
             self.settings_page.set_save_suffix)
         self.settings_page.suffixChanged.connect(
             self.subs_page.set_save_suffix)
+        self.settings_page.themeChanged.connect(self._apply_theme)
+        self.settings_page.bgEffectChanged.connect(self._apply_bg_effect)
+        # 主题切换（含跟随系统翻转）后重贴窗口材质（Mica 明暗/Acrylic 底色随
+        # 主题变）；自绘控件（统计分隔线/药丸）paintEvent 现取主题色，免刷
+        qconfig.themeChangedFinished.connect(self._apply_bg_effect)
+        # 跟随系统明暗：GUI 线程 2s 轮询（darkdetect 读注册表，开销可忽略）。
+        # 不用 qfw SystemThemeListener——win32 分支卡在 darkdetect 原生循环
+        # 里收不了尾，进程退出会炸
+        self._last_sys_theme = darkdetect.theme()
+        self._sys_theme_timer = QTimer(self)
+        self._sys_theme_timer.setInterval(2000)
+        self._sys_theme_timer.timeout.connect(self._poll_system_theme)
+        self._sys_theme_timer.start()
         self.setWindowTitle("Ass 字体替补")
         self.resize(1100, 750)
+
+    # ---- 主题与窗口材质（设置页「常规」组驱动）----
+    def _apply_theme(self, name: str):
+        setTheme(_THEME_OF[name])
+
+    def _apply_bg_effect(self, effect: str | None = None):
+        """按设置贴窗口材质。FluentWindow 在 Win11 出厂即开 Mica；其余材质
+        手贴 windowEffect 并把窗口底色置透明，None 恢复实色。offscreen
+        （测试）下 winId 无真实 DWM 窗口，调用静默无效。"""
+        effect = effect or self.settings.get("bg_effect")
+        # 一律先清再贴：setMicaEffectEnabled 在 Win10 早退，复位不能靠它；
+        # 非普通 Mica 的材质也不能让 _isMicaEnabled 残留 True（主题切换时
+        # FluentWindow 会拿普通 Mica 覆盖）
+        self._isMicaEnabled = False
+        self.windowEffect.removeBackgroundEffect(self.winId())
+        if effect == "mica":
+            self.setMicaEffectEnabled(True)
+        elif effect == "none":
+            self.setBackgroundColor(self._normalBackgroundColor())
+        else:
+            if effect == "mica_alt":
+                self.windowEffect.setMicaEffect(
+                    self.winId(), isDarkTheme(), isAlt=True)
+            elif effect == "acrylic":
+                self.windowEffect.setAcrylicEffect(
+                    self.winId(), "00000030" if isDarkTheme() else "FFFFFF30")
+            elif effect == "aero":
+                self.windowEffect.setAeroEffect(self.winId())
+            self.setBackgroundColor(QColor(0, 0, 0, 0))   # 材质透出：底色透明
+
+    def _poll_system_theme(self):
+        if self.settings.get("theme") != "auto":
+            return
+        t = darkdetect.theme()
+        if not t or t == self._last_sys_theme:
+            return
+        self._last_sys_theme = t
+        qconfig.theme = Theme.AUTO          # 重解析 auto → 新的系统明暗
+        updateStyleSheet()
+        qconfig.themeChangedFinished.emit()
 
     def closeEvent(self, e):
         self.library_page.shutdown()        # 先汇合在途索引线程（写库中不能退）

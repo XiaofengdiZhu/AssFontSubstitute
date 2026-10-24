@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
                             IconWidget, IndeterminateProgressRing, InfoBadge,
                             StrongBodyLabel, TransparentPushButton,
-                            isDarkTheme)
+                            isDarkTheme, qconfig)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.subs_vm import KEEP, SIM_FLOOR, Card
@@ -40,16 +40,33 @@ def _pct(v: float | None) -> str:
     return f"{v * 100:.1f}%" if v is not None else ""
 
 
-def _pill(text: str) -> QLabel:
+class _PillLabel(QLabel):
     """中性灰药丸标签（原字体/简繁/字重/分类）：InfoBadge.custom 底色自定义
-    但文字色死在样式表白字上——浅底白字直接隐形，自绘 QSS 双色全控。"""
-    dark = isDarkTheme()
-    w = QLabel(text)
-    w.setStyleSheet(
-        f"QLabel{{color:{'#cccccc' if dark else '#5c5c5c'};"
-        f" background:{'rgba(255,255,255,0.10)' if dark else 'rgba(0,0,0,0.06)'};"
-        f" border-radius:4px; padding:1px 8px; font-size:11px;}}")
-    return w
+    但文字色死在样式表白字上——浅底白字直接隐形。qfw VerticalSeparator 同法
+    paintEvent 现取主题配色，换肤自动跟随，无需外部重刷。"""
+
+    def __init__(self, text: str):
+        super().__init__(text)
+        font = self.font()
+        font.setPixelSize(11)
+        self.setFont(font)
+        self.setContentsMargins(8, 1, 8, 1)
+        qconfig.themeChanged.connect(lambda _: self.update())
+
+    def paintEvent(self, e):
+        painter = QPainter(self)
+        dark = isDarkTheme()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 26) if dark
+                         else QColor(0, 0, 0, 15))
+        painter.drawRoundedRect(self.rect(), 4, 4)
+        painter.setPen(QColor("#cccccc") if dark else QColor("#5c5c5c"))
+        painter.drawText(self.rect(), Qt.AlignCenter, self.text())
+
+
+def _pill(text: str) -> QLabel:
+    return _PillLabel(text)
 
 
 class FontCard(CardWidget):
