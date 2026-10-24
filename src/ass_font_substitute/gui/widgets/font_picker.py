@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QVBoxLayout
-from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, PrimaryPushButton,
-                            PushButton, SearchLineEdit, SubtitleLabel)
+from PySide6.QtWidgets import QHBoxLayout
+from qfluentwidgets import (CaptionLabel, ComboBox, MessageBoxBase,
+                            SearchLineEdit, SubtitleLabel)
 
 from ass_font_substitute.gui.jobs import make_searcher, pull_chunk
 from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.widgets.font_list import FontListWidget
 
 
-class FontPickerDialog(QDialog):
+class FontPickerDialog(MessageBoxBase):
     """「从字体库选择」：与字体库预览页同款筛选/列表；
     chars 给定时顶部加「推荐」区（target=None 全池覆盖率门槛 + 探针粗排，
     纯元数据一次搜穿，无渲染）。"""
@@ -17,23 +17,24 @@ class FontPickerDialog(QDialog):
     def __init__(self, settings, worker, entities, chars=None,
                  direction="t2s", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("从字体库选择")
-        self.resize(720, 640)
         self.worker = worker            # _on_reco 取消订阅需要（brief 漏存）
         self.selected = None
         self.pvm = PreviewVM()
         self.pvm.set_entities(entities)
 
-        v = QVBoxLayout(self)
+        self.titleLabel = SubtitleLabel("从字体库选择")
+        self.viewLayout.addWidget(self.titleLabel)
+
         self.rec_title = SubtitleLabel("推荐（覆盖达标）")
         self.rec_list = FontListWidget(worker, self.pvm, lambda: self._preview())
         self.rec_list.entity_picked.connect(self._pick)
+        self.rec_list.setFixedHeight(150)
         self.rec_title.hide()
         self.rec_list.hide()
-        v.addWidget(self.rec_title)
-        v.addWidget(self.rec_list)
+        self.viewLayout.addWidget(self.rec_title)
+        self.viewLayout.addWidget(self.rec_list)
 
-        v.addWidget(SubtitleLabel("全部字体"))
+        self.viewLayout.addWidget(SubtitleLabel("全部字体"))
         filters = QHBoxLayout()
         self.name_edit = SearchLineEdit()
         self.name_edit.setPlaceholderText("搜索字体名")
@@ -44,27 +45,28 @@ class FontPickerDialog(QDialog):
             cb.currentIndexChanged.connect(self._apply_filters)
         for w in (self.name_edit, self.cb_cat, self.cb_script, self.cb_weight):
             filters.addWidget(w)
-        v.addLayout(filters)
+        self.viewLayout.addLayout(filters)
 
         self.all_list = FontListWidget(worker, self.pvm, lambda: self._preview())
         self.all_list.entity_picked.connect(self._pick)
-        v.addWidget(self.all_list, 1)
+        self.all_list.setMinimumHeight(220)
+        self.viewLayout.addWidget(self.all_list, 1)
 
-        bottom = QHBoxLayout()
         self.hint = CaptionLabel("未选择")
-        self.btn_ok = PrimaryPushButton("选定")
-        self.btn_ok.setEnabled(False)
-        self.btn_cancel = PushButton("取消")
-        bottom.addWidget(self.hint, 1)
-        bottom.addWidget(self.btn_cancel)
-        bottom.addWidget(self.btn_ok)
-        v.addLayout(bottom)
+        self.viewLayout.addWidget(self.hint)
+
+        self.widget.setMinimumWidth(720)
+        # 窗口高度有限（内容按布局自适应），超出会把按钮区顶出窗口外
+        win_h = self.window().height() if self.window() is not None else 0
+        if win_h > 300:
+            self.widget.setMaximumHeight(win_h - 24)
+        self.yesButton.setText("选定")
+        self.yesButton.setEnabled(False)
+        self.cancelButton.setText("取消")
 
         self._fill_filters()
         self._reload_all()
         self.name_edit.textChanged.connect(lambda _: self._reload_all())
-        self.btn_ok.clicked.connect(self.accept)
-        self.btn_cancel.clicked.connect(self.reject)
 
         if chars:
             worker.result.connect(self._on_reco)
@@ -112,7 +114,7 @@ class FontPickerDialog(QDialog):
     def _pick(self, e):
         self.selected = e
         self.hint.setText(f"已选：{e.display_name}")
-        self.btn_ok.setEnabled(True)
+        self.yesButton.setEnabled(True)
 
     _reco = None
 

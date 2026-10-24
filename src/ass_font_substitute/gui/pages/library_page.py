@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog,
-                               QHBoxLayout, QTextEdit, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget,
-                            IndeterminateProgressRing, InfoBar, PrimaryPushButton,
-                            PushButton, ScrollArea, StrongBodyLabel, ToolButton)
+                            IndeterminateProgressRing, InfoBar, MessageBoxBase,
+                            PrimaryPushButton, PushButton, ScrollArea,
+                            StrongBodyLabel, SubtitleLabel, TextEdit, ToolButton)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.jobs import (ensure_library, probe_dir_status,
@@ -208,7 +208,7 @@ class LibraryPage(ScrollArea):
         dirs = [d.path for d in self.vm.dirs]
 
         def show(payload):
-            dlg = _FailuresDialog(payload, [d.path for d in self.vm.dirs],
+            dlg = _FailuresDialog(payload,
                                   retry=lambda dr, rel: self.worker.submit(
                                       f"retry:{dr}:{rel}", _retry_job, dr, rel),
                                   parent=self)
@@ -218,16 +218,20 @@ class LibraryPage(ScrollArea):
         self.worker.submit("failures", _failures_job, dirs)
 
 
-class _FailuresDialog(QDialog):
-    def __init__(self, data, dirs, retry, parent=None):
+class _FailuresDialog(MessageBoxBase):
+    """失败清单：只读全文 + 重试全部（fluent 风格弹窗）。"""
+
+    def __init__(self, data, retry, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("失败清单")
-        self.resize(640, 480)
         self._retry = retry
         self._bad = data.get("bad", {}) or {}
-        v = QVBoxLayout(self)
-        text = QTextEdit()
+
+        self.titleLabel = SubtitleLabel("失败清单")
+        hint = CaptionLabel("重试全部会重新解析下列文件；对目录重新索引同样有效。")
+        hint.setWordWrap(True)
+        text = TextEdit()
         text.setReadOnly(True)
+        text.setFixedHeight(320)
         lines = []
         if not self._bad:
             lines.append("各目录暂无解析失败文件。")
@@ -235,27 +239,28 @@ class _FailuresDialog(QDialog):
             lines.append(f"【{d}】")
             for rel, reason in rows:
                 lines.append(f"  {rel} —— {reason}")
-                lines.append("    （点击「重试全部」或重新索引可重试）")
         skipped = data.get("skipped", [])
         if skipped:
             lines.append("【跳过的旧版本】")
             lines.extend(f"  {s}" for s in skipped)
         text.setPlainText("\n".join(lines))
-        v.addWidget(text)
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(hint)
+        self.viewLayout.addWidget(text)
+        self.widget.setMinimumWidth(640)
         if self._bad:
-            btn = PushButton("重试全部")
-            btn.clicked.connect(self._retry_all)
-            v.addWidget(btn)
-        box = QDialogButtonBox(QDialogButtonBox.Close)
-        box.rejected.connect(self.reject)
-        box.clicked.connect(self.accept)
-        v.addWidget(box)
+            self.yesButton.setText("重试全部")
+            self.cancelButton.setText("关闭")
+        else:
+            self.hideYesButton()
+            self.cancelButton.setText("关闭")
 
-    def _retry_all(self):
-        for d, rows in self._bad.items():
-            for rel, _reason in rows:
-                self._retry(d, rel)
-        self.accept()
+    def validate(self) -> bool:
+        if self._bad:
+            for d, rows in self._bad.items():
+                for rel, _reason in rows:
+                    self._retry(d, rel)
+        return True
 
 
 def _lib_job(ctx, dirs):
