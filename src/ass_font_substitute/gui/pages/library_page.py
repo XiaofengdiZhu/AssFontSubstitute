@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+
+from ass_font_substitute.gui.lastdir import pick_existing_dir
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget,
                             IndeterminateProgressRing, InfoBar, MessageBoxBase,
                             PrimaryPushButton, PushButton, ScrollArea,
@@ -94,7 +96,7 @@ class LibraryPage(ScrollArea):
             self.dirs_box.addWidget(card)
 
     def _add_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "选择字体目录")
+        d = pick_existing_dir(self, self.settings, "选择字体目录")
         if not d:
             return
         if not self.vm.add_dir(d):

@@ -26,6 +26,7 @@ DEFAULTS: dict = {
     "overwrite_default": False,
     "sample_text": SAMPLE_TEXT,
     "cache_path": "",                              # 空 = paths.default_cache_path()
+    "last_dir": "",                                # 上次文件/目录对话框的目录
 }
 
 _BOOL_KEYS = {"overwrite_default"}
@@ -73,7 +74,8 @@ class Settings:
                 self._data[k] = float(v)
             elif k == "sample_text" and isinstance(v, str) and v.strip():
                 self._data[k] = v
-            elif k in ("save_suffix", "cache_path") and isinstance(v, str):
+            elif k in ("save_suffix", "cache_path", "last_dir") \
+                    and isinstance(v, str):
                 self._data[k] = v
             else:
                 dirty = True                # 未知键或类型不符

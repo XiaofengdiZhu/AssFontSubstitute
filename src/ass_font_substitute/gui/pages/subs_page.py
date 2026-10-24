@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
                             ComboBox, FlowLayout, InfoBadge, InfoBar, LineEdit,
                             PrimaryPushButton, PushButton, ScrollArea,
@@ -13,6 +13,7 @@ from qfluentwidgets import FluentIcon as FIF
 from ass_font_substitute.gui.jobs import (apply_to_file, classify_one,
                                           ensure_library, make_searcher,
                                           parse_subtitle, pull_chunk)
+from ass_font_substitute.gui.lastdir import pick_open_files
 from ass_font_substitute.gui.paths import decisions_path
 from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.subs_vm import SubsVM
@@ -145,8 +146,8 @@ class SubsPage(ScrollArea):
 
     # ---- 文件层 ----
     def _add_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "添加字幕文件", "",
-                                                "ASS 字幕 (*.ass *.ssa)")
+        paths = pick_open_files(self, self.settings, "添加字幕文件",
+                                "ASS 字幕 (*.ass *.ssa)")
         if not paths:
             return
         for p in paths:

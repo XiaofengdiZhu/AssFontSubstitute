@@ -5,7 +5,6 @@ from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtWidgets import QFileDialog
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, Dialog,
                             HyperlinkCard, InfoBar, LineEdit,
@@ -15,6 +14,7 @@ from qfluentwidgets import (BodyLabel, CaptionLabel, ComboBox, Dialog,
                             ToolButton)
 from qfluentwidgets import FluentIcon as FIF
 
+from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.settings_store import (COV_BOUNDS, SIM_BOUNDS,
                                                     SIZE_BOUNDS)
 from ass_font_substitute.gui.widgets.spin import SpinBox
@@ -372,7 +372,7 @@ class SettingsPage(ScrollArea):
             self.worker.submit("cacheclear", _clear_job)
 
     def _move_cache(self):
-        d = QFileDialog.getExistingDirectory(self, "选择新缓存位置")
+        d = pick_existing_dir(self, self.settings, "选择新缓存位置")
         if not d:
             return
         new = Path(d) / "cache.db"
