@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import (BodyLabel, CaptionLabel, CardWidget, CheckBox,
                             ComboBox, FlowLayout, InfoBadge, InfoBar, LineEdit,
                             PrimaryPushButton, PushButton, ScrollArea,
-                            SegmentedWidget, StrongBodyLabel)
+                            SegmentedWidget, StrongBodyLabel, setFont)
 from qfluentwidgets import FluentIcon as FIF
 
 from ass_font_substitute.gui.jobs import (apply_to_file, classify_one,
@@ -52,6 +52,7 @@ class SubsPage(ScrollArea):
 
         self.view = QWidget(self)
         v = QVBoxLayout(self.view)
+        v.setContentsMargins(36, 24, 36, 24)   # 页边距对齐其他页
         v.setSpacing(12)
         self.setWidget(self.view)
         self.setWidgetResizable(True)
@@ -59,7 +60,9 @@ class SubsPage(ScrollArea):
         self.view.setMinimumWidth(420)
 
         head = QHBoxLayout()
-        head.addWidget(StrongBodyLabel("处理字幕"))
+        page_title = QLabel("处理字幕")
+        setFont(page_title, 20)     # 与字体库页标题同款（QLabel 20px Normal）
+        head.addWidget(page_title)
         head.addStretch(1)
         self.summary = _BadgeRow()
         head.addWidget(self.summary)

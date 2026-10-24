@@ -233,7 +233,7 @@ class FontCard(CardWidget):
         elif card.search_state == "paused":
             n = sum(1 for o in card.options if o.source == "search")
             foot.addWidget(CaptionLabel(f"已找到 {n} 个相似字体，暂停搜索。"))
-            more = TransparentPushButton("继续找更多")
+            more = TransparentPushButton(FIF.SEARCH, "继续找更多")
             more.clicked.connect(
                 lambda: self.continue_clicked.emit(self.card.norm_name))
             foot.addWidget(more)
@@ -251,7 +251,7 @@ class FontCard(CardWidget):
             foot.addWidget(CaptionLabel("原字体无法渲染，无法比较相似度"))
         elif (ekind in ("replace", "twin", "keep") and card.n_chars > 0):
             # 0 字卡无可比字型：不给搜索入口（空池/全池放行都无意义）
-            cont = TransparentPushButton("继续找其他相似字体")
+            cont = TransparentPushButton(FIF.SEARCH, "继续找其他相似字体")
             cont.clicked.connect(
                 lambda: self.continue_clicked.emit(self.card.norm_name))
             foot.addWidget(cont)

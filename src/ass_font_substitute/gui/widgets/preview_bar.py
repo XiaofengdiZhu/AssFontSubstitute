@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPainter, QPainterPath, QPixmap
 from qfluentwidgets import CaptionLabel
 
 from ass_font_substitute.core.similarity.render import RenderBundle
+
+# 贴图条宽度上限：长字体名（PostScript 名十几字符）逐字 tile 横排会远超
+# 卡片宽，被右缘硬裁出半个字母；超宽缩到上限，绝不截半字
+_MAX_BAR_W = 360
 
 
 def tiles_to_pixmap(tiles: list[np.ndarray]) -> QPixmap:
@@ -16,6 +20,20 @@ def tiles_to_pixmap(tiles: list[np.ndarray]) -> QPixmap:
     h, w = row.shape
     img = QImage(row.data, w, h, w, QImage.Format_Grayscale8)
     return QPixmap.fromImage(img)
+
+
+def _rounded(pm: QPixmap, radius: int = 6) -> QPixmap:
+    """圆角化贴图条：黑底方角在浅色卡面上太硬，圆角软化观感。"""
+    out = QPixmap(pm.size())
+    out.fill(Qt.transparent)
+    p = QPainter(out)
+    p.setRenderHint(QPainter.Antialiasing)
+    path = QPainterPath()
+    path.addRoundedRect(0, 0, pm.width(), pm.height(), radius, radius)
+    p.setClipPath(path)
+    p.drawPixmap(0, 0, pm)
+    p.end()
+    return out
 
 
 def _bundle_tiles(payload):
@@ -82,8 +100,10 @@ class PreviewBar(CaptionLabel):
         if pm.isNull():
             self.setText("（无可渲染字形）")
             return
-        self.setPixmap(pm.scaledToHeight(self.height(),
-                                         Qt.SmoothTransformation))
+        pm = pm.scaledToHeight(self.height(), Qt.SmoothTransformation)
+        if pm.width() > _MAX_BAR_W:
+            pm = pm.scaledToWidth(_MAX_BAR_W, Qt.SmoothTransformation)
+        self.setPixmap(_rounded(pm))
 
 
 def _render_job(ctx, entity, text):
