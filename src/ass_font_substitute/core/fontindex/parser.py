@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import xxhash
 from fontTools.ttLib import TTCollection
 from fontTools.ttLib import TTFont
 
@@ -43,11 +42,10 @@ def _load_fonts(path: Path) -> list[TTFont]:
 
 
 def parse_font_file(path: Path) -> list[FontRecord]:
+    # 不读全文：lazy 加载只定点取 name/OS/2/cmap 三张小表，文件级变更
+    # 检测由 update_index 的 size+mtime 门负责，解析层无需内容指纹
     fonts = _load_fonts(path)
     try:
-        data = path.read_bytes()
-        xxh = xxhash.xxh64(data).hexdigest()
-        st = path.stat()
         out: list[FontRecord] = []
         errors: list[str] = []
         for idx, tt in enumerate(fonts):
@@ -65,7 +63,7 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                     psname=psname, version=version, aliases=aliases,
                     weight=os2.usWeightClass, width=os2.usWidthClass,
                     italic=bool(os2.fsSelection & 1),
-                    cmap=cmap, xxh=xxh, size=st.st_size, mtime_ns=st.st_mtime_ns,
+                    cmap=cmap,
                     script=classify_script(cmap), category=classify_category(aliases),
                 ))
             except Exception as e:

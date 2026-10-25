@@ -21,7 +21,21 @@ def test_parse_single(tmp_path):
     assert r.weight == 700 and not r.italic
     assert "華康測試體W5" in r.aliases and "华康测试体 W5" in r.aliases
     assert r.cmap.contains(ord("永"))
-    assert len(r.xxh) == 16
+
+
+def test_parse_no_full_read(tmp_path, monkeypatch):
+    # 解析只定点读 name/OS/2/cmap 表，不读全文（文件级变更检测由
+    # size+mtime 门负责）——全文读取（旧 xxh 指纹行为）回归即炸
+    from pathlib import Path
+
+    def boom(self, *a, **k):
+        raise AssertionError("parse_font_file 不应全量读取文件")
+
+    monkeypatch.setattr(Path, "read_bytes", boom)
+    p = tmp_path / "a.ttf"
+    build_font(p, chars="永中", family="A體")
+    recs = parse_font_file(p)
+    assert recs[0].cmap.contains(ord("永"))
 
 
 def test_parse_ttc(tmp_path):

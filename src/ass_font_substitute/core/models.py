@@ -65,9 +65,6 @@ class FontRecord:
     width: int
     italic: bool
     cmap: CmapRanges
-    xxh: str
-    size: int
-    mtime_ns: int
     script: str  # 简/繁/简繁/未标注
     category: str  # 黑/宋/圆/楷/仿/未分类
 

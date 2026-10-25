@@ -71,30 +71,29 @@ class LibraryIndex:
             conn = open_db(d / "fontindex.db")
             try:
                 cached = {(r[0], r[1]): (r[2], r[3]) for r in conn.execute(
-                    "SELECT rel_path, face_index, xxh, fp FROM fingerprints "
+                    "SELECT rel_path, face_index, mtime_ns, fp FROM fingerprints "
                     "WHERE algo=?", (FP_ALGO,))}
                 writeback = []
                 for (rel, fi, ps, ver, al, w, wd, it, cmb, script, cat,
-                     xxh, _size, _mtime) in load_font_rows(conn):
+                     _size, _mtime) in load_font_rows(conn):
                     aliases = tuple(json.loads(al))
                     version = tuple(json.loads(ver)) if ver else None
                     cmap = CmapRanges.from_bytes(cmb)
                     hit = cached.get((rel, fi))
-                    if hit is not None and hit[0] == xxh:
+                    if hit is not None and hit[0] == _mtime:
                         fp = hit[1]
                     else:
-                        # 缓存缺失（旧库/新文件/xxh 变化）→ 现算并回写
-                        fp = fingerprint_of(list(aliases), cmap, w, wd,
-                                            bool(it), xxh)
-                        writeback.append((rel, fi, xxh, fp))
+                        # 缓存缺失（旧库/新文件/mtime 变化）→ 现算并回写
+                        fp = fingerprint_of(list(aliases), cmap, w, wd, bool(it))
+                        writeback.append((rel, fi, _mtime, fp))
                     raw.append((di, rel, fi, ps, version, aliases, w, wd, bool(it),
                                 script, cat, cmap, fp))
                 if writeback:
                     with conn:
                         conn.executemany(
                             "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
-                            [(rel, fi, xxh, FP_ALGO, fp)
-                             for rel, fi, xxh, fp in writeback])
+                            [(rel, fi, mtime, FP_ALGO, fp)
+                             for rel, fi, mtime, fp in writeback])
             finally:
                 conn.close()
         # 身份 = psname，无则别名并集；排序保证平局保留目录顺序靠前、rel_path、face_index

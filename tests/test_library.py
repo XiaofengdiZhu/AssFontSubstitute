@@ -70,7 +70,25 @@ def test_fingerprints_precomputed_and_reused(tmp_path, monkeypatch):
 
 
 def test_fingerprint_recomputed_when_file_changes(tmp_path):
-    # 文件内容变化（xxh 变）→ 缓存失效重算
+    # 语义变化（cmap 变）→ 缓存失效重算
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA",
+               version="Version 1.000")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    fp1 = LibraryIndex.open([d]).entities()[0].fingerprint
+    build_font(d / "a.ttf", chars="永中木", family="甲體", psname="JIA",
+               version="Version 1.000")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    fp2 = LibraryIndex.open([d]).entities()[0].fingerprint
+    assert fp1 != fp2
+
+
+def test_fingerprint_stable_when_only_version_changes(tmp_path):
+    # 指纹是纯语义身份：version 变而别名/cmap/样式未变 → 指纹不变，
+    # 渲染缓存与记忆跨文件更新可复用
     d = tmp_path / "lib"
     d.mkdir()
     build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA",
@@ -83,25 +101,23 @@ def test_fingerprint_recomputed_when_file_changes(tmp_path):
     conn = open_db(d / "fontindex.db")
     update_index(d, conn)
     fp2 = LibraryIndex.open([d]).entities()[0].fingerprint
-    assert fp1 != fp2
+    assert fp1 == fp2
 
 
-def test_fingerprint_stale_xxh_recomputed(tmp_path):
-    # 缓存表被篡改（xxh 不匹配）→ 回退重算，结果与现算一致
+def test_fingerprint_stale_mtime_recomputed(tmp_path):
+    # 缓存表被篡改（mtime 令牌不匹配）→ 回退重算，结果与现算一致
     from ass_font_substitute.core.fontindex.store import fingerprint_of
     d = tmp_path / "lib"
     d.mkdir()
     build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA")
     conn = open_db(d / "fontindex.db")
     update_index(d, conn)
-    conn.execute("UPDATE fingerprints SET xxh='tampered'")
+    conn.execute("UPDATE fingerprints SET mtime_ns=1")
     conn.commit()
     lib = LibraryIndex.open([d])
     e = lib.entities()[0]
     assert e.fingerprint == fingerprint_of(
-        list(e.aliases), e.cmap, e.weight, e.width, e.italic,
-        next(r[0] for r in open_db(d / "fontindex.db").execute(
-            "SELECT xxh FROM files")))
+        list(e.aliases), e.cmap, e.weight, e.width, e.italic)
 
 
 def test_removed_file_cleans_fingerprints(tmp_path):

@@ -57,7 +57,7 @@ def test_schema_mismatch_backs_up_and_rebuilds(tmp_path):
     old = sqlite3.connect(db)
     old.executescript(DDL)
     old.execute("INSERT INTO schema_version VALUES (99)")
-    old.execute("INSERT INTO files VALUES ('old.ttf', 1, 1, 'xx')")
+    old.execute("INSERT INTO files VALUES ('old.ttf', 1, 1)")
     old.commit()
     old.close()
     (d / "fontindex.db.bak").write_bytes(b"stale backup")   # 既有 .bak 须被覆盖
@@ -70,6 +70,41 @@ def test_schema_mismatch_backs_up_and_rebuilds(tmp_path):
     assert backup.execute("SELECT v FROM schema_version").fetchone()[0] == 99
     assert backup.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 1
     backup.close()
+
+
+def test_schema_v2_with_xxh_column_migrates(tmp_path):
+    # 真实 v2 旧库形状（files/fingerprints 含 xxh 列）→ 备份重建后照常索引
+    d = tmp_path / "fonts"
+    d.mkdir()
+    db = d / "fontindex.db"
+    old = sqlite3.connect(db)
+    old.executescript("""
+    CREATE TABLE IF NOT EXISTS schema_version(v INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS files(
+      rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, xxh TEXT);
+    CREATE TABLE IF NOT EXISTS fonts(
+      id INTEGER PRIMARY KEY, rel_path TEXT, face_index INTEGER, psname TEXT,
+      version TEXT, aliases TEXT, weight INTEGER, width INTEGER, italic INTEGER,
+      cmap BLOB, script TEXT, category TEXT,
+      UNIQUE(rel_path, face_index));
+    CREATE TABLE IF NOT EXISTS bad(
+      rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, reason TEXT);
+    CREATE TABLE IF NOT EXISTS fingerprints(
+      rel_path TEXT, face_index INTEGER, xxh TEXT, algo INTEGER, fp TEXT,
+      PRIMARY KEY(rel_path, face_index));
+    """)
+    old.execute("INSERT INTO schema_version VALUES (2)")
+    old.execute("INSERT INTO files VALUES ('v2.ttf', 1, 1, 'deadbeef')")
+    old.commit()
+    old.close()
+    build_font(d / "new.ttf", chars="永", family="新體")
+    conn = open_db(db)
+    assert conn.execute("SELECT v FROM schema_version").fetchone()[0] == SCHEMA_VERSION
+    assert update_index(d, conn).added == 1
+    assert stats(conn)["fonts"] == 1
+    bak = sqlite3.connect(d / "fontindex.db.bak")
+    assert bak.execute("SELECT xxh FROM files").fetchone()[0] == "deadbeef"
+    bak.close()
     conn.close()
 
 
@@ -94,9 +129,9 @@ def test_update_index_precomputes_fingerprints(tmp_path):
     conn = open_db(d / "fontindex.db")
     update_index(d, conn)
     rows = conn.execute(
-        "SELECT rel_path, face_index, xxh, algo, fp FROM fingerprints").fetchall()
+        "SELECT rel_path, face_index, mtime_ns, algo, fp FROM fingerprints").fetchall()
     assert len(rows) == 1
-    rel, fi, xxh, algo, fp = rows[0]
-    assert (rel, fi) == ("a.ttf", 0) and xxh and fp
+    rel, fi, mtime, algo, fp = rows[0]
+    assert (rel, fi) == ("a.ttf", 0) and mtime and fp
     from ass_font_substitute.core.fontindex.store import FP_ALGO
     assert algo == FP_ALGO

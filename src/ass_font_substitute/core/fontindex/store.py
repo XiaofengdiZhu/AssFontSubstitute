@@ -14,18 +14,19 @@ from ass_font_substitute.core.fontindex.parser import parse_font_file
 from ass_font_substitute.core.models import CmapRanges
 
 # 库列即最终分类（建索引时由别名算好入库，装载直读）。分类规则改进属
-# 内容语义变化：升此版本触发旧库备份+全量重建（spec §5）。
-SCHEMA_VERSION = 2
+# 内容语义变化：升此版本触发旧库备份+全量重建（spec §5）。v3：指纹去
+# 内容哈希（xxh 列废除，解析不再读全文），fingerprints 校验列改 mtime_ns。
+SCHEMA_VERSION = 3
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 
 # 指纹算法版本：fingerprint_of 的规范化方式变化时递增，旧缓存整批失效重算
-FP_ALGO = 1
+FP_ALGO = 2
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_version(v INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS files(
-  rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, xxh TEXT);
+  rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER);
 CREATE TABLE IF NOT EXISTS fonts(
   id INTEGER PRIMARY KEY, rel_path TEXT, face_index INTEGER, psname TEXT,
   version TEXT, aliases TEXT, weight INTEGER, width INTEGER, italic INTEGER,
@@ -34,20 +35,23 @@ CREATE TABLE IF NOT EXISTS fonts(
 CREATE TABLE IF NOT EXISTS bad(
   rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, reason TEXT);
 CREATE TABLE IF NOT EXISTS fingerprints(
-  rel_path TEXT, face_index INTEGER, xxh TEXT, algo INTEGER, fp TEXT,
+  rel_path TEXT, face_index INTEGER, mtime_ns INTEGER, algo INTEGER, fp TEXT,
   PRIMARY KEY(rel_path, face_index));
 """
 
 
 def fingerprint_of(aliases: list[str], cmap: CmapRanges, weight: int, width: int,
-                   italic: bool, xxh: str) -> str:
-    """字体指纹 = hash(全部名称别名 + cmap 区间表 + weight/width/italic + 文件 xxh64)。
-    update_index 时预计算入 fingerprints 表（键 rel_path+face_index，xxh+algo
-    双重防陈旧），LibraryIndex 聚合读命中直取、缺失回写——避免每次打开重算。"""
+                   italic: bool) -> str:
+    """字体指纹 = hash(全部名称别名 + cmap 区间表 + weight/width/italic)。
+    纯语义身份：同语义字体（重打包/换路径/换 mtime）指纹稳定，渲染缓存
+    与记忆可跨副本复用；文件是否变化由 update_index 的 size+mtime 门判定，
+    fingerprints 表的 mtime_ns 列（与 fonts 行同事务写入）作装载侧防陈旧
+    兜底。update_index 时预计算入表（键 rel_path+face_index），LibraryIndex
+    聚合读命中直取、缺失回写——避免每次打开重算。"""
     canon = json.dumps({
         "aliases": sorted(aliases),
         "cmap": [list(r) for r in zip(cmap.starts, cmap.ends, strict=False)],
-        "weight": weight, "width": width, "italic": int(italic), "xxh": xxh,
+        "weight": weight, "width": width, "italic": int(italic),
     }, ensure_ascii=False, sort_keys=True)
     return hashlib.sha1(canon.encode("utf-8")).hexdigest()
 
@@ -142,22 +146,23 @@ def update_index(dir_path: Path, conn: sqlite3.Connection,
     total = len(todo)
     for done, p in enumerate(todo, 1):
         rel = p.relative_to(dir_path).as_posix()
+        # 解析前取 stat：若解析窗口内文件被外部覆写，记下的是旧 mtime，
+        # 下次必重检；解析后取会记到新 mtime，门误判「未变」→ 静默陈旧
+        st = p.stat()
         with conn:
             recs = None
             try:
                 recs = parse_font_file(p)
             except FontParseError as e:
                 res.bad += 1
-                st = p.stat()
                 conn.execute("INSERT OR REPLACE INTO bad VALUES (?,?,?,?)",
                              (rel, st.st_size, st.st_mtime_ns, str(e)))
                 conn.execute("DELETE FROM files WHERE rel_path=?", (rel,))
                 conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
                 conn.execute("DELETE FROM fingerprints WHERE rel_path=?", (rel,))
             if recs is not None:
-                st = p.stat()
-                conn.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?)",
-                             (rel, st.st_size, st.st_mtime_ns, recs[0].xxh))
+                conn.execute("INSERT OR REPLACE INTO files VALUES (?,?,?)",
+                             (rel, st.st_size, st.st_mtime_ns))
                 conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
                 conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
                 for r in recs:
@@ -171,9 +176,9 @@ def update_index(dir_path: Path, conn: sqlite3.Connection,
                          r.cmap.to_bytes(), r.script, r.category))
                     conn.execute(
                         "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
-                        (rel, r.face_index, recs[0].xxh, FP_ALGO,
+                        (rel, r.face_index, st.st_mtime_ns, FP_ALGO,
                          fingerprint_of(r.aliases, r.cmap, r.weight, r.width,
-                                        r.italic, recs[0].xxh)))
+                                        r.italic)))
         if progress is not None and not progress(done, total, res):
             res.cancelled = True
             break
@@ -193,7 +198,7 @@ def load_font_rows(conn: sqlite3.Connection) -> Iterator[tuple]:
     yield from conn.execute(
             "SELECT f.rel_path, f.face_index, f.psname, f.version, f.aliases, "
             "f.weight, f.width, f.italic, f.cmap, f.script, f.category, "
-            "fi.xxh, fi.size, fi.mtime_ns FROM fonts f JOIN files fi USING(rel_path)")
+            "fi.size, fi.mtime_ns FROM fonts f JOIN files fi USING(rel_path)")
 
 
 __all__ = [
