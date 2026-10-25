@@ -13,7 +13,9 @@ from ass_font_substitute.core.fontindex.parser import FontParseError
 from ass_font_substitute.core.fontindex.parser import parse_font_file
 from ass_font_substitute.core.models import CmapRanges
 
-SCHEMA_VERSION = 1
+# 库列即最终分类（建索引时由别名算好入库，装载直读）。分类规则改进属
+# 内容语义变化：升此版本触发旧库备份+全量重建（spec §5）。
+SCHEMA_VERSION = 2
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 

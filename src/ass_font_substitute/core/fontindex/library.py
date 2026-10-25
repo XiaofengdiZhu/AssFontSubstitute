@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from ass_font_substitute.core.fontindex.probes import classify_category
 from ass_font_substitute.core.fontindex.store import FP_ALGO
 from ass_font_substitute.core.fontindex.store import fingerprint_of
 from ass_font_substitute.core.fontindex.store import load_font_rows
@@ -112,13 +111,10 @@ class LibraryIndex:
             else:
                 self._skipped.append(f"{self.dirs[item[0]]}/{item[1]}#{item[2]} 旧版本")
         self._files_count = len({(item[0], item[1]) for item in raw})
-        # category 装载时由别名重算而非读库：分类规则改进即时生效，
-        # 存量索引免重建（分类是别名的纯函数，确定性不变）
         self._entities = [
             FontEntity(fp, _display_name(aliases), aliases, ps, ver, w, wd, it,
-                       script, classify_category(list(aliases)),
-                       cmap, str(self.dirs[di]), rel, fi)
-            for (di, rel, fi, ps, ver, aliases, w, wd, it, script, _cat, cmap, fp)
+                       script, cat, cmap, str(self.dirs[di]), rel, fi)
+            for (di, rel, fi, ps, ver, aliases, w, wd, it, script, cat, cmap, fp)
             in best.values()]
 
     def entities(self) -> list[FontEntity]:

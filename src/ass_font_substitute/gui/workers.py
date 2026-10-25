@@ -81,15 +81,26 @@ class IndexWorker(QThread):
         super().__init__(parent)
         self._dirs = list(dirs)
         self._cancel = False
+        self._skip: set[str] = set()
 
     def cancel(self):
         self._cancel = True
 
+    def cancel_dir(self, d: str):
+        """单停一个目录：在途的中断剩余文件，排队的到队即跳过；
+        其余目录不受影响（工具栏「取消更新」才是整体取消）。"""
+        self._skip.add(d)
+
     def run(self):
+        from ass_font_substitute.core.fontindex.store import UpdateResult
         from ass_font_substitute.gui.jobs import update_dir
         for d in self._dirs:
             if self._cancel:
                 break
+            if d in self._skip:
+                # 排队中被单停：回发取消结果让行按钮即刻脱「更新中」
+                self.finished_dir.emit(d, UpdateResult(cancelled=True))
+                continue
             try:
                 r = update_dir(
                     d, progress=lambda done, total, res, d=d:
@@ -99,7 +110,7 @@ class IndexWorker(QThread):
                 self.failed.emit(d, f"{type(e).__name__}: {e}")
 
     def _on_progress(self, d, done, total, res) -> bool:
-        if self._cancel:
+        if self._cancel or d in self._skip:
             return False
         self.progress.emit(d, done, total, res)
         return True

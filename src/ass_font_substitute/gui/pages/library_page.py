@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
-from typing import ClassVar
 
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
@@ -20,7 +18,6 @@ from qfluentwidgets import CaptionLabel
 from qfluentwidgets import CardWidget
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import GroupHeaderCardWidget
-from qfluentwidgets import InfoBadge
 from qfluentwidgets import InfoBar
 from qfluentwidgets import MessageBox
 from qfluentwidgets import MessageBoxBase
@@ -30,9 +27,9 @@ from qfluentwidgets import PushSettingCard
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import SubtitleLabel
 from qfluentwidgets import TextEdit
-from qfluentwidgets import ToolButton
 from qfluentwidgets import TransparentToolButton
 from qfluentwidgets import VerticalSeparator
+from qfluentwidgets import setCustomStyleSheet
 from qfluentwidgets import setFont
 
 from ass_font_substitute.gui.jobs import ensure_library
@@ -46,6 +43,49 @@ from ass_font_substitute.gui.workers import IndexWorker
 
 _STAT_KEYS = [("dirs", "字体目录"), ("files", "文件总数"), ("fonts", "字体总数"),
               ("support_sc", "支持简体"), ("support_tc", "支持繁体")]
+
+# 目录行状态写进行内按钮：进行时「更新中/检查中」，静态词「已最新/需更新/
+# 不可用」；stale 另配琥珀底提示可点更新
+_STATUS_TEXT = {
+    "ok": "已最新", "stale": "需更新", "indexing": "更新中",
+    "pending": "检查中", "offline": "不可用"}
+
+# stale 行按钮琥珀底（qfw 无警示色按钮；双主题 QSS，含 disabled 态——
+# 其他目录更新在途时本行也不可点）
+_AMBER_QSS_LIGHT = """
+PushButton{
+    background-color: #ffb900;
+    border: none;
+    color: #1f1f1f;
+}
+PushButton:hover{
+    background-color: #efa90a;
+}
+PushButton:pressed{
+    background-color: #e09d00;
+}
+PushButton:disabled{
+    background-color: #f3d78a;
+    color: #8a7a33;
+}
+"""
+_AMBER_QSS_DARK = """
+PushButton{
+    background-color: #9d5d00;
+    border: none;
+    color: #ffffff;
+}
+PushButton:hover{
+    background-color: #b26e00;
+}
+PushButton:pressed{
+    background-color: #8a5100;
+}
+PushButton:disabled{
+    background-color: #5e3a00;
+    color: rgba(255,255,255,0.5);
+}
+"""
 
 
 class LibraryPage(ScrollArea):
@@ -139,10 +179,6 @@ class LibraryPage(ScrollArea):
         self.refresh_status()
 
     # ---- 目录列表 ----
-    # 类级常量表（只读），ClassVar 注解仅为 RUF012
-    _BADGE_MAKER: ClassVar[dict[str, Callable[[], InfoBadge]]] = {
-        "ok": InfoBadge.success, "stale": InfoBadge.warning,
-        "indexing": InfoBadge.info, "offline": InfoBadge.error}
 
     def _rebuild_dir_rows(self):
         while self.dirs_box.count():
@@ -162,17 +198,27 @@ class LibraryPage(ScrollArea):
             rh = QHBoxLayout(right)
             rh.setContentsMargins(0, 0, 0, 0)
             rh.setSpacing(8)
-            badge = self._BADGE_MAKER.get(d.state, InfoBadge.info)(d.badge)
-            rh.addWidget(badge, 0, Qt.AlignVCenter)
-            upd = ToolButton(FIF.SYNC)
-            upd.setToolTip("更新该目录索引")
-            # pending=首个探测在途（尚不知盘上实况），indexing=更新在途：
-            # 两者再点更新都是瞎打，禁用
-            upd.setEnabled(self._index_worker is None
-                           and d.state not in ("indexing", "pending"))
-            upd.clicked.connect(lambda _=False, p=d.path: self._start_update_dir(p))
-            rh.addWidget(upd, 0, Qt.AlignVCenter)
-            rm = ToolButton(FIF.DELETE)
+            hint = CaptionLabel(f"新增 {d.added} · 修改 {d.changed}")
+            hint.setVisible(d.state == "stale")
+            rh.addWidget(hint, 0, Qt.AlignVCenter)
+            # 状态即按钮：非 indexing 挂更新图标（与「更新全部索引」同款），
+            # indexing 换暂停=可单停；stale 可点启动更新，其余纯展示
+            btn = PushButton(FIF.UPDATE, _STATUS_TEXT.get(d.state, d.state))
+            if d.state == "stale":
+                btn.setEnabled(self._index_worker is None)
+                btn.setToolTip("点击更新该目录索引")
+                setCustomStyleSheet(btn, _AMBER_QSS_LIGHT, _AMBER_QSS_DARK)
+                btn.clicked.connect(
+                    lambda _=False, p=d.path: self._start_update_dir(p))
+            elif d.state == "indexing":
+                btn.setIcon(FIF.PAUSE)
+                btn.setToolTip("点击停止该目录的索引更新")
+                btn.clicked.connect(
+                    lambda _=False, p=d.path: self._stop_dir(p))
+            else:
+                btn.setEnabled(False)
+            rh.addWidget(btn, 0, Qt.AlignVCenter)
+            rm = PushButton(FIF.DELETE, "删除")
             # 更新在途禁删：索引线程正写该目录 db，删后状态失配
             rm.setEnabled(self._index_worker is None)
             rm.clicked.connect(lambda _=False, p=d.path: self._remove_dir(p))
@@ -327,16 +373,29 @@ class LibraryPage(ScrollArea):
         # 宽度锁定期间计数不进文字（会撑宽/塌缩），进度走 tooltip
         self.btn_update.setToolTip(f"正在更新索引（{done}/{total}），点击取消")
 
+    def _stop_dir(self, path: str):
+        """行内「更新中」按钮：单停该目录（排队即跳、在途中断剩余文件），
+        其余目录照常跑完。"""
+        if self._index_worker is not None:
+            self._index_worker.cancel_dir(path)
+
     def _on_index_done(self, d, res):
         if not getattr(res, "cancelled", False):
-            self.vm.mark_done(d)           # 取消的目录不标「已更新」
+            self.vm.mark_done(d)           # 取消的目录不标「已最新」
+        else:
+            self.vm.mark_pending(d)        # 行即刻脱「更新中」，终扫再定状态
         self._rebuild_dir_rows()
 
     def _on_index_failed(self, d, err):
+        self.vm.mark_pending(d)
+        self._rebuild_dir_rows()
         InfoBar.error("索引更新失败", f"{d}: {err}", parent=self)
 
     def _on_index_all_done(self):
         self._index_worker = None
+        # 取消路径没有逐目录回执：残留 indexing 行统一复位，探测结果
+        # 才能盖定真实状态（修复「取消后徽章停在索引中直到重启」）
+        self.vm.clear_indexing()
         self._set_updating(False)
         self.refresh_status()
         # 索引内容变了（新索引字体/去重变化），与删目录同病同治

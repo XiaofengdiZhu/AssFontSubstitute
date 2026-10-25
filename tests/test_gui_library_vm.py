@@ -18,29 +18,42 @@ def test_add_remove_persist(tmp_path):
 
 
 def test_new_dir_pending_until_first_probe(tmp_path):
-    # 回归：新加目录在首个探测结果未到时显示「更新中」而非「需更新」
+    # 回归：新加目录在首个探测结果未到时挂「检查中」而非「需更新」
     # （盘上实况未知，谈不上需不需要更新）；探测结果照常覆盖 pending
     vm = _vm(tmp_path)
     vm.add_dir("J:/new")
     d = vm.dirs[0]
-    assert d.state == "pending" and d.badge == "更新中"
+    assert d.state == "pending"
     vm.refresh([DirStatus("J:/new", "stale", added=5, changed=0, total=5)],
                {}, [], [])
-    assert d.state == "stale" and "需更新" in d.badge
+    assert d.state == "stale"
 
 
-def test_badge_texts(tmp_path):
+def test_status_button_texts():
+    # 行内状态按钮文案（状态即按钮）：进行时「更新中/检查中」，
+    # 静态词「已最新/需更新/不可用」
+    from ass_font_substitute.gui.pages.library_page import _STATUS_TEXT
+
+    assert _STATUS_TEXT == {"ok": "已最新", "stale": "需更新",
+                            "indexing": "更新中", "pending": "检查中",
+                            "offline": "不可用"}
+
+
+def test_mark_pending_and_clear_indexing(tmp_path):
+    # 取消/单停/失败路径：行即刻脱「更新中」挂「检查中」，收尾清残留
     vm = _vm(tmp_path)
     vm.add_dir("J:/a")
-    d = vm.dirs[0]
-    d.state = "ok"
-    assert d.badge == "已更新"
-    d.state, d.added, d.changed = "stale", 3, 1
-    assert d.badge == "需更新：新增 3 · 修改 1"
-    d.state = "indexing"
-    assert d.badge == "索引中"
-    d.state = "offline"
-    assert d.badge == "不可用"
+    vm.add_dir("J:/b")
+    vm.mark_indexing("J:/a")
+    vm.mark_indexing("J:/b")
+    vm.mark_pending("J:/a")
+    assert vm.dirs[0].state == "pending"
+    assert vm.dirs[1].state == "indexing"
+    vm.clear_indexing()
+    assert vm.dirs[1].state == "pending"
+    vm.refresh([DirStatus("J:/a", "ok"), DirStatus("J:/b", "stale", added=1)],
+               {}, [], [])
+    assert [d.state for d in vm.dirs] == ["ok", "stale"]
 
 
 def test_refresh_maps_status_and_reports_failures(tmp_path):

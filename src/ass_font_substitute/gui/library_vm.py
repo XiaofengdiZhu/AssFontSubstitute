@@ -20,18 +20,6 @@ class DirRow:
     skipped: int = 0            # 版本去重跳过数
     fail: int = 0               # 失败/旧版 = bad + skipped
 
-    @property
-    def badge(self) -> str:
-        if self.state == "indexing":
-            return "索引中"
-        if self.state == "pending":
-            return "更新中"      # 新加入/启动中，首个探测结果未到
-        if self.state == "offline":
-            return "不可用"
-        if self.state == "stale":
-            return f"需更新：新增 {self.added} · 修改 {self.changed}"
-        return "已更新"
-
 
 class LibraryVM:
     """字体库管理页状态机（零 Qt）。目录增删持久化进 settings.font_dirs。
@@ -91,6 +79,20 @@ class LibraryVM:
         d = self._row(path)
         if d:
             d.state = "indexing"
+
+    def mark_pending(self, path: str) -> None:
+        """行脱「更新中」回暂态：取消/单停/失败后真实状态未知，
+        挂「检查中」直到收尾探测盖定。"""
+        d = self._row(path)
+        if d:
+            d.state = "pending"
+
+    def clear_indexing(self) -> None:
+        """更新全部收尾（含取消）：worker 已停，indexing 行的保护不再
+        需要，全部复位暂态让探测结果照常覆盖。"""
+        for d in self.dirs:
+            if d.state == "indexing":
+                d.state = "pending"
 
     def mark_done(self, path: str) -> None:
         d = self._row(path)

@@ -144,9 +144,9 @@ def test_display_name_prefers_cjk_alias(tmp_path):
     assert b.display_name == "Arial"
 
 
-def test_category_recomputed_on_load(tmp_path):
-    # 库列是索引时的分类快照；装载时按现行分类器由别名重算——
-    # 规则改进对存量索引即时生效，免重建
+def test_category_read_from_db(tmp_path):
+    # 库列即最终分类：建索引时由分类器算好入库，装载直读不重算——
+    # 改分类规则须升 SCHEMA_VERSION 重建（旧库列才会过期）
     d = tmp_path / "lib"
     d.mkdir()
     build_font(d / "a.ttf", chars="永", family="微软雅黑")
@@ -155,7 +155,7 @@ def test_category_recomputed_on_load(tmp_path):
     conn.execute("UPDATE fonts SET category='未分类'")
     conn.commit()
     lib = LibraryIndex.open([d])
-    assert lib.entities()[0].category == "黑"
+    assert lib.entities()[0].category == "未分类"
 
 
 def test_display_name_skips_vertical_and_halfwidth_kana():

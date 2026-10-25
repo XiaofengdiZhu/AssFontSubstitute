@@ -161,6 +161,40 @@ def test_worker_skips_cancelled_jobs(qapp, tmp_path, monkeypatch):
         assert w.wait(2000)
 
 
+def test_index_worker_cancel_dir(qapp, tmp_path, monkeypatch):
+    # 单停：排队目录到队即跳（回发取消结果让行按钮脱「更新中」），
+    # 在途目录 progress 回调返 False 中断剩余文件，其余目录照常
+    import time
+
+    import ass_font_substitute.gui.jobs as jobs
+    from ass_font_substitute.core.fontindex.store import UpdateResult
+    from ass_font_substitute.gui.workers import IndexWorker
+
+    calls, seen = [], {}
+
+    def fake_update_dir(d, progress=None):
+        calls.append(d)
+        if progress is not None:
+            seen["stop_requested"] = not progress(1, 10, UpdateResult())
+        return UpdateResult(cancelled=seen.get("stop_requested", False))
+
+    monkeypatch.setattr(jobs, "update_dir", fake_update_dir)
+    w = IndexWorker(["J:/a", "J:/b", "J:/c"])
+    done = []
+    w.finished_dir.connect(lambda d, r: done.append((d, r.cancelled)))
+    w.cancel_dir("J:/b")                    # 尚未开跑：b 排队即跳
+    w.start()
+    # finished_dir 是跨线程队列连接，主线程须转事件循环才有回执
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and len(done) < 3:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert w.wait(2000)                     # 三条回执收齐≠线程簿记已完成
+    assert calls == ["J:/a", "J:/c"]        # b 未执行
+    assert ("J:/b", True) in done           # b 回发取消结果
+    assert ("J:/a", False) in done          # a 照常完成
+
+
 def _update_dirs_job(ctx, dirs):
     from ass_font_substitute.gui.jobs import update_dir
     for d in dirs:
@@ -231,7 +265,8 @@ def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
     d.mkdir()
     build_font(d / "a.ttf", chars="永宇", family="甲")
     from PySide6.QtTest import QTest
-    from qfluentwidgets import ToolButton
+    from qfluentwidgets import CaptionLabel
+    from qfluentwidgets import PushButton
 
     from ass_font_substitute.gui.app import AFSWindow
     from ass_font_substitute.gui.settings_store import Settings
@@ -254,17 +289,21 @@ def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
             break
     assert len(w.browse_page.pvm.entities) == 1
 
-    # 更新在途：行内按钮禁用（_index_worker 先于重排行赋值）；
-    # ToolButton 含标题栏刷新钮（常 enabled），禁用的是行内更新+删除两枚
+    # 更新在途：需更新行按钮+删除钮禁用（_index_worker 先于重排行赋值）；
+    # stale 计数小字仅 stale 态可见
+    page.vm.dirs[0].state = "stale"
     page._index_worker = object()
     page._rebuild_dir_rows()
-    row = page.dirs_box.itemAt(0).widget()
-    assert len([b for b in row.findChildren(ToolButton)
-                if not b.isEnabled()]) == 2
+    card = page.dirs_box.itemAt(0).widget()
+    btns = {b.text(): b for b in card.findChildren(PushButton)}
+    assert not btns["需更新"].isEnabled() and not btns["删除"].isEnabled()
+    hint = card.findChildren(CaptionLabel)[0]
+    assert not hint.isHidden()
     page._index_worker = None
     page._rebuild_dir_rows()
-    row = page.dirs_box.itemAt(0).widget()
-    assert all(b.isEnabled() for b in row.findChildren(ToolButton))
+    card = page.dirs_box.itemAt(0).widget()
+    btns = {b.text(): b for b in card.findChildren(PushButton)}
+    assert btns["需更新"].isEnabled() and btns["删除"].isEnabled()
 
     gen0 = w.subs_page._gen
     page._remove_dir_confirmed(str(d))          # → libraryChanged 广播（确认弹窗路径 offscreen 不测，直接走确认后段）

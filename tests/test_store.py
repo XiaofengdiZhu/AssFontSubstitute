@@ -1,6 +1,7 @@
 import sqlite3
 
 from ass_font_substitute.core.fontindex.store import DDL
+from ass_font_substitute.core.fontindex.store import SCHEMA_VERSION
 from ass_font_substitute.core.fontindex.store import open_db
 from ass_font_substitute.core.fontindex.store import stats
 from ass_font_substitute.core.fontindex.store import update_index
@@ -62,7 +63,7 @@ def test_schema_mismatch_backs_up_and_rebuilds(tmp_path):
     (d / "fontindex.db.bak").write_bytes(b"stale backup")   # 既有 .bak 须被覆盖
     conn = open_db(db)                    # 不得抛 IndexSchemaError
     assert stats(conn) == {"files": 0, "fonts": 0, "support_sc": 0, "support_tc": 0}
-    assert conn.execute("SELECT v FROM schema_version").fetchone()[0] == 1
+    assert conn.execute("SELECT v FROM schema_version").fetchone()[0] == SCHEMA_VERSION
     bak = d / "fontindex.db.bak"
     assert bak.read_bytes() != b"stale backup"
     backup = sqlite3.connect(bak)
