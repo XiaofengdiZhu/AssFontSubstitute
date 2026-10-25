@@ -456,16 +456,19 @@ class SettingsPage(ScrollArea):
             self.settings.set("theme_color", "")
             self._sync_accent_content()
             return
-        # 自定义：fluent 取色器；确认（颜色有变）才落 store，取消不动
+        # 自定义：fluent 取色器。accept 后直接从 dlg.color 落 store——
+        # 不依赖 colorChanged（确认与当前色相同时上游不发信号，「钉住
+        # 当前色」意图会丢）；取消（reject）不写
         dlg = ColorDialog(QColor(qconfig.themeColor.value), "选择强调色",
                           self.window())
-        dlg.colorChanged.connect(
-            lambda c: self.settings.set("theme_color", c.name()))
-        dlg.exec()
+        accepted = dlg.exec()
+        chosen = dlg.color.name()
         dlg.deleteLater()                 # HuePanel 大 pixmap 别滞留到关窗
-        self._sync_accent_content()       # 确认后卡面色值跟上（审查 P1）
+        if accepted:
+            self.settings.set("theme_color", chosen)
+        self._sync_accent_content()       # 卡面色值跟上（审查 P1）
         if not self.settings.get("theme_color"):
-            # 取消/原色确认而原本是跟随系统：选项回「跟随系统」
+            # 取消而原本是跟随系统：选项回「跟随系统」
             self.accent_combo.blockSignals(True)
             self.accent_combo.setCurrentIndex(0)
             self.accent_combo.blockSignals(False)

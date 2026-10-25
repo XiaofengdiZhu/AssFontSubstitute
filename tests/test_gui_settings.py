@@ -377,7 +377,8 @@ def test_theme_color_store_roundtrip_and_reject(tmp_path):
 
 def test_accent_card_follow_custom_and_dialog(qapp, tmp_path, monkeypatch):
     # 强调色卡：存量自定义→选项「自定义…」+内容显色值；切跟随落空串；
-    # 自定义弹 fluent 取色器，确认才落 store；取消回退「跟随系统」
+    # 自定义弹 fluent 取色器，accept 才落 store（含同色确认钉住）；
+    # 取消回退「跟随系统」
     from PySide6.QtCore import QObject
     from PySide6.QtCore import Signal
     from PySide6.QtGui import QColor
@@ -392,24 +393,15 @@ def test_accent_card_follow_custom_and_dialog(qapp, tmp_path, monkeypatch):
         def submit(self, *a):
             pass
 
-    class _DlgOk(QObject):
-        colorChanged = Signal(QColor)
+    def _dlg_factory(return_code, color):
+        class _Dlg(QObject):
+            def __init__(self, color0, title, parent):
+                super().__init__()
+                self.color = QColor(color)
 
-        def __init__(self, color, title, parent):
-            super().__init__()
-            self.init_color = color
-
-        def exec(self):
-            self.colorChanged.emit(QColor("#123456"))
-
-    class _DlgCancel(QObject):
-        colorChanged = Signal(QColor)
-
-        def __init__(self, color, title, parent):
-            super().__init__()
-
-        def exec(self):
-            pass                                  # 取消：无信号
+            def exec(self):
+                return return_code
+        return _Dlg
 
     s = Settings(tmp_path / "s.json")
     s.set("theme_color", "#0065d5")
@@ -422,14 +414,23 @@ def test_accent_card_follow_custom_and_dialog(qapp, tmp_path, monkeypatch):
     page._on_accent(0)                            # 切跟随系统
     assert s.get("theme_color") == ""
 
-    monkeypatch.setattr(sp, "ColorDialog", _DlgCancel)
+    monkeypatch.setattr(sp, "ColorDialog", _dlg_factory(0, "#123456"))
     page._on_accent(1)                            # 取消：回退跟随系统
     assert s.get("theme_color") == ""
     assert page.accent_combo.currentIndex() == 0  # handler 主动回退
 
-    monkeypatch.setattr(sp, "ColorDialog", _DlgOk)
+    monkeypatch.setattr(sp, "ColorDialog", _dlg_factory(1, "#123456"))
     page._on_accent(1)                            # 确认：落 store
     assert s.get("theme_color") == "#123456"
+    assert "#123456" in page.accent_card.contentLabel.text()
 
     page._on_accent(1)                            # 回归：已停在自定义再选仍弹窗
     assert s.get("theme_color") == "#123456"
+
+    # 同色确认钉住：跟随系统下确认与当前生效色相同的颜色也落 store
+    # （qfw colorChanged 此时不发，accept 后直接读 dlg.color 才接得住）
+    page._on_accent(0)
+    assert s.get("theme_color") == ""
+    monkeypatch.setattr(sp, "ColorDialog", _dlg_factory(1, "#009faa"))
+    page._on_accent(1)
+    assert s.get("theme_color") == "#009faa"
