@@ -271,8 +271,11 @@ class LibraryPage(ScrollArea):
             rh.setContentsMargins(0, 0, 0, 0)
             rh.setSpacing(8)
             hint = CaptionLabel(f"新增 {d.added} · 修改 {d.changed}")
-            hint.setVisible(d.state == "stale")
             rh.addWidget(hint, 0, Qt.AlignVCenter)
+            # 先入父再 setVisible：无父 setVisible(True) 即成顶层窗口上屏
+            # （默认尺寸+标题栏），addWidget 重挂父再触发原生重建——取消
+            # 更新后行回 stale 重排时闪现小窗
+            hint.setVisible(d.state == "stale")
             # 状态即按钮：非 indexing 挂更新图标（与「更新全部索引」同款），
             # indexing 换暂停=可单停；stale 可点启动更新，其余纯展示
             btn = PushButton(FIF.UPDATE, _STATUS_TEXT.get(d.state, d.state))

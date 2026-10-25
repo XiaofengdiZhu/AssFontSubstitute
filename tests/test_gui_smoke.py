@@ -195,6 +195,46 @@ def test_index_worker_cancel_dir(qapp, tmp_path, monkeypatch):
     assert ("J:/a", False) in done          # a 照常完成
 
 
+def test_dir_row_no_top_level_flash(qapp, tmp_path, monkeypatch):
+    # 回归：重排行时「新增/修改」提示曾先 setVisible(True) 后入父——
+    # 无父 setVisible 即顶层窗口上屏（取消更新后行回 stale 重排时
+    # 闪现带标题栏小窗），修复后必须先 addWidget 再 setVisible
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    from PySide6.QtCore import QEvent
+    from PySide6.QtCore import QObject
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    s = Settings(tmp_path / "settings.json")
+    w = AFSWindow(s)
+    page = w.library_page
+    page.vm.add_dir(str(tmp_path / "fonts"))
+    page.vm.dirs[0].state = "stale"        # 触发 hint.setVisible(True) 的行
+
+    class Spy(QObject):
+        def __init__(self):
+            super().__init__()
+            self.flashed = None
+
+        def eventFilter(self, obj, ev):
+            # 顶层 Show 且非主窗 = 有控件以独立窗口上屏
+            if (ev.type() == QEvent.Type.Show and isinstance(obj, QWidget)
+                    and obj.isWindow() and obj is not w):
+                self.flashed = obj
+            return False
+
+    spy = Spy()
+    qapp.installEventFilter(spy)
+    try:
+        page._rebuild_dir_rows()
+    finally:
+        qapp.removeEventFilter(spy)
+    assert spy.flashed is None
+    w.close()
+
+
 def test_dir_row_progress_strip(qapp, tmp_path, monkeypatch):
     # 行内进度：indexing 行挂行底细条+行中文本；逐文件回执只原地推进
     # （不重排行），中途回排行从缓存恢复；脱 indexing 后进度区移除
