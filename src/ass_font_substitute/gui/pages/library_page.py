@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QRectF
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QFont
 from PySide6.QtGui import QIcon
 from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainterPath
 from PySide6.QtGui import QPen
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QHBoxLayout
@@ -18,10 +20,12 @@ from qfluentwidgets import CaptionLabel
 from qfluentwidgets import CardWidget
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import GroupHeaderCardWidget
+from qfluentwidgets import IndeterminateProgressBar
 from qfluentwidgets import InfoBar
 from qfluentwidgets import MessageBox
 from qfluentwidgets import MessageBoxBase
 from qfluentwidgets import PrimaryPushButton
+from qfluentwidgets import ProgressBar
 from qfluentwidgets import PushButton
 from qfluentwidgets import PushSettingCard
 from qfluentwidgets import ScrollArea
@@ -49,6 +53,68 @@ _STAT_KEYS = [("dirs", "字体目录"), ("files", "文件总数"), ("fonts", "�
 _STATUS_TEXT = {
     "ok": "已最新", "stale": "需更新", "indexing": "更新中",
     "pending": "检查中", "offline": "不可用"}
+
+
+def _progress_text(done: int, total: int) -> str:
+    """行内进度文案；total=0 表示还没收到首笔回执（扫描中）。"""
+    return f"{round(done * 100 / total)}% · {done}/{total}" if total else "准备中…"
+
+
+# 统计行定宽模板（文件/字体 5 位、简繁/失败 4 位封顶）：各行左块等宽，
+# 行中进度文案的横向位置才逐行对齐。超限（单目录 10 万+文件量级）实际
+# 文案会宽于定宽被静默截尾，当前量级安全
+_STATS_TMPL = ("文件 00000 · 字体 00000 · 支持简体 0000"
+               " · 支持繁体 0000 · 失败/旧版 0000")
+
+
+def _bottom_clip_path(bar) -> QPainterPath:
+    """条贴卡片底边：底部两角按卡片圆角（qfw CardWidget 默认 r5）的
+    裁剪路径——弧心与背景圆角重合，填充端头不出圆角。"""
+    w, h, r = float(bar.width()), float(bar.height()), 5.0
+    path = QPainterPath()
+    path.moveTo(0, 0)
+    path.lineTo(w, 0)
+    path.lineTo(w, h - r)
+    path.arcTo(QRectF(w - 2 * r, h - 2 * r, 2 * r, 2 * r), 0, -90)
+    path.lineTo(r, h)
+    path.arcTo(QRectF(0, h - 2 * r, 2 * r, 2 * r), 270, -90)
+    path.closeSubpath()
+    return path
+
+
+class _RowBar(ProgressBar):
+    """行底定态条：不画轨道线（qfw 半透 1px 线贴卡底成脏线），填充画在
+    卡片圆角裁剪内。裁剪须与绘制同一 painter——super() 自建 painter 会
+    丢掉外部设置的 clip，故自绘复刻 qfw 的填充数学。"""
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHints(QPainter.Antialiasing)
+        p.setClipPath(_bottom_clip_path(self))
+        if self.minimum() >= self.maximum():
+            return
+        p.setPen(Qt.NoPen)
+        p.setBrush(self.barColor())
+        w = int(self.val / (self.maximum() - self.minimum()) * self.width())
+        p.drawRoundedRect(0, 0, w, self.height(),
+                          self.height() / 2, self.height() / 2)
+
+
+class _RowIndeterminateBar(IndeterminateProgressBar):
+    """行底不定态条：游走段同样画进卡片圆角裁剪。"""
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHints(QPainter.Antialiasing)
+        p.setClipPath(_bottom_clip_path(self))
+        p.setPen(Qt.NoPen)
+        p.setBrush(self.barColor())
+        r = self.height() / 2
+        x = int((self.shortPos - 0.4) * self.width())
+        p.drawRoundedRect(x, 0, int(0.4 * self.width()), self.height(), r, r)
+        x = int((self.longPos - 0.6) * self.width())
+        p.drawRoundedRect(x, 0, int(0.6 * self.width()), self.height(), r, r)
+
 
 # stale 行按钮琥珀底（qfw 无警示色按钮；双主题 QSS，含 disabled 态——
 # 其他目录更新在途时本行也不可点）
@@ -101,6 +167,11 @@ class LibraryPage(ScrollArea):
         self.setObjectName("libraryPage")
         self.vm = LibraryVM(settings)
         self._index_worker: IndexWorker | None = None
+        self._index_progress: dict[str, tuple[int, int]] = {}
+        """path → 最近一次 (done, total)：重排行后进度条原地恢复值"""
+        self._progress_widgets: dict[str, tuple] = {}
+        """path → (不定态条, 定态条, 文本)：随每次重排行重建，逐文件
+        回执只原地 set 值/文案，绝不整页重排"""
         self._pending_failures = None       # "failures" 任务结果到达后的弹窗回调
         self._lib_reported = False          # loadCompleted 只发一次
 
@@ -181,6 +252,7 @@ class LibraryPage(ScrollArea):
     # ---- 目录列表 ----
 
     def _rebuild_dir_rows(self):
+        self._progress_widgets = {}
         while self.dirs_box.count():
             item = self.dirs_box.takeAt(0)
             if item.widget():
@@ -233,6 +305,13 @@ class LibraryPage(ScrollArea):
             path_lbl.setToolTip(d.path)
             group.textLayout.insertWidget(0, path_lbl)
             group.titleLabel.hide()
+            # 左块两行锁同一定宽（统计模板宽）：行中进度文案位置逐行一致
+            stats_w = group.contentLabel.fontMetrics().horizontalAdvance(
+                _STATS_TMPL)
+            group.contentLabel.setFixedWidth(stats_w)
+            path_lbl.setFixedWidth(stats_w)
+            if d.state == "indexing":
+                self._build_progress_strip(group, d.path)
         if not self.vm.dirs:
             ph = CaptionLabel("（请添加字体目录）")
             ph.setAlignment(Qt.AlignCenter)
@@ -243,6 +322,37 @@ class LibraryPage(ScrollArea):
             card.viewLayout.addWidget(wrap)
         self.dirs_box.addWidget(card)
         self._update_failures_card()
+
+    def _build_progress_strip(self, group, path: str):
+        """indexing 行的进度区：文本居中于左块与按钮之间的空档，细条贴
+        行底（首笔回执前 total 未知=不定态条，之后切定态条原地推进）。"""
+        done, total = self._index_progress.get(path, (0, 0))
+        lbl = CaptionLabel(_progress_text(done, total))
+        lbl.setAlignment(Qt.AlignCenter)
+        # qfw 预置 stretch 之后才是按钮区：插到其前并清其 stretch，文本
+        # 独占空档后 AlignCenter 才是真居中（默认各分一半=偏左四分之一）
+        group.hBoxLayout.insertWidget(2, lbl, 1, Qt.AlignVCenter)
+        group.hBoxLayout.setStretch(3, 0)
+        strip = QWidget()
+        sv = QVBoxLayout(strip)
+        sv.setContentsMargins(0, 2, 0, 1)   # 条贴行底边、左右到卡缘（qfw 圆头填充）
+        sv.setSpacing(3)
+        ind = _RowIndeterminateBar(strip)
+        det = _RowBar(strip)
+        det.hide()
+        sv.addWidget(ind)
+        sv.addWidget(det)
+        group.vBoxLayout.addWidget(strip)
+        self._progress_widgets[path] = (ind, det, lbl)
+        if total:
+            # 中途重排行的恢复：停掉不定态动画、关填充动画（否则 setValue
+            # 从 0 重播一次「回卷」）
+            ind.stop()
+            ind.hide()
+            det.show()
+            det.setUseAni(False)
+            det.setRange(0, total)
+            det.setValue(done)
 
     def _update_failures_card(self):
         bad = sum(d.bad for d in self.vm.dirs)
@@ -370,8 +480,21 @@ class LibraryPage(ScrollArea):
         self._index_worker.start()
 
     def _on_index_progress(self, d, done, total, res):
+        self._index_progress[d] = (done, total)
         # 宽度锁定期间计数不进文字（会撑宽/塌缩），进度走 tooltip
         self.btn_update.setToolTip(f"正在更新索引（{done}/{total}），点击取消")
+        w = self._progress_widgets.get(d)
+        if w is None or not total:
+            return                        # 首笔回执前不定态条自转，无需动
+        ind, det, lbl = w
+        if det.maximum() != total:        # 首笔定态回执先立量程（默认 0 会钳值）
+            det.setRange(0, total)
+        det.setValue(done)                # 行存活期内原地推进，不重排行
+        lbl.setText(_progress_text(done, total))
+        if not ind.isHidden():            # isHidden 不依赖窗口显示状态
+            ind.stop()                    # loop 动画随隐藏停掉，防空转
+            ind.hide()
+            det.show()
 
     def _stop_dir(self, path: str):
         """行内「更新中」按钮：单停该目录（排队即跳、在途中断剩余文件），
@@ -380,6 +503,7 @@ class LibraryPage(ScrollArea):
             self._index_worker.cancel_dir(path)
 
     def _on_index_done(self, d, res):
+        self._index_progress.pop(d, None)
         if not getattr(res, "cancelled", False):
             self.vm.mark_done(d)           # 取消的目录不标「已最新」
         else:
@@ -387,6 +511,7 @@ class LibraryPage(ScrollArea):
         self._rebuild_dir_rows()
 
     def _on_index_failed(self, d, err):
+        self._index_progress.pop(d, None)
         self.vm.mark_pending(d)
         self._rebuild_dir_rows()
         InfoBar.error("索引更新失败", f"{d}: {err}", parent=self)
@@ -395,6 +520,7 @@ class LibraryPage(ScrollArea):
         self._index_worker = None
         # 取消路径没有逐目录回执：残留 indexing 行统一复位，探测结果
         # 才能盖定真实状态（修复「取消后徽章停在索引中直到重启」）
+        self._index_progress.clear()
         self.vm.clear_indexing()
         self._set_updating(False)
         self.refresh_status()

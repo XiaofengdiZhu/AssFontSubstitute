@@ -195,6 +195,67 @@ def test_index_worker_cancel_dir(qapp, tmp_path, monkeypatch):
     assert ("J:/a", False) in done          # a 照常完成
 
 
+def test_dir_row_progress_strip(qapp, tmp_path, monkeypatch):
+    # 行内进度：indexing 行挂行底细条+行中文本；逐文件回执只原地推进
+    # （不重排行），中途回排行从缓存恢复；脱 indexing 后进度区移除
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    from tests.fonts import build_font
+    d = tmp_path / "fonts"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永宇", family="甲")
+    from PySide6.QtWidgets import QProgressBar
+    from qfluentwidgets import IndeterminateProgressBar
+
+    from ass_font_substitute.core.fontindex.store import UpdateResult
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.pages.library_page import _STATS_TMPL
+    from ass_font_substitute.gui.pages.library_page import _progress_text
+    from ass_font_substitute.gui.settings_store import Settings
+
+    assert _progress_text(12308, 17583) == "70% · 12308/17583"
+    assert _progress_text(0, 0) == "准备中…"   # 首笔回执前（扫描中）
+
+    s = Settings(tmp_path / "settings.json")
+    w = AFSWindow(s)
+    page = w.library_page
+    assert page.vm.add_dir(str(d)) is True
+    page.vm.mark_indexing(str(d))
+    page._index_worker = object()          # 模拟在途（不真起线程）
+    page._rebuild_dir_rows()
+    ind, det, lbl = page._progress_widgets[str(d)]
+    assert isinstance(ind, IndeterminateProgressBar)
+    # offscreen 窗口未 show，isVisible 恒 False，用 isHidden 断显隐
+    assert det.isHidden() and not ind.isHidden()
+    assert lbl.text() == "准备中…"
+
+    page._on_index_progress(str(d), 12308, 17583, None)
+    assert not det.isHidden() and ind.isHidden()
+    assert det.value() == 12308 and det.maximum() == 17583
+    assert lbl.text() == "70% · 12308/17583"
+
+    page._rebuild_dir_rows()               # 他目录收尾触发重排行：进度恢复
+    ind2, det2, lbl2 = page._progress_widgets[str(d)]
+    assert (ind2, det2, lbl2) != (ind, det, lbl)
+    assert det2.value() == 12308 and det2.maximum() == 17583
+    assert lbl2.text() == "70% · 12308/17583"
+
+    page._index_worker = None
+    page._on_index_done(str(d), UpdateResult())
+    assert str(d) not in page._progress_widgets
+    row = page.dirs_box.itemAt(0).widget()
+    # QProgressBar 基类连不定态条一起断（其非 ProgressBar 子类，防泄漏漏报）
+    assert not row.findChildren(QProgressBar)
+
+    # 左块两行（路径+统计）锁同一定宽=统计模板宽：行中进度文案位置逐行一致
+    grp = row.groupWidgets[0]
+    want = grp.contentLabel.fontMetrics().horizontalAdvance(_STATS_TMPL)
+    assert grp.contentLabel.minimumWidth() == want
+    assert grp.contentLabel.maximumWidth() == want
+    path_lbl = grp.textLayout.itemAt(0).widget()
+    assert path_lbl.minimumWidth() == path_lbl.maximumWidth() == want
+    w.close()
+
+
 def _update_dirs_job(ctx, dirs):
     from ass_font_substitute.gui.jobs import update_dir
     for d in dirs:
