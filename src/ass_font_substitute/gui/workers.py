@@ -77,9 +77,10 @@ class IndexWorker(QThread):
     finished_dir = Signal(str, object)           # (dir, UpdateResult)
     failed = Signal(str, str)
 
-    def __init__(self, dirs, parent=None):
+    def __init__(self, dirs, max_threads: int = 1, parent=None):
         super().__init__(parent)
         self._dirs = list(dirs)
+        self._max_threads = max(1, int(max_threads))
         self._cancel = False
         self._skip: set[str] = set()
 
@@ -104,7 +105,8 @@ class IndexWorker(QThread):
             try:
                 r = update_dir(
                     d, progress=lambda done, total, res, d=d:
-                    self._on_progress(d, done, total, res))
+                    self._on_progress(d, done, total, res),
+                    max_threads=self._max_threads)
                 self.finished_dir.emit(d, r)
             except Exception as e:
                 self.failed.emit(d, f"{type(e).__name__}: {e}")

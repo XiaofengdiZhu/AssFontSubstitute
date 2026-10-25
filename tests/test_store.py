@@ -1,5 +1,6 @@
 import sqlite3
 
+from ass_font_substitute.core.fontindex import store as store_mod
 from ass_font_substitute.core.fontindex.store import DDL
 from ass_font_substitute.core.fontindex.store import SCHEMA_VERSION
 from ass_font_substitute.core.fontindex.store import open_db
@@ -144,3 +145,71 @@ def test_update_index_precomputes_fingerprints(tmp_path):
     assert (rel, fi) == ("a.ttf", 0) and mtime and fp
     from ass_font_substitute.core.fontindex.store import FP_ALGO
     assert algo == FP_ALGO
+
+
+def test_update_index_parallel_executor(tmp_path):
+    # 注入线程池锁并行行为：乱序完成下逐文件事务入库与串行等价，坏文件照常入 bad
+    from concurrent.futures import ThreadPoolExecutor
+    d = tmp_path / "fonts"
+    d.mkdir()
+    _mklib(d, n=4)
+    (d / "bad.ttf").write_bytes(b"junk")
+    conn = open_db(d / "fontindex.db")
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        r = update_index(d, conn, executor=ex)
+    # added=发现数（scan 阶段计数，含坏文件），非入库数
+    assert (r.added, r.bad) == (5, 1)
+    s = stats(conn)
+    assert s["files"] == 4 and s["fonts"] == 4
+    assert conn.execute("SELECT COUNT(*) FROM bad").fetchone()[0] == 1
+
+
+def test_update_index_parallel_cancel(tmp_path):
+    # progress 返 False → 停止消费：cancelled=True，已入库前缀保留，
+    # 完成数与回调严格交替（apply 与 progress 不重不漏）
+    from concurrent.futures import ThreadPoolExecutor
+    d = tmp_path / "fonts"
+    d.mkdir()
+    _mklib(d, n=5)
+    conn = open_db(d / "fontindex.db")
+    seen = []
+
+    def progress(done, total, res):
+        seen.append((done, total))
+        return done < 2
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        r = update_index(d, conn, progress=progress, executor=ex)
+    # cancelled 且库中恰有已完成的 2 个（added 是发现数含未入库的 3 个）
+    assert r.cancelled and r.added == 5
+    assert stats(conn)["files"] == 2
+    assert seen == [(1, 5), (2, 5)]
+
+
+def test_update_index_broken_pool_falls_back(tmp_path, monkeypatch):
+    # 池整体崩坏（任务体抛 BrokenProcessPool）→ 剩余文件回退串行续完，
+    # 不丢不炸、无取消标记
+    from concurrent.futures import ThreadPoolExecutor
+
+    def boom(p):
+        raise store_mod.BrokenProcessPool()
+
+    monkeypatch.setattr(store_mod, "_parse_task", boom)
+    d = tmp_path / "fonts"
+    d.mkdir()
+    _mklib(d, n=3)
+    conn = open_db(d / "fontindex.db")
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        r = update_index(d, conn, executor=ex)
+    assert not r.cancelled and r.added == 3
+    assert stats(conn)["fonts"] == 3
+
+
+def test_update_index_real_process_pool(tmp_path):
+    # 真进程池 smoke：Windows spawn 导入链 + FontRecord pickle 全链
+    d = tmp_path / "fonts"
+    d.mkdir()
+    _mklib(d, n=2)
+    conn = open_db(d / "fontindex.db")
+    r = update_index(d, conn, max_threads=2)
+    assert r.added == 2 and stats(conn)["fonts"] == 2

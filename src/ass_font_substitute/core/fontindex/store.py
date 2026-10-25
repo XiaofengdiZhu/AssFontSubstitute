@@ -6,12 +6,16 @@ import os
 import sqlite3
 from collections.abc import Callable
 from collections.abc import Iterator
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
 
 from ass_font_substitute.core.fontindex.parser import FontParseError
 from ass_font_substitute.core.fontindex.parser import parse_font_file
 from ass_font_substitute.core.models import CmapRanges
+from ass_font_substitute.core.models import FontRecord
 
 # 库列即最终分类（建索引时由别名算好入库，装载直读）。分类规则改进属
 # 内容语义变化：升此版本触发旧库备份+全量重建（spec §5）。v3：指纹去
@@ -124,11 +128,104 @@ def scan_dir(root: Path) -> list[Path]:
     return sorted(out)
 
 
+def _parse_task(p: Path) -> list[FontRecord] | FontParseError:
+    """进程池任务体：FontParseError 以值返回（不 raise，免池层异常包装），
+    pickle 回主线程照常入 bad 表。"""
+    try:
+        return parse_font_file(p)
+    except FontParseError as e:
+        return e
+
+
+def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
+                  recs: list[FontRecord] | FontParseError,
+                  res: UpdateResult) -> None:
+    """单文件写库事务（串行/并行共用）：失败入 bad，成功清 bad 重灌条目。"""
+    with conn:
+        if isinstance(recs, FontParseError):
+            res.bad += 1
+            conn.execute("INSERT OR REPLACE INTO bad VALUES (?,?,?,?)",
+                         (rel, st.st_size, st.st_mtime_ns, str(recs)))
+            conn.execute("DELETE FROM files WHERE rel_path=?", (rel,))
+            conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
+            conn.execute("DELETE FROM fingerprints WHERE rel_path=?", (rel,))
+            return
+        conn.execute("INSERT OR REPLACE INTO files VALUES (?,?,?)",
+                     (rel, st.st_size, st.st_mtime_ns))
+        conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
+        conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
+        for r in recs:
+            conn.execute(
+                "INSERT INTO fonts(rel_path,face_index,psname,version,aliases,"
+                "weight,width,italic,cmap,script,category) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (rel, r.face_index, r.psname,
+                 json.dumps(r.version) if r.version else None,
+                 json.dumps(r.aliases, ensure_ascii=False),
+                 r.weight, r.width, int(r.italic),
+                 r.cmap.to_bytes(), r.script, r.category))
+            conn.execute(
+                "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
+                (rel, r.face_index, st.st_mtime_ns, FP_ALGO,
+                 fingerprint_of(r.aliases, r.cmap, r.weight, r.width,
+                                r.italic)))
+
+
+def _update_parallel(dir_path: Path, conn: sqlite3.Connection,
+                     todo: list[Path], res: UpdateResult,
+                     progress: Callable[[int, int, UpdateResult], bool] | None,
+                     total: int, executor=None, max_threads: int = 1) -> None:
+    """解析走进程池（fontTools 纯 Python CPU 摊多核），写库仍主线程逐文件
+    事务（SQLite 单写者；取消/中断保留已入库前缀语义不变——progress 返
+    False 停止消费，在途结果丢弃不入库，未派发文件下次增量重跑）。
+    executor 供测试注入（行为与真池一致），None 按 max_threads 建
+    ProcessPoolExecutor。池整体崩坏（BrokenProcessPool，fontTools 纯
+    Python 极难触发，纯保险）时剩余文件回退主线程串行续完。"""
+    owned = executor is None
+    ex = executor if executor is not None else ProcessPoolExecutor(max_workers=max_threads)
+    try:
+        futs = {}
+        for p in todo:
+            # 派发前取 stat：解析窗口内被外部覆写则记旧 mtime，下次必重检
+            futs[ex.submit(_parse_task, p)] = (
+                p.relative_to(dir_path).as_posix(), p.stat(), p)
+        pending = dict(futs)
+        done = 0
+        for fut in as_completed(futs):
+            try:
+                recs = fut.result()
+            except BrokenProcessPool:
+                break
+            rel, st, _ = futs[fut]
+            del pending[fut]
+            _apply_result(conn, rel, st, recs, res)
+            done += 1
+            if progress is not None and not progress(done, total, res):
+                res.cancelled = True
+                return
+        for rel, st, p in pending.values():
+            try:
+                recs = parse_font_file(p)
+            except FontParseError as e:
+                recs = e
+            _apply_result(conn, rel, st, recs, res)
+            done += 1
+            if progress is not None and not progress(done, total, res):
+                res.cancelled = True
+                return
+    finally:
+        if owned:
+            ex.shutdown(wait=True, cancel_futures=res.cancelled)
+
+
 def update_index(dir_path: Path, conn: sqlite3.Connection,
-                 progress: Callable[[int, int, UpdateResult], bool] | None = None) -> UpdateResult:
-    """progress(done, total, res) -> bool 在每解析完一个文件后回调；
-    返回 False 停止剩余文件并置 res.cancelled=True。逐文件事务提交，
-    取消/中断保留已解析前缀，重跑按增量续（GUI 进度/取消依赖此语义）。"""
+                 progress: Callable[[int, int, UpdateResult], bool] | None = None,
+                 executor=None, max_threads: int = 1) -> UpdateResult:
+    """progress(done, total, res) -> bool 在每解析完一个文件后回调（并行
+    时按完成序，done=已完成数）；返回 False 停止剩余文件并置
+    res.cancelled=True。逐文件事务提交，取消/中断保留已入库前缀，重跑按
+    增量续（GUI 进度/取消依赖此语义）。max_threads>1 且待解析多于一个
+    文件时解析走进程池（jobs.update_dir 传 settings.max_threads），
+    executor 参数供测试注入线程池替代。"""
     res = UpdateResult()
     known = {r[0]: (r[1], r[2]) for r in
              conn.execute("SELECT rel_path, size, mtime_ns FROM files")}
@@ -161,44 +258,23 @@ def update_index(dir_path: Path, conn: sqlite3.Connection,
             conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
 
     total = len(todo)
-    for done, p in enumerate(todo, 1):
-        rel = p.relative_to(dir_path).as_posix()
-        # 解析前取 stat：若解析窗口内文件被外部覆写，记下的是旧 mtime，
-        # 下次必重检；解析后取会记到新 mtime，门误判「未变」→ 静默陈旧
-        st = p.stat()
-        with conn:
-            recs = None
+    if total > 1 and (executor is not None or max_threads > 1):
+        _update_parallel(dir_path, conn, todo, res, progress, total,
+                         executor=executor, max_threads=max_threads)
+    else:
+        for done, p in enumerate(todo, 1):
+            rel = p.relative_to(dir_path).as_posix()
+            # 解析前取 stat：若解析窗口内文件被外部覆写，记下的是旧 mtime，
+            # 下次必重检；解析后取会记到新 mtime，门误判「未变」→ 静默陈旧
+            st = p.stat()
             try:
                 recs = parse_font_file(p)
             except FontParseError as e:
-                res.bad += 1
-                conn.execute("INSERT OR REPLACE INTO bad VALUES (?,?,?,?)",
-                             (rel, st.st_size, st.st_mtime_ns, str(e)))
-                conn.execute("DELETE FROM files WHERE rel_path=?", (rel,))
-                conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
-                conn.execute("DELETE FROM fingerprints WHERE rel_path=?", (rel,))
-            if recs is not None:
-                conn.execute("INSERT OR REPLACE INTO files VALUES (?,?,?)",
-                             (rel, st.st_size, st.st_mtime_ns))
-                conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
-                conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
-                for r in recs:
-                    conn.execute(
-                        "INSERT INTO fonts(rel_path,face_index,psname,version,aliases,"
-                        "weight,width,italic,cmap,script,category) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                        (rel, r.face_index, r.psname,
-                         json.dumps(r.version) if r.version else None,
-                         json.dumps(r.aliases, ensure_ascii=False),
-                         r.weight, r.width, int(r.italic),
-                         r.cmap.to_bytes(), r.script, r.category))
-                    conn.execute(
-                        "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
-                        (rel, r.face_index, st.st_mtime_ns, FP_ALGO,
-                         fingerprint_of(r.aliases, r.cmap, r.weight, r.width,
-                                        r.italic)))
-        if progress is not None and not progress(done, total, res):
-            res.cancelled = True
-            break
+                recs = e
+            _apply_result(conn, rel, st, recs, res)
+            if progress is not None and not progress(done, total, res):
+                res.cancelled = True
+                break
     res.fonts = stats(conn)["fonts"]
     return res
 

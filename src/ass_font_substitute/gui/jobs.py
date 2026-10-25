@@ -118,10 +118,11 @@ def ensure_library(ctx, dirs: list[str]) -> LibrarySnapshot:
     return snap
 
 
-def update_dir(dir_path: str, progress=None):
+def update_dir(dir_path: str, progress=None, max_threads: int = 1):
     conn = open_db(Path(dir_path) / "fontindex.db")
     try:
-        return update_index(Path(dir_path), conn, progress=progress)
+        return update_index(Path(dir_path), conn, progress=progress,
+                            max_threads=max_threads)
     finally:
         conn.close()
 

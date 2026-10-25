@@ -473,7 +473,8 @@ class LibraryPage(ScrollArea):
         for d in dirs:
             self.vm.mark_indexing(d)
         # 先持 worker 再重排行：行内 upd/rm 按钮的在途禁用读该字段
-        self._index_worker = IndexWorker(dirs)
+        self._index_worker = IndexWorker(
+            dirs, max_threads=self.settings.get("max_threads"))
         self._rebuild_dir_rows()
         self._set_updating(True)
         self._index_worker.progress.connect(self._on_index_progress)

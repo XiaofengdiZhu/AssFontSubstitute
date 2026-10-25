@@ -28,7 +28,7 @@ DEFAULTS: dict = {
     "size_min": SIZE_RANGE[0],
     "size_max": SIZE_RANGE[1],
     "n_pause": 5,
-    "max_threads": max(1, os.cpu_count() or 4),   # 挂账：并行解析落地前仅存储
+    "max_threads": max(1, os.cpu_count() or 4),   # 建索引并行解析进程数
     "save_suffix": ".substituted.ass",
     "overwrite_default": False,
     "sample_text": SAMPLE_TEXT,

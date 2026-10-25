@@ -175,8 +175,9 @@ def test_index_worker_cancel_dir(qapp, tmp_path, monkeypatch):
 
     calls, seen = [], {}
 
-    def fake_update_dir(d, progress=None):
+    def fake_update_dir(d, progress=None, max_threads=1):
         calls.append(d)
+        assert max_threads >= 1               # 设置页 max_threads 透传通路
         if progress is not None:
             seen["stop_requested"] = not progress(1, 10, UpdateResult())
         return UpdateResult(cancelled=seen.get("stop_requested", False))
