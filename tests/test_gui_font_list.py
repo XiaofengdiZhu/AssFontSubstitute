@@ -28,7 +28,8 @@ def _ent(fp, name):
 
 
 class _FakeWorker(QObject):
-    """只实现 PreviewBar 用到的接口；submit 记账、result 手动发射。"""
+    """只实现 PreviewBar 用到的接口；submit 记账并返回可取消句柄，
+    result 手动发射。"""
 
     result = Signal(object, object)
 
@@ -37,7 +38,15 @@ class _FakeWorker(QObject):
         self.submits = []
 
     def submit(self, tag, fn, *args, **kw):
-        self.submits.append((tag, fn, args))
+        from types import SimpleNamespace
+        handle = SimpleNamespace(cancelled=False)
+        self.submits.append((tag, fn, args, handle))
+        return handle
+
+
+def _row_of(handle_or_submit):
+    """submit 记录 → 行号（tag 形如 plist:{fingerprint}:{list_id}）。"""
+    return int(handle_or_submit[0].split(":")[1])
 
 
 def test_font_list_lazy_materialization(qapp):
@@ -69,7 +78,7 @@ def test_font_list_lazy_materialization(qapp):
     assert fl.itemWidget(fl.item(199)) is None          # 远端行未构建
     assert len(fl._worker.submits) == len(vis)          # 仅物化行派渲染任务
 
-    fl.verticalScrollBar().setValue(150)    # ScrollPerItem：单位即行
+    fl.verticalScrollBar().setValue(150 * (ROW_H + ROW_SPACING))   # 像素模式
     qapp.processEvents()
     far = materialized()
     assert far and 0 not in far             # 首屏行控件已释放
@@ -249,3 +258,239 @@ def test_scaled_pixmap_keeps_device_ratio(qapp):
     assert out.height() == 49 and out.devicePixelRatio() == 1.75
     out2 = out.scaledToWidth(100, Qt.SmoothTransformation)
     assert out2.width() == 100 and out2.devicePixelRatio() == 1.75
+
+
+def test_scroll_out_cancels_pending_renders(qapp):
+    # 滚出物化窗口的行：未执行的渲染任务必须取消——串行工作者下不取消
+    # 则快速滚动积压几百个过期任务，新视口的预览排在队尾迟迟不出来
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import ROW_H
+    from ass_font_substitute.gui.widgets.font_list import ROW_SPACING
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
+    fl.resize(300, 600)
+    fl.show()
+    qapp.processEvents()
+    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(200)])
+
+    old = list(fl._worker.submits)
+    assert old and all(not h.cancelled for _t, _f, _a, h in old)
+    fl.verticalScrollBar().setValue(150 * (ROW_H + ROW_SPACING))
+    qapp.processEvents()
+    assert all(h.cancelled for _t, _f, _a, h in old)   # 旧窗口全部出窗取消
+    new = fl._worker.submits[len(old):]
+    assert new and all(not h.cancelled for _t, _f, _a, h in new)
+    assert 150 in {_row_of(s) for s in new}
+
+
+def test_set_rows_cancels_inflight_renders(qapp):
+    # 筛选/重拉重建列表：旧窗口在途任务全部取消（行控件即将销毁，结果
+    # 无处可贴；不取消同样白占工作者串行时段）
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
+    fl.resize(300, 600)
+    fl.show()
+    qapp.processEvents()
+    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(200)])
+    old = list(fl._worker.submits)
+    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(200)])
+    assert old and all(h.cancelled for _t, _f, _a, h in old)
+
+
+def test_materialization_submits_nearest_visible_first(qapp):
+    # 连续滚动时新进入视野的行先入渲染队列：物化提交按到可视中心距离
+    # 排序（旧实现固定自上而下，向下滚动时最想看的行反而最后派发）
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
+    fl.resize(300, 600)
+    fl.show()
+    qapp.processEvents()
+    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(200)])
+
+    first, last = fl._visible_range()
+    center = (first + last) / 2
+    rows = {_row_of(s) for s in fl._worker.submits}
+    expected = sorted(rows, key=lambda i: abs(i - center))
+    assert [_row_of(s) for s in fl._worker.submits] == expected
+
+
+def test_smooth_scroll_delegated(qapp):
+    # 平滑滚动接线：ScrollPerPixel + qfw SmoothScrollDelegate useAni 路径。
+    # 行为钉：滚轮 1 格净位移恒 120px——默认引擎路径把每帧增量以合成
+    # 滚轮事件发给原生条、原生条按 angleDelta/120×singleStep 换算，而
+    # QListView singleStep=行高（QScrollArea 页面是 20px），每格滚出
+    # 4.4 倍距离与其他页面手感脱节（实测 422px vs 96px）；动画路径
+    # scrollValue() 直驱原生条 setValue，无此二次换算。
+    from PySide6.QtCore import QEventLoop
+    from PySide6.QtCore import QPoint
+    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QTimer
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QAbstractItemView
+    from qfluentwidgets import SmoothScrollDelegate
+
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
+    fl.resize(300, 600)
+    fl.show()
+    qapp.processEvents()
+    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(100)])
+    assert fl.verticalScrollMode() == QAbstractItemView.ScrollMode.ScrollPerPixel
+    assert isinstance(fl._scroll, SmoothScrollDelegate)
+    assert fl._scroll.useAni
+    assert fl.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+
+    e = QWheelEvent(QPoint(150, 300), QPoint(150, 300), QPoint(0, 0),
+                    QPoint(0, -120), Qt.MouseButton.NoButton,
+                    Qt.KeyboardModifier.NoModifier,
+                    Qt.ScrollPhase.ScrollBegin, False)
+    qapp.sendEvent(fl.viewport(), e)
+    loop = QEventLoop()                     # QPropertyAnimation 需真事件循环
+    QTimer.singleShot(800, loop.quit)
+    loop.exec()
+    assert fl.verticalScrollBar().value() == 120
+
+
+def test_visible_range_converts_pixels(qapp):
+    # 可视区判定 = 滚动条 value 按实测行距换算（ScrollPerPixel 下
+    # value/pageStep 单位是像素；QListView indexAt 因布局 x 内缩恒 -1、
+    # 行高校准后深处又错位，不可作依据，已整体弃用）
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
+    fl.resize(300, 600)
+    fl.show()
+    qapp.processEvents()
+    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(200)])
+    fl.verticalScrollBar().setValue(10 * fl._row_pitch)
+    first, last = fl._visible_range()
+    assert first == 10
+    assert 10 < last < 200
+
+
+def test_deep_jump_materializes_viewport_rows(qapp, monkeypatch):
+    # 回归（实机：拖滚动条直达深处大片空白）：可视区判定弃用 indexAt、
+    # 直接按 value//实测行距 换算——物化窗口必须落在真视口行上。真值
+    # 以 visualRect 与视口相交的行是否有控件为准（indexAt 自身不可信）。
+    from PySide6.QtCore import QSize
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    class _TallRow(QWidget):
+        def sizeHint(self):
+            return QSize(300, 96)       # 模拟实机：行高实测 > 初值
+
+    fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
+    monkeypatch.setattr(fl, "_row_widget", lambda i: _TallRow())
+    fl.resize(1200, 600)
+    fl.show()
+    qapp.processEvents()
+    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(2000)])
+
+    def viewport_rows():
+        vp = fl.viewport().rect()
+        return [i for i in range(fl.count())
+                if fl.visualRect(fl.model().index(i, 0)).intersects(vp)]
+
+    sb = fl.verticalScrollBar()
+    sb.setValue(int(sb.maximum() * 0.7))
+    qapp.processEvents()
+    fl._materialize_visible()
+    qapp.processEvents()
+    assert all(fl.itemWidget(fl.item(i)) is not None
+               for i in viewport_rows())
+    first, _last = fl._visible_range()
+    assert abs(first - sb.value() // fl._row_pitch) <= 2
+
+
+def test_wheel_after_scrollbar_jump_no_rewind(qapp):
+    # 回归（实机：点滚动条后滚轮从点击前位置开始滚）：点 groove 跳位走
+    # setValue(useAni=True) 动画，动画结束时滚动条 value 已到位，但
+    # SmoothScrollBar 的滚动目标 __value 仍停在点击前——下次滚轮
+    # scrollValue 从旧目标出发即回跳。动画 finished 必须把目标重置到
+    # 当前 value。
+    from PySide6.QtCore import QEventLoop
+    from PySide6.QtCore import QPoint
+    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QTimer
+    from PySide6.QtGui import QWheelEvent
+
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
+    fl.resize(300, 600)
+    fl.show()
+    qapp.processEvents()
+    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(300)])
+
+    def drain(ms=900):
+        loop = QEventLoop()                 # 动画推进需真事件循环
+        QTimer.singleShot(ms, loop.quit)
+        loop.exec()
+
+    smooth = fl._scroll.vScrollBar
+    target = int(smooth.maximum() * 0.8)
+    smooth.setValue(target)                 # 与点击 groove 同路径：动画跳位
+    drain()
+    assert fl.verticalScrollBar().value() >= target - 2
+
+    e = QWheelEvent(QPoint(150, 300), QPoint(150, 300), QPoint(0, 0),
+                    QPoint(0, -120), Qt.MouseButton.NoButton,
+                    Qt.KeyboardModifier.NoModifier,
+                    Qt.ScrollPhase.ScrollBegin, False)
+    qapp.sendEvent(fl.viewport(), e)
+    drain()
+    assert fl.verticalScrollBar().value() >= target     # 不许回跳
+
+
+def test_wheel_mid_jump_animation_continues_from_reality(qapp):
+    # 回归（审查实证）：跳位动画「中途」滚一格，scrollValue 先从过期
+    # 滚动目标 __value（停在点击前）算好目标再 stop 旧动画——finished
+    # 补救晚于传参，整段跳位被丢弃回跳到点击前。滚轮入口必须先从原生
+    # 条真实现值重置目标，动画中断即从当前帧续走。
+    from PySide6.QtCore import QEventLoop
+    from PySide6.QtCore import QPoint
+    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QTimer
+    from PySide6.QtGui import QWheelEvent
+
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
+    fl.resize(300, 600)
+    fl.show()
+    qapp.processEvents()
+    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(300)])
+
+    def drain(ms=900):
+        loop = QEventLoop()                 # 动画推进需真事件循环
+        QTimer.singleShot(ms, loop.quit)
+        loop.exec()
+
+    smooth = fl._scroll.vScrollBar
+    target = int(smooth.maximum() * 0.8)
+    smooth.setValue(target)                 # 跳位动画开跑
+    drain(150)                              # 停在动画中段
+    v_mid = fl.verticalScrollBar().value()
+
+    e = QWheelEvent(QPoint(150, 300), QPoint(150, 300), QPoint(0, 0),
+                    QPoint(0, -120), Qt.MouseButton.NoButton,
+                    Qt.KeyboardModifier.NoModifier,
+                    Qt.ScrollPhase.ScrollBegin, False)
+    qapp.sendEvent(fl.viewport(), e)
+    drain()
+    # 从中断帧 +120 续走（修复前回跳到点击前附近：终值 ≈120）
+    assert abs(fl.verticalScrollBar().value() - (v_mid + 120)) <= 2
+    assert v_mid > 0                        # 护栏：确已停在动画中段

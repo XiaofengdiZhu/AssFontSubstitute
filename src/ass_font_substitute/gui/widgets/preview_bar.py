@@ -50,6 +50,7 @@ class PreviewBar(CaptionLabel):
         self._worker, self._pvm = worker, pvm
         self._entity, self._text, self._tag = entity, text, tag
         self._inflight = False
+        self._job = None                     # 在途任务的取消句柄
         self._strip = None                   # 最近一次贴上的条带，换肤重贴用
         self._stale_theme = False            # 不可见期换肤未贴上，showEvent 补
         self._applied_w = -1                 # 最近一次贴图用的宽度上限
@@ -103,7 +104,16 @@ class PreviewBar(CaptionLabel):
             return
         self._inflight = True
         self._worker.result.connect(self._on_result)
-        self._worker.submit(self._tag, _render_job, self._entity, self._text)
+        self._job = self._worker.submit(self._tag, _render_job,
+                                        self._entity, self._text)
+
+    def cancel(self):
+        """行滚出物化窗口/列表重建时调用：未开始的渲染任务从队列除名，
+        不占工作者串行时段（否则新视口的预览排在几百个过期任务后）。
+        已开始的不可中断，结果回传时控件多半已销毁、连接自动断开。"""
+        if self._job is not None:
+            self._job.cancelled = True
+        self._inflight = False
 
     def _on_result(self, tag, payload):
         if tag != self._tag:

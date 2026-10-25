@@ -123,6 +123,44 @@ def test_worker_init_failure_is_observable(qapp, tmp_path, monkeypatch):
         assert w.wait(2000)                                    # 线程正常退出
 
 
+def test_worker_skips_cancelled_jobs(qapp, tmp_path, monkeypatch):
+    # 取消句柄：已置 cancelled 的任务弹出即跳过，不执行不回传——
+    # 预览列表快速滚动靠这个把过期渲染从串行队列里除名
+    import threading
+    import time
+
+    from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.workers import CoreWorker
+
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    s = Settings(tmp_path / "s.json")
+    w = CoreWorker(s)
+    results = []
+    w.result.connect(lambda tag, p: results.append(tag))
+    w.start()
+    started, release = threading.Event(), threading.Event()
+
+    def blocker(ctx):
+        started.set()
+        release.wait(5)
+        return "b"
+
+    try:
+        w.submit("b", blocker)
+        assert started.wait(5)              # 阻塞住工作者，钉死取消时机
+        j = w.submit("c", lambda ctx: "c")
+        j.cancelled = True                  # 此刻 b 未完，c 必然未出队
+        release.set()
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and "b" not in results:
+            qapp.processEvents()
+            time.sleep(0.01)
+        assert results == ["b"]             # c 已取消：不执行不回传
+    finally:
+        w.shutdown()
+        assert w.wait(2000)
+
+
 def _update_dirs_job(ctx, dirs):
     from ass_font_substitute.gui.jobs import update_dir
     for d in dirs:

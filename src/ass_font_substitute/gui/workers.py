@@ -10,10 +10,22 @@ from PySide6.QtCore import Signal
 from ass_font_substitute.gui.settings_store import Settings
 
 
+class JobHandle:
+    """submit 的取消句柄：置 cancelled 后任务仍在队列里，worker 弹出时
+    跳过不执行。用于预览渲染这类「过期即废物」的任务——字体列表快速
+    滚动会积压大量已滚出视野的渲染，不取消则可见行排在几百个废任务后。"""
+
+    __slots__ = ("cancelled",)
+
+    def __init__(self):
+        self.cancelled = False
+
+
 class CoreWorker(QThread):
     """串行核心工作者：独占 Cache/LibraryIndex（core Cache 单连接线程约束）。
-    submit(tag, fn, *args, **kw) 入队；fn(ctx, *args, **kw) 的返回值经
-    result 信号回 UI 线程，异常经 failed 信号。任务严格按提交顺序执行。"""
+    submit(tag, fn, *args, **kw) 入队并返回 JobHandle；fn(ctx, *args, **kw)
+    的返回值经 result 信号回 UI 线程，异常经 failed 信号。任务按提交顺序
+    执行，已取消的弹出即跳过（开始执行后不可中断）。"""
 
     result = Signal(object, object)   # (tag, payload)
     failed = Signal(object, str)      # (tag, "ExcType: msg")
@@ -39,14 +51,18 @@ class CoreWorker(QThread):
             item = self._q.get()
             if item is None:
                 break
-            tag, fn, args, kw = item
+            handle, tag, fn, args, kw = item
+            if handle.cancelled:
+                continue
             try:
                 self.result.emit(tag, fn(ctx, *args, **kw))
             except Exception as e:
                 self.failed.emit(tag, f"{type(e).__name__}: {e}")
 
-    def submit(self, tag, fn, *args, **kw):
-        self._q.put((tag, fn, args, kw))
+    def submit(self, tag, fn, *args, **kw) -> JobHandle:
+        handle = JobHandle()
+        self._q.put((handle, tag, fn, args, kw))
+        return handle
 
     def shutdown(self):
         self._stop = True
