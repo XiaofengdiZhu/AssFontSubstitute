@@ -26,6 +26,9 @@ def test_main_window_boots(qapp, tmp_path, monkeypatch):
     assert w.browse_page.objectName() == "browsePage"
     assert w.subs_page.objectName() == "subsPage"
     assert w.settings_page.objectName() == "settingsPage"
+    # 最小窗口盖住最宽页硬约束（库页 823 + 导航 48 + 余量）
+    assert w.minimumWidth() == 900
+    assert w.minimumHeight() == 620
     w.close()
 
 

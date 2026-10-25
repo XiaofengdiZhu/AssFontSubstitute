@@ -149,6 +149,11 @@ class AFSWindow(FluentWindow):
         self._sys_theme_timer.start()
         self.setWindowTitle("Ass 字体替补")
         self.resize(1100, 750)
+        # 最小窗口按布局硬约束定（175% DPI 实测各页 layout 最小宽：库页
+        # 823=统计卡横排+目录行左块定宽、字幕页 767、预览页 417，均含页
+        # 边距；四页纵向皆可滚，高度不算硬约束）——最宽页 + 左侧导航 48
+        # + 窗框余量；高度给标题条 + 统计卡 + 一行目录的可用下限
+        self.setMinimumSize(900, 620)
 
     # ---- 主题与窗口材质（设置页「常规」组驱动）----
     def _on_setting_changed(self, key: str, value):
