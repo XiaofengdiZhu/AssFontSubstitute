@@ -35,7 +35,8 @@ def parse_version(s: str | None) -> tuple[int, ...] | None:
 def _load_fonts(path: Path) -> list[TTFont]:
     try:
         if path.suffix.lower() in TTC_EXTS:
-            return list(TTCollection(str(path)).fonts)
+            # lazy=True：各 face 只在取 name/OS/2/cmap 时定点读表
+            return list(TTCollection(str(path), lazy=True).fonts)
         return [TTFont(str(path), lazy=True)]
     except Exception as e:  # fontTools 各类异常统一包装
         raise FontParseError(f"{path.name}: {e}") from e

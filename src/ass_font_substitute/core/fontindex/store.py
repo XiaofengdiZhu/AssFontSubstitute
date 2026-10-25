@@ -74,6 +74,10 @@ class UpdateResult:
 def _connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=5)
     conn.execute("PRAGMA journal_mode=WAL")
+    # NORMAL（WAL 安全默认，Cache 层同款）：进程崩溃不丢已提交事务，
+    # 掉电最多丢最近几秒；逐文件事务的 COMMIT 免每次 fsync——17k 文件
+    # 首建省 17k 次 fsync 等待。取消/续跑语义不变（增量门照常续传）。
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.executescript(DDL)
     return conn
@@ -102,9 +106,22 @@ def open_db(path: Path) -> sqlite3.Connection:
 
 
 def scan_dir(root: Path) -> list[Path]:
-    return sorted(p for p in root.rglob("*")
-                  if p.is_file() and p.suffix.lower() in WHITELIST
-                  and p.name != DB_NAME)
+    # os.scandir 递归替代 rglob：Windows 上 DirEntry 的 is_dir/is_file
+    # 直接用目录枚举附带信息，零额外 stat（Path.is_file() 每次真 stat）；
+    # follow_symlinks=False 与 rglob 的「不跟随目录符号链接」语义一致
+    out: list[Path] = []
+    stack = [root]
+    while stack:
+        d = stack.pop()
+        with os.scandir(d) as it:
+            for e in it:
+                if e.is_dir(follow_symlinks=False):
+                    stack.append(Path(e.path))
+                elif (e.is_file(follow_symlinks=False)
+                      and Path(e.path).suffix.lower() in WHITELIST
+                      and e.name != DB_NAME):
+                    out.append(Path(e.path))
+    return sorted(out)
 
 
 def update_index(dir_path: Path, conn: sqlite3.Connection,

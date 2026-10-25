@@ -13,6 +13,15 @@ def _mklib(d, n=2):
         build_font(d / f"f{i}.ttf", chars="永中木", family=f"X體{i}")
 
 
+def test_connect_wal_synchronous_normal(tmp_path):
+    # WAL + synchronous=NORMAL：逐文件事务 COMMIT 免每次 fsync；
+    # synchronous 非持久是连接级参数，经 open_db 的每个连接都必须带上
+    conn = open_db(tmp_path / "fontindex.db")
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1   # NORMAL
+    conn.close()
+
+
 def test_incremental(tmp_path):
     d = tmp_path / "fonts"
     d.mkdir()
