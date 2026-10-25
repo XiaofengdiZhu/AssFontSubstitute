@@ -198,6 +198,82 @@ def test_index_worker_cancel_dir(qapp, tmp_path, monkeypatch):
     assert ("J:/a", False) in done          # a 照常完成
 
 
+def test_window_geometry_restore(qapp, tmp_path, monkeypatch):
+    # 位置/大小记忆：屏内存档按档恢复；屏外存档弃用回默认；max 标记
+    # 独立恢复；关闭时把当前几何落盘
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QGuiApplication
+
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    avail = QGuiApplication.primaryScreen().availableGeometry()
+    gw = min(1000, avail.width() - 40)
+    gh = min(700, avail.height() - 40)
+
+    s = Settings(tmp_path / "s1.json")
+    s.set("win_geometry", {"x": avail.x() + 8, "y": avail.y() + 8,
+                           "w": gw, "h": gh, "max": False})
+    w = AFSWindow(s)
+    # 位置契约：屏内存档原位；放不下右/下缘时钳回。实现先钳尺寸再定位
+    # （Qt 最小宽强制发生在 setGeometry），期望按钳后宽算（offscreen 屏
+    # 800 宽小于窗口 900 最小宽，必钳到 0——真机屏宽足够则原位）
+    cw = min(w.width(), avail.width())
+    ch = min(w.height(), avail.height())
+    ex = min(avail.x() + 8, avail.right() - cw + 1)
+    ey = min(avail.y() + 8, avail.bottom() - ch + 1)
+    assert (w.geometry().x(), w.geometry().y()) == (ex, ey)
+    # 尺寸钳制链：不小于窗口最小值、不大于可用区；屏比最小值还小时
+    # setGeometry 由 Qt 强制回最小值（offscreen 屏 800 宽 < 900 即此况）
+    want = (QSize(gw, gh).expandedTo(QSize(900, 620))
+            .boundedTo(avail.size()).expandedTo(QSize(900, 620)))
+    assert (w.width(), w.height()) == (want.width(), want.height())
+    w.close()
+
+    s2 = Settings(tmp_path / "s2.json")
+    s2.set("win_geometry", {"x": avail.x() + 99999, "y": avail.y(),
+                            "w": gw, "h": gh, "max": False})
+    w2 = AFSWindow(s2)
+    # 屏外弃用→默认尺寸+主屏居中（窗口比屏大时偏移取 0 不出屏）；
+    # 居中只在真实窗口系统生效（offscreen 下 ctor 重定位毒化渲染），
+    # pos() 是含框位置（geometry() 是客户区，差帧边距）
+    assert w2.width() == 1100
+    if QGuiApplication.platformName() != "offscreen":
+        assert (w2.pos().x(), w2.pos().y()) == (
+            avail.x() + max(0, (avail.width() - 1100) // 2),
+            avail.y() + max(0, (avail.height() - 750) // 2))
+    w2.close()
+
+    # 部分越界（右缘拖出一半，交集仍够一块标题条）：整窗钳回交集最大的屏
+    s2b = Settings(tmp_path / "s2b.json")
+    s2b.set("win_geometry", {"x": avail.right() - 300, "y": avail.y() + 8,
+                             "w": gw, "h": gh, "max": False})
+    w2b = AFSWindow(s2b)
+    assert w2b.geometry().x() == avail.left()
+    w2b.close()
+
+    s3 = Settings(tmp_path / "s3.json")
+    s3.set("win_geometry", {"x": avail.x() + 8, "y": avail.y() + 8,
+                            "w": gw, "h": gh, "max": True})
+    w3 = AFSWindow(s3)
+    # 真实平台 ctor 期直接置最大化态；offscreen 隐藏窗口 setWindowState
+    # 走 qframelesswindow 的 win32 假句柄通路会炸，只挂标记供此处断言
+    assert w3.isMaximized() or w3._pending_maximized
+    w3.close()
+
+    s4 = Settings(tmp_path / "s4.json")
+    w4 = AFSWindow(s4)
+    w4.show()
+    qapp.processEvents()
+    g4 = w4.geometry()
+    w4.close()
+    saved = Settings(tmp_path / "s4.json").get("win_geometry")
+    assert (saved["x"], saved["y"], saved["w"], saved["h"]) == (
+        g4.x(), g4.y(), g4.width(), g4.height())
+    assert saved["max"] is False
+
+
 def test_dir_row_no_top_level_flash(qapp, tmp_path, monkeypatch):
     # 回归：重排行时「新增/修改」提示曾先 setVisible(True) 后入父——
     # 无父 setVisible 即顶层窗口上屏（取消更新后行回 stale 重排时
@@ -523,6 +599,9 @@ def test_dark_theme_pages_are_dark(qapp, tmp_path, monkeypatch):
     s.set("bg_effect", "none")
     try:
         w = AFSWindow(s)
+        # switchTo 的滑入动画 250ms，processEvents 等不走完，render 会
+        # 抓到中间帧的未画区白块（挂哪个页随机）——测试直切
+        w.stackedWidget.setAnimationEnabled(False)
         w.resize(1100, 750)
         w.show()
         qapp.processEvents()
@@ -534,7 +613,16 @@ def test_dark_theme_pages_are_dark(qapp, tmp_path, monkeypatch):
             img.fill(0)
             w.render(img)
             r, g, b, _a = img.pixelColor(600, 500).getRgb()
-            assert (r + g + b) / 3 < 80, f"{name} 底色未随深色主题变暗"
+            from PySide6.QtCore import QPoint as _QP
+            _pg = getattr(w, name)
+            _wd = _pg.childAt(_pg.mapFrom(w, _QP(600, 500)))
+            _ch = []
+            while _wd is not None and len(_ch) < 8:
+                _ch.append(f"{type(_wd).__name__}"
+                           f"({_wd.x()},{_wd.y()} {_wd.width()}x{_wd.height()})")
+                _wd = _wd.parentWidget()
+            assert (r + g + b) / 3 < 80, \
+                f"{name} 底色未随深色主题变暗 pixel={(r, g, b)} pos={w.pos()} chain={' <- '.join(_ch)}"
     finally:
         setTheme(Theme.AUTO)                      # 还原全局主题
         w.close()

@@ -89,6 +89,33 @@ def test_atomic_write_no_tmp_leftover(tmp_path):
     assert not (tmp_path / "s.json.tmp").exists()
 
 
+def test_win_geometry_roundtrip_and_validation(tmp_path):
+    # None=没记过；合法存档 {x,y,w,h:int, max:bool} 落盘回读；
+    # 坏形状 set 即拒；存量坏形状 reload 过滤回默认并净化重写
+    f = tmp_path / "s.json"
+    s = Settings(f)
+    assert s.get("win_geometry") is None
+
+    g = {"x": -8, "y": 0, "w": 1100, "h": 750, "max": False}   # 负坐标合法（副屏）
+    s.set("win_geometry", g)
+    assert Settings(f).get("win_geometry") == g
+
+    for bad in ({"x": 1, "y": 2, "w": 3},                     # 缺键
+                {"x": 1, "y": 2, "w": 3, "h": 4, "max": 1},   # max 非 bool
+                {"x": 1.5, "y": 2, "w": 3, "h": 4, "max": True},
+                {"x": 1 << 31, "y": 0, "w": 3, "h": 4, "max": True},  # 超 QRect 域
+                "0,0,100x100"):
+        with pytest.raises(ValueError):
+            s.set("win_geometry", bad)
+
+    f.write_text(json.dumps({"win_geometry": {"x": 0, "y": "a",
+                                              "w": 100, "h": 100,
+                                              "max": True}}), "utf-8")
+    s2 = Settings(f)
+    assert s2.get("win_geometry") is None
+    assert json.loads(f.read_text("utf-8"))["win_geometry"] is None   # 净化重写
+
+
 def test_last_dir_scoped_roundtrip_and_independence(tmp_path, monkeypatch, qapp):
     pytest.importorskip("PySide6")
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

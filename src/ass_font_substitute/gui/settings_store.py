@@ -38,6 +38,7 @@ DEFAULTS: dict = {
     "theme": "auto",                               # auto/light/dark
     "theme_color": "",                             # 强调色 #rrggbb；空=跟随系统
     "bg_effect": "mica",                           # 窗口材质；Win10 下 Mica 类自动退化为实色
+    "win_geometry": None,                          # 上次关闭窗口 {x,y,w,h:int, max:bool}；None=没记过
 }
 
 _BOOL_KEYS = {"overwrite_default"}
@@ -53,6 +54,19 @@ _ENUM_KEYS = {
 _SUFFIX_RE = re.compile(r"^\..+$")
 # 强调色：空串=跟随系统；非空必须 #rrggbb（ColorDialog c.name() 出货格式）
 _THEME_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _is_win_geometry(v) -> bool:
+    """win_geometry 存档形状：None 或 {x,y,w,h:int, max:bool}。整数限
+    ±2^31：JSON 任意精度整数越界会让 QRect 构造抛 OverflowError，ctor
+    崩=每次启动都崩（违背「损坏绝不崩 GUI」），界内荒谬值由恢复分支
+    钳制/弃用兜底。"""
+    return v is None or (
+        isinstance(v, dict)
+        and isinstance(v.get("max"), bool)
+        and all(isinstance(v.get(f), int) and not isinstance(v.get(f), bool)
+                and -(1 << 31) < v.get(f) < (1 << 31)
+                for f in ("x", "y", "w", "h")))
 
 
 class Settings(QObject):
@@ -115,6 +129,8 @@ class Settings(QObject):
                         and all(isinstance(kk, str) and isinstance(vv, str)
                                 for kk, vv in v.items()):
                     self._data[k] = dict(v)        # 深一层不做路径校验，种子时兜底
+                elif k == "win_geometry" and _is_win_geometry(v):
+                    self._data[k] = v
                 else:
                     dirty = True                # 未知键或类型不符
             if dirty:
@@ -136,6 +152,9 @@ class Settings(QObject):
             raise ValueError(f"{key} 必须是有限数值")
         if key in _ENUM_KEYS and value not in _ENUM_KEYS[key]:
             raise ValueError(f"{key} 必须是 {'/'.join(sorted(_ENUM_KEYS[key]))} 之一")
+        if key == "win_geometry" and not _is_win_geometry(value):
+            raise ValueError("win_geometry 必须是 None 或 "
+                             "{x,y,w,h:int, max:bool} 字典")
         with self._lock:
             old = self._data.get(key)
             self._data[key] = value

@@ -4,11 +4,15 @@ import logging
 import sys
 
 import darkdetect
+from PySide6.QtCore import QEvent
+from PySide6.QtCore import QRect
+from PySide6.QtCore import QSize
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtCore import qInstallMessageHandler
 from PySide6.QtGui import QColor
 from PySide6.QtGui import QFont
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import BodyLabel
@@ -56,6 +60,10 @@ def _forward_qt_messages(_type, ctx, message: str) -> None:
 # 设置页 theme 值 → qfw Theme
 _THEME_OF = {"auto": Theme.AUTO, "light": Theme.LIGHT, "dark": Theme.DARK}
 
+# 出厂窗口尺寸（无存档/存档弃用时的启动大小，主屏居中）。居中须显式传
+# 尺寸：ctor 里布局尚未稳定，窗口 width() 是中间值不是 resize 的目标值
+_DEFAULT_SIZE = (1100, 750)
+
 # 强调色「跟随系统」的兜底：qfw 出厂主题色（getSystemAccentColor 失败/非
 # win/mac 平台时用）；save=False 一律不落 qconfig 自己的 config.json
 _DEFAULT_THEME_COLOR = QColor("#009faa")
@@ -81,9 +89,37 @@ class _Splash(SplashScreen):
 
     def __init__(self, parent):
         super().__init__(QIcon(), parent)
+        # qfw TitleBar 只靠 window 的 WindowStateChange 事件切换最大化/
+        # 还原图标，初值恒「最大化」——本画面创建晚于 ctor 期最大化，
+        # 错过事件，须手动同步初值（最大化重启时按钮才不显错图标）
+        self.titleBar.maxBtn.setMaxState(self.window().isMaximized())
         self.ring = IndeterminateProgressRing(self)
         self.ring.setFixedSize(28, 28)
         self.tip = BodyLabel("正在加载字体库…", self)
+        # qfw 靠父对象事件过滤器跟随窗口尺寸，实测 show 期最大化那记
+        # resize 不经 Qt 事件系统（独立过滤器同样收不到），轮询兜底；
+        # 存续期仅启动数秒，50ms 开销可忽略，hide 即停
+        self._poll = QTimer(self)
+        self._poll.setInterval(50)
+        self._poll.timeout.connect(self._follow_parent)
+        self._poll.start()
+
+    def _follow_parent(self):
+        p = self.parentWidget()
+        if p is not None:
+            self.resize(p.size())
+
+    def eventFilter(self, obj, e):
+        # qfw 过滤器逐笔记父 Resize 同步自身尺寸：show 期 native 最大化的
+        # 中间尺寸序列（1100→654×517→终值）会把预给满的 splash 缩回中间
+        # 值，首帧只盖一角。尺寸跟随全权交轮询，这里只保留新兄弟置顶
+        if obj is self.parent() and e.type() == QEvent.ChildAdded:
+            self.raise_()
+        return False
+
+    def hideEvent(self, e):
+        self._poll.stop()
+        super().hideEvent(e)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -148,12 +184,14 @@ class AFSWindow(FluentWindow):
         self._sys_theme_timer.timeout.connect(self._poll_system_theme)
         self._sys_theme_timer.start()
         self.setWindowTitle("Ass 字体替补")
-        self.resize(1100, 750)
+        self.resize(*_DEFAULT_SIZE)
         # 最小窗口按布局硬约束定（175% DPI 实测各页 layout 最小宽：库页
         # 823=统计卡横排+目录行左块定宽、字幕页 767、预览页 417，均含页
         # 边距；四页纵向皆可滚，高度不算硬约束）——最宽页 + 左侧导航 48
         # + 窗框余量；高度给标题条 + 统计卡 + 一行目录的可用下限
         self.setMinimumSize(900, 620)
+        self._pending_maximized = False
+        self._restore_geometry()
 
     # ---- 主题与窗口材质（设置页「常规」组驱动）----
     def _on_setting_changed(self, key: str, value):
@@ -226,10 +264,102 @@ class AFSWindow(FluentWindow):
             self._apply_theme_color("")
 
     def closeEvent(self, e):
+        self._save_geometry()
         self.library_page.shutdown()        # 先汇合在途索引线程（写库中不能退）
         self.worker.shutdown()
         self.worker.wait(10000)
         super().closeEvent(e)
+
+    # ---- 窗口位置/大小记忆 ----
+
+    def _save_geometry(self):
+        """关闭时记位置/大小进设置。最大化时取 normalGeometry（还原态
+        矩形）+ max 标记，恢复时先复位矩形再套最大化。未上屏不记
+        （offscreen 测试里 geometry 是无意义初值）。"""
+        if not self.isVisible():
+            return
+        r = self.normalGeometry()
+        self.settings.set("win_geometry", {
+            "x": r.x(), "y": r.y(), "w": r.width(), "h": r.height(),
+            "max": self.isMaximized(),
+        })
+
+    def _center_on_screen(self, w: int, h: int):
+        """出厂位：主屏可用区居中（Qt 默认落左上角）。窗口比屏大时偏移
+        取 0（贴左上），超屏部分向右/下探出——小屏下物理上不可避免。"""
+        scr = QGuiApplication.primaryScreen().availableGeometry()
+        self.setGeometry(scr.x() + max(0, (scr.width() - w) // 2),
+                         scr.y() + max(0, (scr.height() - h) // 2), w, h)
+
+    def _restore_geometry(self):
+        """启动恢复上次关闭的位置/大小；无存档或存档弃用时主屏居中。
+        屏幕会变（拔显示器/改分辨率/换机）：包围盒内且至少与一块屏有
+        标题条交集的存档照原样恢复（跨双屏的正常布局不动）；越界的整窗
+        钳进交集最大的那块屏（按包围盒钳会落进拼屏间的死角）；与所有
+        屏幕交集不足一块标题条（200x100）的视为屏外存档，弃用回默认。
+        最大化标记独立于矩形有效性：最大化必落在某屏内，永远可恢复。"""
+        g = self.settings.get("win_geometry")
+        if not g:
+            # 居中只在真实窗口系统做：offscreen（测试）下 ctor 期重定位
+            # 会毒化后续页面刷新（深色页渲染竞态出白块），跳过
+            if QGuiApplication.platformName() != "offscreen":
+                self._center_on_screen(*_DEFAULT_SIZE)
+            return
+        screens = QGuiApplication.screens()
+        avail = screens[0].availableGeometry()
+        for sc in screens[1:]:
+            avail = avail.united(sc.availableGeometry())
+        rect = QRect(g["x"], g["y"], g["w"], g["h"])
+        rect.setSize(rect.size().expandedTo(
+            QSize(self.minimumWidth(), self.minimumHeight())))
+
+        def titlebar_on(geo) -> bool:
+            inter = rect.intersected(geo)
+            return inter.width() >= 200 and inter.height() >= 100
+
+        # 包围盒 contain 只是粗滤：混合分辨率/转向的拼屏存在包围盒内
+        # 死角，还要与至少一块屏有标题条交集才可原样恢复，否则窗口会
+        # 恢复成看不见也拖不着
+        if avail.contains(rect) and any(
+                titlebar_on(sc.availableGeometry()) for sc in screens):
+            self.setGeometry(rect)
+            if g["max"]:
+                self._restore_maximized()
+            return
+        # 越界：找交集最大的屏幕整窗钳入；交集不足一块标题条（200x100）
+        # = 屏外存档弃用
+        best = None
+        best_area = 0
+        for sc in screens:
+            inter = rect.intersected(sc.availableGeometry())
+            area = inter.width() * inter.height()
+            if area > best_area:
+                best, best_area = sc.availableGeometry(), area
+        if best is None or not titlebar_on(best):
+            if g["max"]:
+                self._restore_maximized()
+            if QGuiApplication.platformName() != "offscreen":
+                self._center_on_screen(*_DEFAULT_SIZE)
+            return
+        rect.setWidth(min(rect.width(), best.width()))
+        rect.setHeight(min(rect.height(), best.height()))
+        rect.moveLeft(min(max(rect.left(), best.left()),
+                          best.right() - rect.width() + 1))
+        rect.moveTop(min(max(rect.top(), best.top()),
+                         best.bottom() - rect.height() + 1))
+        self.setGeometry(rect)
+        if g["max"]:
+            self._restore_maximized()
+
+    def _restore_maximized(self):
+        """最大化恢复：真实平台 ctor 直接置状态——show 首帧即最大化，免
+        「先还原矩形再最大化」的中间帧与启动画面尺寸竞态。offscreen 隐藏
+        窗口 setWindowState 走 qframelesswindow 的 win32 假句柄通路会炸
+        （GetWindowPlacement 无效句柄），改挂标记供测试断言。"""
+        if QGuiApplication.platformName() == "offscreen":
+            self._pending_maximized = True
+        else:
+            self.setWindowState(Qt.WindowState.WindowMaximized)
 
 
 def main() -> int:
@@ -260,13 +390,22 @@ def main() -> int:
     w = AFSWindow()
     # 启动画面：库加载（开库 + 逐目录探测，大库数秒）期间盖住窗口，
     # loadCompleted（首个 lib 结果/失败）收幕；30s 兜底防卡死盖板。
-    # 无目录没有可等的加载，直接进主界面
+    # 无目录没有可等的加载，直接进主界面。
+    # splash 须在 w.show() 之前建好、给足首尺寸并 show：最大化存档下
+    # 窗口曝光即伴随同步绘制，子控件此时仍隐藏就不参与首帧（裸 UI 先
+    # 出、盖板迟到）；且最大化时窗口尺寸还是还原矩形，首尺寸按目标屏
+    # 可用区给满（后续由 _Splash 轮询校正），首帧即全窗盖板
     if w.settings.get("font_dirs"):
         splash = _Splash(w)
-        splash.resize(w.size())
+        if w.isMaximized():
+            scr = (QGuiApplication.screenAt(w.normalGeometry().center())
+                   or QGuiApplication.primaryScreen())
+            splash.resize(scr.availableGeometry().size())
+        else:
+            splash.resize(w.size())
+        splash.show()
         w.show()
         splash.raise_()
-        splash.show()
         w.library_page.loadCompleted.connect(splash.finish)
         QTimer.singleShot(30_000, splash.finish)
     else:

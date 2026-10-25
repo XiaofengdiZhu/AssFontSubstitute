@@ -158,6 +158,7 @@ def test_dialog_buttons_tuned_on_show(qapp, tmp_path):
 
     from ass_font_substitute.gui.widgets.dialog_ani import _tune_dialog_buttons
 
+    host = None
     try:
         setThemeColor("#f2f2f2", save=False)
         host = QWidget()
@@ -168,4 +169,5 @@ def test_dialog_buttons_tuned_on_show(qapp, tmp_path):
         assert _custom_qss(box.cancelButton) == ""            # cancel 普通按钮不动
     finally:
         setThemeColor("#009faa", save=False)
-        host.deleteLater()
+        if host is not None:
+            host.deleteLater()
