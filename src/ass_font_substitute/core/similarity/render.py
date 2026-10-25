@@ -94,3 +94,84 @@ def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
                 continue
             tiles[ch] = _fit(arr)
         return RenderBundle(tiles, median, frozenset(tiles))
+
+
+STRIP_PX = 72          # 预览条带渲染尺寸：显示高 28 逻辑 px 的 ~2.5x 超采样
+_SPACE_ADV = 0.28      # cmap 无空格字形时的空白 advance 占 px 比例（兜底）
+
+
+def _baseline_metrics(metrics, px: int) -> tuple[int, int]:
+    """ascender/descender（26.6 定点 → px）。度量异常（怪字体 asc+desc 近 0）
+    兜底成 px/px÷4，保证条带有可用行高。"""
+    asc = max(1, round(metrics.ascender / 64))
+    desc = max(1, round(-metrics.descender / 64))
+    if asc + desc < px // 2:
+        return px, px // 4
+    return asc, desc
+
+
+def _strip_extent(slots: list, adv_right: float, pad: int) -> tuple[int, int]:
+    """画布横向范围 [left, right)。含超挂（overhang）：斜体 f/j 墨迹可超出
+    advance 远超 pad（实测 +14px）、首字可负 lsb——按实际墨迹范围开画布，
+    纯 advance 定宽会裁掉末字右缘/首字左缘。"""
+    left = min([0] + [gx for _, gx, _ in slots])
+    right = max([round(adv_right) + pad]
+                + [gx + arr.shape[1] + pad for arr, gx, _ in slots])
+    return left, right
+
+
+def render_text_strip(path: Path, face_index: int, text: str,
+                      px: int = STRIP_PX) -> np.ndarray | None:
+    """预览条带：真实排版渲染（统一 px 尺寸 + baseline + 字符 advance），
+    字形比例与字距保真——区别于相似度管线 render_bundle 的等高归一 tile
+    （那套为比对设计，逐字裁缩到 48px，放大即糊）。
+
+    缺字跳过（不前进），空白（含 U+3000/NBSP）cmap 有映射走真实 advance、
+    无映射按比例兜底；全缺字返回 None。重复字符各自渲染归位（RenderBundle
+    的 dict 会去重，预览不能丢字）。单个坏字形跳过不毁整条。
+    以文件对象打开，理由同 render_bundle。
+    """
+    with open(path, "rb") as fh:
+        face = freetype.Face(fh, face_index)
+        face.set_pixel_sizes(0, px)
+        asc, desc = _baseline_metrics(face.size, px)
+        pad = 4
+        h = asc + desc + pad * 2
+        slots: list[tuple[np.ndarray, int, int]] = []
+        x = float(pad)
+        for ch in text:
+            if face.get_char_index(ord(ch)) == 0:
+                # 缺字跳过不前进；cmap 也没有的空白字符按比例兜底出词距
+                if ch.isspace():
+                    x += px * _SPACE_ADV
+                continue
+            try:
+                face.load_char(ch, freetype.FT_LOAD_RENDER
+                               | freetype.FT_LOAD_TARGET_NORMAL)
+            except Exception:
+                continue                      # 坏字形：跳过不前进，不毁整条
+            g = face.glyph
+            if g.bitmap.width and g.bitmap.rows:
+                arr = np.frombuffer(bytes(g.bitmap.buffer), dtype=np.uint8)
+                arr = arr.reshape(g.bitmap.rows, g.bitmap.width)
+                slots.append((arr, round(x) + g.bitmap_left,
+                              pad + asc - g.bitmap_top))
+            x += g.advance.x / 64
+        if not slots:
+            return None
+        left, right = _strip_extent(slots, x, pad)
+        canvas = np.zeros((h, right - left), dtype=np.uint8)
+        for arr, gx, gy in slots:             # 超界裁边 + maximum 防叠字互抹
+            gx -= left
+            y0, x0 = max(0, gy), max(0, gx)
+            y1 = min(h, gy + arr.shape[0])
+            x1 = min(canvas.shape[1], gx + arr.shape[1])
+            if y0 < y1 and x0 < x1:
+                region = canvas[y0:y1, x0:x1]
+                np.maximum(region, arr[y0 - gy:y1 - gy, x0 - gx:x1 - gx],
+                           out=region)
+        # 裁上下空白到墨迹 bbox（留 2px 余量）：显示按条高缩放，不裁则
+        # ascender/descender 空白让字形显示偏小；条内相对比例不受影响
+        rows = np.where(canvas.any(axis=1))[0]
+        canvas = canvas[max(0, rows[0] - 2):rows[-1] + 3, :]
+        return canvas

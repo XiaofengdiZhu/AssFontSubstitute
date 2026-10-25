@@ -48,3 +48,63 @@ def test_fit_wide_glyph_no_overflow():
     assert ys.size > 0                          # 墨迹保留
     assert ys.min() >= 0 and ys.max() < 48      # 墨迹全在 tile 界内
     assert xs.min() >= 0 and xs.max() < 48
+
+
+def test_render_text_strip_basic(tmp_path):
+    from ass_font_substitute.core.similarity.render import render_text_strip
+
+    p = tmp_path / "f.ttf"
+    build_font(p, chars="永中木", family="X體")
+    s1 = render_text_strip(p, 0, "永")
+    assert s1 is not None and s1.ndim == 2 and s1.dtype == np.uint8
+    assert s1.max() > 0                             # 有墨迹
+    s2 = render_text_strip(p, 0, "永中")
+    assert s2.shape[1] > s1.shape[1]                # advance 累加定宽
+
+
+def test_render_text_strip_repeats_not_deduped(tmp_path):
+    # 丢字回归钉：重复字符必须各自渲染归位（RenderBundle 的 dict 去重
+    # 曾让预览丢字，条带管线不允许）。工厂字体 advance = 500/1000×72 =
+    # 36.0px 精确，钉关系式而非魔法阈值
+    from ass_font_substitute.core.similarity.render import render_text_strip
+
+    p = tmp_path / "f.ttf"
+    build_font(p, chars="永", family="X體")
+    one = render_text_strip(p, 0, "永")
+    two = render_text_strip(p, 0, "永永")
+    # 每多一个字符宽一块 advance：two-one ≈ one-左右留白(2×pad)
+    assert abs((two.shape[1] - one.shape[1]) - (one.shape[1] - 8)) <= 1
+
+
+def test_strip_helpers():
+    # 画布超挂范围与度量兜底（纯函数，不依赖字体文件）
+    from types import SimpleNamespace
+
+    from ass_font_substitute.core.similarity.render import _baseline_metrics
+    from ass_font_substitute.core.similarity.render import _strip_extent
+
+    arr = np.zeros((10, 3), np.uint8)
+    # 首字负 lsb（bitmap_left=-5）+ 末字墨迹超 advance 右缘
+    slots = [(arr, -5, 0), (arr, 40, 0)]
+    left, right = _strip_extent(slots, adv_right=20, pad=4)
+    assert left == -5
+    assert right == 40 + 3 + 4                      # 末字超挂 + pad，非 24
+    # 度量正常：26.6 定点换算
+    assert _baseline_metrics(SimpleNamespace(ascender=77 * 64,
+                                             descender=-18 * 64), 72) == (77, 18)
+    # 度量异常兜底
+    assert _baseline_metrics(SimpleNamespace(ascender=0, descender=0), 72) == (72, 18)
+
+
+def test_render_text_strip_space_and_missing(tmp_path):
+    from ass_font_substitute.core.similarity.render import render_text_strip
+
+    p = tmp_path / "f.ttf"
+    build_font(p, chars="永中", family="X體")
+    with_space = render_text_strip(p, 0, "永 中")
+    no_space = render_text_strip(p, 0, "永中")
+    assert with_space.shape[1] > no_space.shape[1]  # 空格出词距
+    ideographic = render_text_strip(p, 0, "永　中")
+    assert ideographic.shape[1] > no_space.shape[1]  # U+3000 同样出词距
+    assert render_text_strip(p, 0, "XYZ") is None   # 全缺字
+    assert render_text_strip(p, 0, "永X中") is not None   # 缺字跳过不炸

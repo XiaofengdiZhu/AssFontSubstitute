@@ -125,3 +125,43 @@ def test_stats_counts_files(tmp_path):
     st = lib.stats()
     assert st["files"] == 3                        # 文件总数（跨目录）
     assert st["fonts"] == 3
+
+
+def test_display_name_prefers_cjk_alias(tmp_path):
+    # 展示名取含 CJK 的别名（微软雅黑 而非排序更前的 Microsoft YaHei）；
+    # 无 CJK 别名退回排序首名
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永", family="微软雅黑",
+               extra_aliases={"en-US": "Microsoft YaHei"})
+    build_font(d / "b.ttf", chars="永", family="Arial")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    ents = LibraryIndex.open([d]).entities()
+    a = next(e for e in ents if "微软雅黑" in e.aliases)
+    assert a.display_name == "微软雅黑"
+    b = next(e for e in ents if "Arial" in e.aliases)
+    assert b.display_name == "Arial"
+
+
+def test_category_recomputed_on_load(tmp_path):
+    # 库列是索引时的分类快照；装载时按现行分类器由别名重算——
+    # 规则改进对存量索引即时生效，免重建
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永", family="微软雅黑")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    conn.execute("UPDATE fonts SET category='未分类'")
+    conn.commit()
+    lib = LibraryIndex.open([d])
+    assert lib.entities()[0].category == "黑"
+
+
+def test_display_name_skips_vertical_and_halfwidth_kana():
+    # @ 前缀是竖排变体别名不作展示名；半角假名也计 CJK
+    from ass_font_substitute.core.fontindex.library import _display_name
+
+    assert _display_name(("@ＭＳ ゴシック", "ＭＳ ゴシック")) == "ＭＳ ゴシック"
+    assert _display_name(("MS Gothic", "ｺﾞｼﾞｯｸ")) == "ｺﾞｼﾞｯｸ"
+    assert _display_name(("Arial",)) == "Arial"

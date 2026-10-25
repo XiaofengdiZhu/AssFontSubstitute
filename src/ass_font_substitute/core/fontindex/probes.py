@@ -29,6 +29,24 @@ CATEGORY_KEYWORDS: list[tuple[str, str]] = [
     ("圆", "圆"),
     ("圓", "圆"),
 ]
+
+# 无中文名的字体（如微软雅黑 UI 的 zh-CN 名就是英文「Microsoft YaHei UI」）
+# 靠罗马化/英文名兜底；token 取品牌专名，casefold 后子串匹配，避免误伤。
+# 匹配序：每个别名先扫 CJK 组再扫 EN 组（别名内 CJK 命中优先）；EN 组在
+# 别名序上位于靠前别名时也会先命中——EN token 均为品牌专名，实测无误配。
+EN_CATEGORY_KEYWORDS: tuple[tuple[str, str], ...] = (
+    ("fangsong", "仿"), ("simfang", "仿"),
+    ("yahei", "黑"), ("simhei", "黑"), ("heiti", "黑"),
+    ("source han sans", "黑"), ("noto sans cjk", "黑"),
+    ("noto sans sc", "黑"), ("noto sans tc", "黑"), ("noto sans hk", "黑"),
+    ("ms gothic", "黑"), ("yu gothic", "黑"), ("meiryo", "黑"),
+    ("simsun", "宋"), ("nsimsun", "宋"), ("songti", "宋"),
+    ("source han serif", "宋"), ("noto serif cjk", "宋"),
+    ("noto serif sc", "宋"), ("noto serif tc", "宋"),
+    ("ms mincho", "宋"), ("yu mincho", "宋"),
+    ("kaiti", "楷"), ("simkai", "楷"),
+    ("yuanti", "圆"),
+)
 THRESHOLD = 0.90
 
 
@@ -46,7 +64,11 @@ def classify_script(cmap: CmapRanges) -> str:
 
 def classify_category(aliases: list[str]) -> str:
     for alias in aliases:
+        folded = alias.casefold()
         for kw, cat in CATEGORY_KEYWORDS:
             if kw in alias:
+                return cat
+        for kw, cat in EN_CATEGORY_KEYWORDS:
+            if kw in folded:
                 return cat
     return "未分类"

@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from ass_font_substitute.core.fontindex.probes import classify_category
 from ass_font_substitute.core.fontindex.store import FP_ALGO
 from ass_font_substitute.core.fontindex.store import fingerprint_of
 from ass_font_substitute.core.fontindex.store import load_font_rows
@@ -14,6 +15,24 @@ from ass_font_substitute.core.models import CmapRanges
 def normalize_name(name: str) -> str:
     """名称规范化：strip 空白 + 剥 @ 前缀 + casefold。"""
     return name.strip().lstrip("@").casefold()
+
+
+def _display_name(aliases: tuple[str, ...]) -> str:
+    """展示名：优先含 CJK 的别名（中文环境可读，如 微软雅黑 优先于
+    Microsoft YaHei），退回排序首名。@ 前缀是竖排变体别名（@MS Gothic），
+    不作展示名。"""
+    for a in aliases:
+        if a.startswith("@"):
+            continue
+        if any("\u3040" <= c <= "\u30ff"      # 假名
+               or "\u3400" <= c <= "\u9fff"   # 汉字
+               or "\uf900" <= c <= "\ufaff"   # 兼容汉字
+               or "\uac00" <= c <= "\ud7af"   # 谚文
+               or "\uff66" <= c <= "\uff9f"   # 半角假名
+               or "\U00020000" <= c <= "\U0002ffff"   # CJK 扩展 B+
+               for c in a):
+            return a
+    return aliases[0]
 
 
 @dataclass(frozen=True)
@@ -93,10 +112,13 @@ class LibraryIndex:
             else:
                 self._skipped.append(f"{self.dirs[item[0]]}/{item[1]}#{item[2]} 旧版本")
         self._files_count = len({(item[0], item[1]) for item in raw})
+        # category 装载时由别名重算而非读库：分类规则改进即时生效，
+        # 存量索引免重建（分类是别名的纯函数，确定性不变）
         self._entities = [
-            FontEntity(fp, aliases[0], aliases, ps, ver, w, wd, it, script, cat,
+            FontEntity(fp, _display_name(aliases), aliases, ps, ver, w, wd, it,
+                       script, classify_category(list(aliases)),
                        cmap, str(self.dirs[di]), rel, fi)
-            for (di, rel, fi, ps, ver, aliases, w, wd, it, script, cat, cmap, fp)
+            for (di, rel, fi, ps, ver, aliases, w, wd, it, script, _cat, cmap, fp)
             in best.values()]
 
     def entities(self) -> list[FontEntity]:

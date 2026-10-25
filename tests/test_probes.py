@@ -41,6 +41,24 @@ def test_category_keywords():
     assert classify_category(["汉仪旗圆", "HYQiYuan"]) == "圆"
 
 
+def test_category_romanized_names():
+    # 无中文名的字体按罗马化/英文名兜底（微软雅黑 UI 的 zh-CN 名就是
+    # 英文「Microsoft YaHei UI」，别名里无「黑」字）；非 CJK 字体不误伤
+    assert classify_category(["Microsoft YaHei UI"]) == "黑"
+    assert classify_category(["SimHei"]) == "黑"
+    assert classify_category(["Noto Sans CJK SC"]) == "黑"
+    assert classify_category(["SimSun"]) == "宋"
+    assert classify_category(["Songti SC"]) == "宋"
+    assert classify_category(["FangSong"]) == "仿"
+    assert classify_category(["Kaiti SC"]) == "楷"
+    assert classify_category(["Yuanti SC"]) == "圆"
+    assert classify_category(["MS Gothic"]) == "黑"
+    assert classify_category(["Yu Gothic UI"]) == "黑"
+    assert classify_category(["Meiryo"]) == "黑"
+    assert classify_category(["MS Mincho"]) == "宋"
+    assert classify_category(["Arial"]) == "未分类"
+
+
 def test_probe_sets_aligned():
     assert len(PROBE_SC) == len(PROBE_TC)
     assert not (PROBE_SC & PROBE_TC)
