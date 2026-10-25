@@ -13,7 +13,7 @@ from ass_font_substitute.core.fontindex.store import open_db
 from ass_font_substitute.core.fontindex.store import scan_dir
 from ass_font_substitute.core.fontindex.store import update_index
 from ass_font_substitute.core.models import FontUsage
-from ass_font_substitute.core.similarity.render import render_bundle
+from ass_font_substitute.core.similarity.render import render_text_strip
 from ass_font_substitute.core.similarity.search import FontSearcher
 
 SEARCH_CHUNK = 8          # pull_chunk 每批候选数（UI 渐进填充节奏）
@@ -215,10 +215,11 @@ def pull_chunk(searcher: FontSearcher, cancel: dict | None = None,
 
 
 def render_preview(entity, text: str):
-    """预览渲染条：不走全局相似度缓存（键按 text_version），GUI 自带
-    （指纹，文字）LRU。缺字跳过，绝不渲染 tofu。"""
-    return render_bundle(Path(entity.dir_path) / entity.rel_path,
-                         entity.face_index, text)
+    """预览渲染条：真实排版高分辨率条带（render_text_strip），不走全局
+    相似度缓存（键按 text_version），GUI 自带（指纹，文字）LRU。缺字
+    跳过，绝不渲染 tofu。"""
+    return render_text_strip(Path(entity.dir_path) / entity.rel_path,
+                             entity.face_index, text)
 
 
 @dataclass

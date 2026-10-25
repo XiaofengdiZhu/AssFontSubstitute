@@ -2,6 +2,7 @@
 from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.core.models import CmapRanges
 from ass_font_substitute.gui.preview_vm import CATEGORY_ORDER
+from ass_font_substitute.gui.preview_vm import TILE_CACHE_MAX
 from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.preview_vm import weight_tag
 
@@ -36,9 +37,22 @@ def test_filter_combinations_and_buckets():
     assert [e.display_name for e in vm.filtered()] == ["A"]
 
 
+def test_filtered_sorts_family_then_weight():
+    # 索引序是目录/文件序，TTC 各 face 交错会把同族各字重打散；
+    # 展示序按 家族名 → 字重 归组
+    vm = PreviewVM()
+    vm.set_entities([_ent("1", "YaHei", weight=700),
+                     _ent("2", "YaHei UI", weight=400),
+                     _ent("3", "YaHei", weight=400),
+                     _ent("4", "YaHei UI", weight=700)])
+    assert [(e.display_name, e.weight) for e in vm.filtered()] == [
+        ("YaHei", 400), ("YaHei", 700),
+        ("YaHei UI", 400), ("YaHei UI", 700)]
+
+
 def test_tile_lru_evicts_oldest():
     vm = PreviewVM()
-    for i in range(2000):
+    for i in range(TILE_CACHE_MAX):
         vm.put_tiles((str(i), "t"), i)
     # 不可先 get_tiles(("0", "t"))：get 会刷新 LRU 新旧度（见
     # test_get_tiles_touches_recency），"0" 被置顶后淘汰的将是 "1" 而非 "0"
@@ -49,7 +63,7 @@ def test_tile_lru_evicts_oldest():
 
 def test_get_tiles_touches_recency():
     vm = PreviewVM()
-    for i in range(2000):
+    for i in range(TILE_CACHE_MAX):
         vm.put_tiles((str(i), "t"), i)
     vm.get_tiles(("0", "t"))                           # 置顶
     vm.put_tiles(("new", "t"), "x")

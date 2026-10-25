@@ -6,7 +6,8 @@ from ass_font_substitute.core.fontindex.library import FontEntity
 
 CATEGORY_ORDER = ["黑", "宋", "圆", "楷", "仿", "未分类"]
 SCRIPT_ORDER = ["简", "繁", "简繁"]
-TILE_CACHE_MAX = 2000
+TILE_CACHE_MAX = 500     # 条带缓存条数；典型预览（字体名）≈30MB，
+                         # 随预览文字长度线性增长（预览输入已限 60 字）
 
 
 def weight_tag(w: int) -> str:
@@ -51,6 +52,10 @@ class PreviewVM:
             if self.weight is not None and e.weight // 100 * 100 != self.weight:
                 continue
             out.append(e)
+        # 索引序是目录/文件序（TTC 各 face 交错，同族各字重被打散）：
+        # 展示按 家族名 → 字重 → 斜体 → 宽度 归组
+        out.sort(key=lambda e: (e.display_name.casefold(), e.weight,
+                                e.italic, e.width))
         return out
 
     # ---- tile LRU：键 (fingerprint, 预览文字) ----

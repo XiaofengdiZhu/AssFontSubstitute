@@ -9,40 +9,36 @@ from qfluentwidgets import CaptionLabel
 from qfluentwidgets import isDarkTheme
 from qfluentwidgets import qconfig
 
-from ass_font_substitute.core.similarity.render import RenderBundle
-
-# 贴图条宽度上限：长字体名（PostScript 名十几字符）逐字 tile 横排会远超
-# 卡片宽，被右缘硬裁出半个字母；超宽缩到上限，绝不截半字
+# 贴图条宽度静态上限（布局未跑时的兜底）；布局定宽后取实际可用宽再扣
+# 呼吸边——顶满标签宽会末字贴死右缘、细笔画被裁半个
 _MAX_BAR_W = 360
+_WIDTH_MARGIN = 16
 
 
-def tiles_to_pixmap(tiles: list[np.ndarray]) -> QPixmap:
-    """48×48 灰度 tile 横排成条；空列表返回空 QPixmap。
+def strip_to_pixmap(strip: np.ndarray, dpr: float = 1.0) -> QPixmap:
+    """灰度条带（render_text_strip 产物，H×W 掩码）→ QPixmap。
 
     掩码值作 alpha、字形色随主题（暗白亮黑）、底全透明——贴在哪种卡面
-    （预览页/选择器/替换卡）都露底色，换肤时 PreviewBar 重贴即可换色。"""
-    if not tiles:
+    （预览页/选择器/替换卡）都露底色，换肤时 PreviewBar 重贴即可换色。
+    dpr>1 时标记 devicePixelRatio，物理分辨率直接交给 Qt 显示，不缩放。"""
+    if strip is None or strip.size == 0:
         return QPixmap()
-    row = np.concatenate([np.pad(t, ((0, 0), (0, 1))) for t in tiles], axis=1)
-    h, w = row.shape
+    h, w = strip.shape
     c = QColor(255, 255, 255) if isDarkTheme() else QColor(0, 0, 0)
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
     rgba[..., 0], rgba[..., 1], rgba[..., 2] = c.red(), c.green(), c.blue()
-    rgba[..., 3] = row
+    rgba[..., 3] = strip
     img = QImage(rgba.data, w, h, w * 4, QImage.Format_RGBA8888)
-    return QPixmap.fromImage(img)
-
-
-def _bundle_tiles(payload):
-    """render_preview 返回 RenderBundle（tiles 为 {字符: 48×48 数组}，按预览
-    文字顺序）；统一成 tile 列表——缓存与 tiles_to_pixmap 只认列表。"""
-    if isinstance(payload, RenderBundle):
-        return list(payload.tiles.values())
-    return payload
+    pm = QPixmap.fromImage(img)
+    pm.setDevicePixelRatio(dpr)
+    return pm
 
 
 class PreviewBar(CaptionLabel):
-    """单行预览条：占位 → 异步渲染 → QPixmap。"""
+    """单行预览条：占位 → 异步渲染（高分辨率真实排版条带）→ QPixmap。
+
+    条带按屏幕 DPR 渲染物理分辨率（STRIP_PX 超采样），显示前缩到
+    本行物理高度再标 DPR——逻辑尺寸 28、像素级清晰。"""
 
     def __init__(self, worker, pvm, entity, text, tag, height=28, parent=None):
         # qfluentwidgets FluentLabelBase.__init__ 是 singledispatchmethod，
@@ -54,18 +50,19 @@ class PreviewBar(CaptionLabel):
         self._worker, self._pvm = worker, pvm
         self._entity, self._text, self._tag = entity, text, tag
         self._inflight = False
-        self._tiles = None                   # 最近一次贴上的 tiles，换肤重贴用
+        self._strip = None                   # 最近一次贴上的条带，换肤重贴用
         self._stale_theme = False            # 不可见期换肤未贴上，showEvent 补
+        self._applied_w = -1                 # 最近一次贴图用的宽度上限
         qconfig.themeChanged.connect(self._on_theme_changed)
         self._render()
 
     def _on_theme_changed(self, _theme):
-        # 贴图字形色按主题取：换肤用已缓存的 tiles 原地重贴（零渲染开销）。
+        # 贴图字形色按主题取：换肤用已缓存的条带原地重贴（零渲染开销）。
         # 高度为 0（布局未跑/被压塌）时缩图得 null，跳过并记脏留给 showEvent
-        if self._tiles is None:
+        if self._strip is None:
             return
         if self.height() > 0:
-            self._apply(self._tiles)
+            self._apply(self._strip)
         else:
             self._stale_theme = True
 
@@ -74,7 +71,24 @@ class PreviewBar(CaptionLabel):
         # 不可见期（高度 0 跳过）换肤的补贴：旧贴图非空，得靠脏标记识别
         if self._stale_theme and self.height() > 0:
             self._stale_theme = False
-            self._apply(self._tiles)
+            self._apply(self._strip)
+        # 布局时序保险：首贴宽度上限过时（首贴早于定宽）在此补齐
+        if (self._strip is not None and self.width() > 1
+                and self._applied_w != self._max_w()):
+            self._apply(self._strip)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        # 首贴发生在布局前（宽未知，退 360 上限）；布局定宽后按实际
+        # 可用宽重贴——QLabel 只裁不缩，超宽贴图会右缘截半字
+        if (self._strip is not None and self.width() > 1
+                and self._applied_w != self._max_w()):
+            self._apply(self._strip)
+
+    def _max_w(self) -> int:
+        if self.width() <= 1:
+            return _MAX_BAR_W
+        return max(0, min(_MAX_BAR_W, self.width() - _WIDTH_MARGIN))
 
     def _render(self):
         if not self._text.strip() or self._entity is None:
@@ -97,7 +111,7 @@ class PreviewBar(CaptionLabel):
         # 回传 text：结果按 (tag, text) 双重匹配，防换文字后旧在途结果错配
         # 缓存键；渲染失败也折进本通路（err 字段）——failed 信号不带 text
         # 无法做同样的护栏，同 tag 旧任务的失败会错标新行
-        text, bundle, err = payload
+        text, strip, err = payload
         if text != self._text:
             # 同 tag（fp + 列表实例）的在途旧任务——行已随 set_rows 重建：
             # 结果的文字与本行不符，直接丢弃，不清缓存不置位
@@ -108,26 +122,39 @@ class PreviewBar(CaptionLabel):
             self.setText("（渲染失败）")
             self.setToolTip(err)        # hover 可见具体异常，排查怪字体
             return
-        tiles = _bundle_tiles(bundle)
-        self._pvm.put_tiles((self._entity.fingerprint, self._text), tiles)
-        self._apply(tiles)
+        if strip is None:
+            # 全缺字也是事实，缓存住（空条带哨兵，_apply 显「无可渲染字形」）：
+            # 存 None 等于无缓存，滚回可视区会每次重开字体文件重渲
+            strip = np.zeros((0, 0), dtype=np.uint8)
+        self._pvm.put_tiles((self._entity.fingerprint, self._text), strip)
+        self._apply(strip)
 
-    def _apply(self, tiles):
-        pm = tiles_to_pixmap(tiles)
+    def _apply(self, strip):
+        dpr = self.devicePixelRatioF() or 1.0
+        pm = strip_to_pixmap(strip, dpr)
         if pm.isNull():
             self.setText("（无可渲染字形）")
             return
-        self._tiles = tiles
-        pm = pm.scaledToHeight(self.height(), Qt.SmoothTransformation)
-        if pm.width() > _MAX_BAR_W:
-            pm = pm.scaledToWidth(_MAX_BAR_W, Qt.SmoothTransformation)
+        self._strip = strip
+        # 条带是超采样位图：缩到本行物理高度（逻辑 28 × DPR），标 DPR 后
+        # Qt 按逻辑尺寸显示，像素级 1:1 不再拉伸——模糊根源（48px tile 放大）即除
+        pm = pm.scaledToHeight(max(1, round(self.height() * dpr)),
+                               Qt.SmoothTransformation)
+        mw = self._max_w()
+        if round(pm.width() / dpr) > mw:
+            pm = pm.scaledToWidth(max(1, round(mw * dpr)),
+                                  Qt.SmoothTransformation)
+            # Qt 6.12 的 scaled 家族已保留 DPR 标签，此行是防版本行为漂移
+            # 的防御——几何数学依赖「缩放后 DPR 仍为 dpr」，勿删
+            pm.setDevicePixelRatio(dpr)
+        self._applied_w = mw
         self.setPixmap(pm)
 
 
 def _render_job(ctx, entity, text):
     from ass_font_substitute.gui.jobs import render_preview
     try:
-        bundle = render_preview(entity, text)
+        strip = render_preview(entity, text)
     except Exception as e:
         return text, None, f"{type(e).__name__}: {e}"
-    return text, bundle, None
+    return text, strip, None

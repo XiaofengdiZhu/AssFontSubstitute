@@ -26,6 +26,7 @@ class BrowsePage(ScrollArea):
         v = self.view.vbox
         self.preview_edit = SearchLineEdit()
         self.preview_edit.setPlaceholderText("预览文字（留空显示字体名）")
+        self.preview_edit.setMaxLength(60)   # 条带缓存按条数计，长文内存线性涨
         v.addWidget(self.preview_edit)
 
         filters = QHBoxLayout()

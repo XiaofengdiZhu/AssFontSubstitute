@@ -124,8 +124,11 @@ def test_render_preview_skips_missing(font_dir):
     snap = load_library([str(font_dir)])
     ctx.snapshot, ctx.lib, ctx.lib_key = snap, snap.lib, lib_key([str(font_dir)])
     e = snap.lib.entities()[0]
-    rb = render_preview(e, "永X")                  # X 不在 cmap → 跳过
-    assert set(rb.tiles) == {"永"}
+    strip = render_preview(e, "永X")               # X 不在 cmap → 跳过
+    assert strip is not None and strip.ndim == 2
+    assert strip.max() > 0                         # 永渲染成墨迹
+    # 缺字不前进：宽度与只渲染「永」一致（X 变 tofu 时这里会炸）
+    assert strip.shape[1] == render_preview(e, "永").shape[1]
 
 
 def test_apply_to_file_suffix_and_overwrite(tmp_path, sub_file):

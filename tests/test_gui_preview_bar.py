@@ -74,3 +74,20 @@ def test_stale_failure_is_discarded(qapp):
 
     w.result.emit("t:fp1", ("永", None, None))     # 正常空 bundle 路径不受影响
     assert bar.text() == "（无可渲染字形）"
+
+
+def test_bar_refits_pixmap_to_layout_width(qapp):
+    # QLabel 只裁不缩：布局前的贴图按兜底上限 360；定宽后按实际宽重贴，
+    # 长名预览不再右缘截半字；变宽回贴到上限
+    import numpy as np
+
+    _w, _pvm, bar = _make_bar(qapp)
+    strip = np.full((48, 900), 255, dtype=np.uint8)
+    bar._apply(strip)
+    assert bar.pixmap().width() == 360              # 布局前兜底上限
+    bar.show()
+    qapp.processEvents()        # 未显示的 widget resize 不发事件：先 show
+    bar.resize(200, 28)
+    assert bar.pixmap().width() == 184              # 定宽后重贴，扣呼吸边
+    bar.resize(500, 28)
+    assert bar.pixmap().width() == 360              # 变宽回贴到上限

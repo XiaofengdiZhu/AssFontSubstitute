@@ -17,8 +17,8 @@ from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.gui.preview_vm import weight_tag
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 
-ROW_H = 56
-ROW_SPACING = 4            # 行间距（indexAt 探针要避开行间空隙）
+ROW_H = 84                 # 行高初值：名 + 元信息 + 28px 预览条；物化首行后
+ROW_SPACING = 4            # 按内容实测校准（见 _calibrate_row_height）
 WINDOW_PAD = 20            # 可视区窗口向外各扩的行数（懒物化缓冲）
 _META_FMT = "{script} · {weight} · {category}"
 
@@ -41,6 +41,7 @@ class FontListWidget(QListWidget):
         self._preview_text_fn = preview_text_fn   # () -> str；返回空串则用字体名
         self._rows: list[FontEntity] = []
         self._materialized: set[int] = set()      # 已物化行号（控件所有权在 Qt）
+        self._row_h = ROW_H                       # 物化首行后按内容校准
         self.setIconSize(self.iconSize())
         self.setUniformItemSizes(True)
         self.setSpacing(ROW_SPACING)
@@ -58,7 +59,8 @@ class FontListWidget(QListWidget):
     def set_rows(self, entities: list[FontEntity]):
         self._rows = list(entities)
         self._materialized.clear()
-        self.clear()
+        self._row_h = ROW_H          # 校准基准每周期重置：item 高度被重置回
+        self.clear()                 # 初值后，跨周期比较旧基准会早退漏校准
         for _e in self._rows:
             item = QListWidgetItem()
             item.setSizeHint(QSize(10, ROW_H))
@@ -102,11 +104,24 @@ class FontListWidget(QListWidget):
         hi = min(len(self._rows) - 1, last + WINDOW_PAD)
         for i in range(lo, hi + 1):
             if i not in self._materialized:
-                self.setItemWidget(self.item(i), self._row_widget(i))
+                w = self._row_widget(i)
+                self.setItemWidget(self.item(i), w)
                 self._materialized.add(i)
+                self._calibrate_row_height(w)
         for i in [i for i in self._materialized if i < lo or i > hi]:
             self.removeItemWidget(self.item(i))
             self._materialized.discard(i)
+
+    def _calibrate_row_height(self, w: QWidget):
+        """行高按内容实测校准。常量初值是估的：三行内容（名字 + 元信息 +
+        28px 预览条）真实高度随平台字体度量变化，估小了布局溢出、预览条
+        下半被行边界裁掉（只能看到上半）。首行 sizeHint 为准，全列表套用。"""
+        h = w.sizeHint().height()
+        if h <= self._row_h or self.count() == 0:
+            return
+        self._row_h = h
+        for i in range(self.count()):
+            self.item(i).setSizeHint(QSize(10, h))
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -118,6 +133,7 @@ class _RowWidget(QWidget):
         super().__init__()
         h = QVBoxLayout(self)
         h.setContentsMargins(8, 2, 8, 2)
+        h.setSpacing(4)               # 显式钉死：默认 spacing 随平台样式漂
         h.addWidget(StrongBodyLabel(e.display_name))
         meta = CaptionLabel(_META_FMT.format(script=e.script,
                                              weight=weight_tag(e.weight),
