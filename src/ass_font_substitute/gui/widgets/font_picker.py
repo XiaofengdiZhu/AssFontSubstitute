@@ -136,10 +136,12 @@ class FontPickerDialog(MessageBoxBase):
 
     def _reload_all(self):
         self.pvm.name_query = self.name_edit.text()
-        rows = {e.fingerprint for e in self.pvm.filtered()}
-        self.all_list.set_rows(self.pvm.filtered())
-        self.rec_list.set_rows([e for e in self._reco or []
-                                if e.fingerprint in rows])
+        rows = self.pvm.filtered()
+        shown = {f.fingerprint for r in rows for f in r.matching}
+        self.all_list.set_rows(rows)
+        # 推荐区不合并：逐 face 单行（as_rows），但只显示行通过筛选的 face
+        self.rec_list.set_rows(self.pvm.as_rows(
+            [e for e in self._reco or [] if e.fingerprint in shown]))
 
     def _on_reco(self, tag, payload):
         if tag != "pickreco":

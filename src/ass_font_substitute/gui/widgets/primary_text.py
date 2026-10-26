@@ -99,7 +99,16 @@ def accent_luma() -> float:
 
 def _draw_icon(self, icon, painter, rect, state=QIcon.Off):
     if not isinstance(icon, FluentIconBase) or accent_luma() < _LUMA_DARK_TEXT:
-        return self._draw_icon_original(icon, painter, rect, state)
+        # 优先类属性上补丁前的原实现：FluentIconBase 的 checked 反色等
+        # qfw 原生语义全保留（self 是 primary 系时走绑定；ToggleToolButton
+        # checked 时未绑定调用 PrimaryToolButton._drawIcon(self, ...)，
+        # self 不是 primary 系，类属性显式传入 self 仍正确）。补丁环境
+        # 外类上无原实现，退 qfw 原生 drawIcon（带 state，双态 QIcon 的
+        # On 态 pixmap 照常生效）
+        orig = getattr(type(self), "_draw_icon_original", None)
+        if orig is not None:
+            return orig(self, icon, painter, rect, state)
+        return drawIcon(icon, painter, rect, state)
     # 浅强调色：图标换深色（禁用态沿用 qfw 的降不透明度处理）
     if not self.isEnabled():
         painter.setOpacity(0.786 if isDarkTheme() else 0.9)

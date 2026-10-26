@@ -1,26 +1,95 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPropertyAnimation
+from PySide6.QtCore import QRect
 from PySide6.QtCore import QSize
+from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QColor
+from PySide6.QtGui import QFont
+from PySide6.QtGui import QIcon
+from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QAbstractItemView
+from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QListWidget
 from PySide6.QtWidgets import QListWidgetItem
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import CaptionLabel
+from qfluentwidgets import SegmentedWidget
 from qfluentwidgets import SmoothScrollDelegate
 from qfluentwidgets import StrongBodyLabel
+from qfluentwidgets import TransparentToggleToolButton
+from qfluentwidgets import isDarkTheme
+from qfluentwidgets import themeColor
 
 from ass_font_substitute.core.fontindex.library import FontEntity
+from ass_font_substitute.gui.preview_vm import FamilyRow
 from ass_font_substitute.gui.preview_vm import weight_tag
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 
-ROW_H = 84                 # 行高初值：名 + 元信息 + 28px 预览条；物化首行后
-ROW_SPACING = 4            # 按内容实测校准（见 _calibrate_row_height）
+ROW_H = 82                 # 行高初值：控制行 + 32px 预览条；物化首行后
+ROW_SPACING = 0            # 按内容实测校准（见 _calibrate_row_height）。
+                           # 列表 spacing 砍零：行间留白由行内 margins 提
+                           # 供，hover 背景铺满 item 时文字离边不局促。
+                           # 初值必须 ≤ 实测：校准只增不减，偏大会把余量
+                           # 固化成行间空白
 WINDOW_PAD = 20            # 可视区窗口向外各扩的行数（懒物化缓冲）
-_META_FMT = "{script} · {weight} · {category}"
+BAR_H = 32                 # 预览条逻辑高
+
+
+def _meta_text(e: FontEntity) -> str:
+    it = "斜体 · " if e.italic else ""
+    return f"{e.script} · {weight_tag(e.weight)} · {it}{e.category}"
+
+
+def _draw_italic_pixmap(color: QColor) -> QPixmap:
+    # 衬线体：无衬线 I 缩到 16px 只剩一根斜竖线，衬线上下横笔才是「斜体」
+    pm = QPixmap(32, 32)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    f = QFont("Georgia", 20)
+    f.setBold(True)
+    f.setItalic(True)
+    p.setFont(f)
+    p.setPen(color)
+    p.drawText(QRect(0, 0, 32, 32), Qt.AlignCenter, "I")
+    p.end()
+    return pm
+
+
+def _on_ink() -> QColor:
+    """checked 底为强调色块：浅强调色上白 I 隐形，按亮度反相。"""
+    tc = themeColor()
+    luma = 0.299 * tc.red() + 0.587 * tc.green() + 0.114 * tc.blue()
+    return QColor(0, 0, 0) if luma > 150 else QColor(255, 255, 255)
+
+
+_ITALIC_ICONS: dict[tuple[bool, int], QIcon] = {}   # (主题, On态墨色) → 图标
+
+
+def _italic_icon() -> QIcon:
+    """斜体图标：FluentIcon 无此形，自绘衬线斜体「I」，双态缓存复用。
+
+    unchecked = 透明底主题墨色；checked 底为强调色块（浅强调色需深 I）。
+    ToggleToolButton checked 走 PrimaryToolButton._drawIcon 只对
+    FluentIconBase 反色，裸 QIcon 不会，必须预置 On 态 pixmap。"""
+    dark = isDarkTheme()
+    on_ink = _on_ink()
+    key = (dark, on_ink.rgb())
+    icon = _ITALIC_ICONS.get(key)
+    if icon is None:
+        icon = QIcon()
+        icon.addPixmap(_draw_italic_pixmap(QColor(255, 255, 255) if dark
+                                           else QColor(0, 0, 0)),
+                       QIcon.Mode.Normal, QIcon.State.Off)
+        icon.addPixmap(_draw_italic_pixmap(on_ink),
+                       QIcon.Mode.Normal, QIcon.State.On)
+        _ITALIC_ICONS[key] = icon
+    return icon
 
 
 class FontListWidget(QListWidget):
@@ -118,12 +187,12 @@ class FontListWidget(QListWidget):
     def _on_scroll_range_changed(self, *_args):
         self._materialize_visible()
 
-    def set_rows(self, entities: list[FontEntity]):
+    def set_rows(self, rows: list[FamilyRow]):
         for i in self._materialized:            # 重建前取消在途渲染，见下
             bar = getattr(self.itemWidget(self.item(i)), "bar", None)
             if bar is not None:
                 bar.cancel()
-        self._rows = list(entities)
+        self._rows = list(rows)
         self._materialized.clear()
         self._row_h = ROW_H          # 校准基准每周期重置：item 高度被重置回
         self.clear()                 # 初值后，跨周期比较旧基准会早退漏校准
@@ -137,13 +206,13 @@ class FontListWidget(QListWidget):
     def _on_click(self, item):
         row = self.row(item)
         if 0 <= row < len(self._rows):
-            self.entity_picked.emit(self._rows[row])
+            self.entity_picked.emit(self._rows[row].selected)
 
     def _row_widget(self, i: int) -> _RowWidget:
-        e = self._rows[i]
-        return _RowWidget(self._worker, self._pvm, e,
-                          self._preview_text_fn() or e.display_name,
-                          f"plist:{e.fingerprint}:{id(self)}")
+        row = self._rows[i]
+        return _RowWidget(self._worker, self._pvm, row,
+                          self._preview_text_fn() or row.display_name,
+                          lambda e: f"plist:{e.fingerprint}:{id(self)}")
 
     def _visible_range(self) -> tuple[int, int]:
         """可视首末行（闭区间）：滚动条 value 按实测行距换算。
@@ -214,15 +283,104 @@ class FontListWidget(QListWidget):
 
 
 class _RowWidget(QWidget):
-    def __init__(self, worker, pvm, e: FontEntity, text, tag):
+    """行 = 控制行（展示名 + 元信息 + 字重分段 + 斜体钮）+ 预览条。
+
+    容器纯 QWidget 不画任何底：常态、悬停、按下的反馈全部交给列表
+    自带样式。多 face 行的字重用 SegmentedWidget（qfw 分段控件），斜体
+    用 TransparentToggleToolButton（自绘斜体 I 图标）；点击就地切
+    row.selected 并重渲预览。单 face 行无控件、只读展示。行点击选择
+    走列表 itemClicked（QLabel 不消费鼠标，事件自然传播到视口）；分段
+    与斜体钮自行消费鼠标，不会触发列表点击。"""
+
+    def __init__(self, worker, pvm, row: FamilyRow, text,
+                 tag_for):            # tag_for: (FontEntity) -> str
         super().__init__()
-        h = QVBoxLayout(self)
-        h.setContentsMargins(8, 2, 8, 2)
-        h.setSpacing(4)               # 显式钉死：默认 spacing 随平台样式漂
-        h.addWidget(StrongBodyLabel(e.display_name))
-        meta = CaptionLabel(_META_FMT.format(script=e.script,
-                                             weight=weight_tag(e.weight),
-                                             category=e.category))
-        h.addWidget(meta)
-        self.bar = PreviewBar(worker, pvm, e, text, tag)
-        h.addWidget(self.bar)
+        self._worker, self._pvm, self._row = worker, pvm, row
+        self._text, self._tag_for = text, tag_for
+        self._seg: SegmentedWidget | None = None
+        self._it_btn: TransparentToggleToolButton | None = None
+        v = QVBoxLayout(self)
+        v.setContentsMargins(16, 8, 16, 8)
+        v.setSpacing(4)               # 显式钉死：默认 spacing 随平台样式漂
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        top.addWidget(StrongBodyLabel(row.display_name))
+        self._meta = CaptionLabel(_meta_text(row.selected))
+        top.addWidget(self._meta)
+        top.addStretch(1)
+        self._build_controls(top)
+        v.addLayout(top)
+        self.bar = PreviewBar(worker, pvm, row.selected, text,
+                              tag_for(row.selected), height=BAR_H)
+        v.addWidget(self.bar)
+
+    def _build_controls(self, top: QHBoxLayout):
+        row = self._row
+        if len(row.faces) < 2:
+            return
+        # 分段键 = 精确字重（不取整）：Semilight 350 折进 W300 曾把
+        # Light/Semilight 两 face 折成一段（真库微软雅黑实测）。
+        # onClick 走 itemClicked；setCurrentItem 只发 currentItemChanged
+        # （未连接）——程序同步不会回环
+        seg = SegmentedWidget(self)
+        for f in row.faces:
+            seg.addItem(str(f.weight), weight_tag(f.weight),
+                        onClick=lambda _c, f=f: self._pick_weight(f.weight))
+        # 段宽高都不固定：46px 宽曾把 W 左缘裁成 V 形；固定高 28 曾被 qss
+        # 撑出的段高裁顶、且与斜体钮错高。按段 sizeHint 定高，钮取同高正方
+        seg_h = max(it.sizeHint().height() for it in seg.items.values())
+        seg.setFixedHeight(seg_h)
+        seg.setCurrentItem(str(row.selected.weight))
+        top.addWidget(seg)
+        self._seg = seg
+        if any(f.italic for f in row.faces):
+            btn = TransparentToggleToolButton(_italic_icon(), self)
+            btn.setCheckable(True)
+            btn.setChecked(row.selected.italic)
+            btn.setFixedSize(seg_h, seg_h)
+            btn.setIconSize(QSize(16, 16))
+            btn.clicked.connect(
+                lambda _c: self._pick_italic(self._it_btn.isChecked()))
+            top.addWidget(btn)
+            self._it_btn = btn
+
+    def _pick_weight(self, weight: int):
+        cur = self._row.selected
+        faces = self._row.faces
+        cands = [f for f in faces
+                 if f.weight == weight and f.italic == cur.italic]
+        if not cands:                 # 该字重无当前斜态 face → 退任意斜态
+            cands = [f for f in faces if f.weight == weight]
+        if cands:
+            self._select(cands[0])
+
+    def _pick_italic(self, on: bool):
+        cur = self._row.selected
+        faces = self._row.faces
+        cands = [f for f in faces
+                 if f.italic == on and f.weight == cur.weight]
+        if not cands:                 # 当前字重无该斜态 → 任意字重的该斜态
+            cands = [f for f in faces if f.italic == on]
+        if cands:
+            self._select(cands[0])
+        elif self._it_btn is not None:  # 无目标 face（不应达）：钮回弹
+            self._it_btn.blockSignals(True)
+            self._it_btn.setChecked(cur.italic)
+            self._it_btn.blockSignals(False)
+
+    def _select(self, e: FontEntity):
+        if e is self._row.selected:
+            return
+        self._row.selected = e
+        self._meta.setText(_meta_text(e))
+        self.bar.set_entity(e, self._tag_for(e))
+        self._sync_controls()
+
+    def _sync_controls(self):
+        cur = self._row.selected
+        if self._seg is not None:
+            self._seg.setCurrentItem(str(cur.weight))
+        if self._it_btn is not None:
+            self._it_btn.blockSignals(True)
+            self._it_btn.setChecked(cur.italic)
+            self._it_btn.blockSignals(False)

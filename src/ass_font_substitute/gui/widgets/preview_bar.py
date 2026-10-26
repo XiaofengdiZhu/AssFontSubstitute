@@ -50,6 +50,7 @@ class PreviewBar(CaptionLabel):
         self._worker, self._pvm = worker, pvm
         self._entity, self._text, self._tag = entity, text, tag
         self._inflight = False
+        self._connected = False              # result 信号是否仍挂着本槽
         self._job = None                     # 在途任务的取消句柄
         self._strip = None                   # 最近一次贴上的条带，换肤重贴用
         self._stale_theme = False            # 不可见期换肤未贴上，showEvent 补
@@ -104,8 +105,28 @@ class PreviewBar(CaptionLabel):
             return
         self._inflight = True
         self._worker.result.connect(self._on_result)
+        self._connected = True
         self._job = self._worker.submit(self._tag, _render_job,
                                         self._entity, self._text)
+
+    def set_entity(self, entity, tag):
+        """行内切换 face（字重/斜体分段）：撤在途任务、断旧结果槽、清贴
+        图重渲。tag 随 fingerprint 换新——已开跑不可撤的旧任务回传时
+        tag 失配，_on_result 直接丢弃。"""
+        if entity is self._entity:
+            return
+        self.cancel()
+        if self._connected:              # 无连接时 disconnect 会刷 warning
+            self._worker.result.disconnect(self._on_result)
+            self._connected = False
+        self._entity, self._tag = entity, tag
+        self._strip = None
+        self._stale_theme = False
+        self._applied_w = -1
+        self.setToolTip("")               # 上一 face 失败遗留的错误详情
+        self.setText("…")
+        self.setPixmap(QPixmap())
+        self._render()
 
     def cancel(self):
         """行滚出物化窗口/列表重建时调用：未开始的渲染任务从队列除名，
@@ -126,7 +147,11 @@ class PreviewBar(CaptionLabel):
             # 同 tag（fp + 列表实例）的在途旧任务——行已随 set_rows 重建：
             # 结果的文字与本行不符，直接丢弃，不清缓存不置位
             return
-        self._worker.result.disconnect(self._on_result)
+        # 同 tag 双任务（滚出重物化后孤儿任务被新行认领）会回传两次：
+        # 第二次已无连接，disconnect 会刷 RuntimeWarning
+        if self._connected:
+            self._worker.result.disconnect(self._on_result)
+            self._connected = False
         self._inflight = False
         if err is not None:
             self.setText("（渲染失败）")

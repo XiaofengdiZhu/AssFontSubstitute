@@ -17,14 +17,20 @@ def qapp():
     yield app
 
 
-def _ent(fp, name):
+def _ent(fp, name, weight=400, italic=False):
     from ass_font_substitute.core.fontindex.library import FontEntity
     from ass_font_substitute.core.models import CmapRanges
     return FontEntity(fingerprint=fp, display_name=name, aliases=(name,),
-                      psname=name, version=(1,), weight=400, width=5,
-                      italic=False, script="简", category="黑",
+                      psname=name, version=(1,), weight=weight, width=5,
+                      italic=italic, script="简", category="黑",
                       cmap=CmapRanges.from_chars([0x6c38]), dir_path="d",
                       rel_path="r.ttf", face_index=0)
+
+
+def _rows(ents):
+    """face 列表 → 单 face 行（FamilyRow 是列表行模型，v5 合并后）。"""
+    from ass_font_substitute.gui.preview_vm import FamilyRow
+    return [FamilyRow(e.display_name, [e], e) for e in ents]
 
 
 class _FakeWorker(QObject):
@@ -69,7 +75,7 @@ def test_font_list_lazy_materialization(qapp):
 
     emitted = []
     fl.count_changed.connect(emitted.append)
-    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(200)])
+    fl.set_rows(_rows([_ent(str(i), f"字体{i}") for i in range(200)]))
     assert emitted[-1] == 200 and fl.count() == 200
 
     vis = materialized()
@@ -78,7 +84,7 @@ def test_font_list_lazy_materialization(qapp):
     assert fl.itemWidget(fl.item(199)) is None          # 远端行未构建
     assert len(fl._worker.submits) == len(vis)          # 仅物化行派渲染任务
 
-    fl.verticalScrollBar().setValue(150 * (ROW_H + ROW_SPACING))   # 像素模式
+    fl.verticalScrollBar().setValue(150 * fl._row_pitch)   # 像素模式（实测 pitch，初值≠实测）
     qapp.processEvents()
     far = materialized()
     assert far and 0 not in far             # 首屏行控件已释放
@@ -238,10 +244,10 @@ def test_row_height_recibrates_each_set_rows(qapp, monkeypatch):
     qapp.processEvents()
 
     ents = [_ent(str(i), f"字体{i}") for i in range(50)]
-    fl.set_rows(ents)
+    fl.set_rows(_rows(ents))
     assert fl.item(0).sizeHint().height() == 100    # 首周期校准生效
 
-    fl.set_rows(ents)                       # 第二周期（筛选/重拉路径）
+    fl.set_rows(_rows(ents))                       # 第二周期（筛选/重拉路径）
     assert fl.item(0).sizeHint().height() == 100    # 不得回退 ROW_H
     assert fl._row_h == 100
 
@@ -264,19 +270,17 @@ def test_scroll_out_cancels_pending_renders(qapp):
     # 滚出物化窗口的行：未执行的渲染任务必须取消——串行工作者下不取消
     # 则快速滚动积压几百个过期任务，新视口的预览排在队尾迟迟不出来
     from ass_font_substitute.gui.preview_vm import PreviewVM
-    from ass_font_substitute.gui.widgets.font_list import ROW_H
-    from ass_font_substitute.gui.widgets.font_list import ROW_SPACING
     from ass_font_substitute.gui.widgets.font_list import FontListWidget
 
     fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
     fl.resize(300, 600)
     fl.show()
     qapp.processEvents()
-    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(200)])
+    fl.set_rows(_rows([_ent(str(i), f"字体{i}") for i in range(200)]))
 
     old = list(fl._worker.submits)
     assert old and all(not h.cancelled for _t, _f, _a, h in old)
-    fl.verticalScrollBar().setValue(150 * (ROW_H + ROW_SPACING))
+    fl.verticalScrollBar().setValue(150 * fl._row_pitch)
     qapp.processEvents()
     assert all(h.cancelled for _t, _f, _a, h in old)   # 旧窗口全部出窗取消
     new = fl._worker.submits[len(old):]
@@ -294,9 +298,9 @@ def test_set_rows_cancels_inflight_renders(qapp):
     fl.resize(300, 600)
     fl.show()
     qapp.processEvents()
-    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(200)])
+    fl.set_rows(_rows([_ent(str(i), f"字体{i}") for i in range(200)]))
     old = list(fl._worker.submits)
-    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(200)])
+    fl.set_rows(_rows([_ent(str(i), f"字体{i}") for i in range(200)]))
     assert old and all(h.cancelled for _t, _f, _a, h in old)
 
 
@@ -310,7 +314,7 @@ def test_materialization_submits_nearest_visible_first(qapp):
     fl.resize(300, 600)
     fl.show()
     qapp.processEvents()
-    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(200)])
+    fl.set_rows(_rows([_ent(str(i), f"字体{i}") for i in range(200)]))
 
     first, last = fl._visible_range()
     center = (first + last) / 2
@@ -341,7 +345,7 @@ def test_smooth_scroll_delegated(qapp):
     fl.resize(300, 600)
     fl.show()
     qapp.processEvents()
-    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(100)])
+    fl.set_rows(_rows([_ent(str(i), f"字体{i}") for i in range(100)]))
     assert fl.verticalScrollMode() == QAbstractItemView.ScrollMode.ScrollPerPixel
     assert isinstance(fl._scroll, SmoothScrollDelegate)
     assert fl._scroll.useAni
@@ -369,7 +373,7 @@ def test_visible_range_converts_pixels(qapp):
     fl.resize(300, 600)
     fl.show()
     qapp.processEvents()
-    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(200)])
+    fl.set_rows(_rows([_ent(str(i), f"字体{i}") for i in range(200)]))
     fl.verticalScrollBar().setValue(10 * fl._row_pitch)
     first, last = fl._visible_range()
     assert first == 10
@@ -395,7 +399,7 @@ def test_deep_jump_materializes_viewport_rows(qapp, monkeypatch):
     fl.resize(1200, 600)
     fl.show()
     qapp.processEvents()
-    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(2000)])
+    fl.set_rows(_rows([_ent(str(i), f"字体{i}") for i in range(2000)]))
 
     def viewport_rows():
         vp = fl.viewport().rect()
@@ -432,7 +436,7 @@ def test_wheel_after_scrollbar_jump_no_rewind(qapp):
     fl.resize(300, 600)
     fl.show()
     qapp.processEvents()
-    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(300)])
+    fl.set_rows(_rows([_ent(str(i), f"字体{i}") for i in range(300)]))
 
     def drain(ms=900):
         loop = QEventLoop()                 # 动画推进需真事件循环
@@ -472,7 +476,7 @@ def test_wheel_mid_jump_animation_continues_from_reality(qapp):
     fl.resize(300, 600)
     fl.show()
     qapp.processEvents()
-    fl.set_rows([_ent(str(i), f"字体{i}") for i in range(300)])
+    fl.set_rows(_rows([_ent(str(i), f"字体{i}") for i in range(300)]))
 
     def drain(ms=900):
         loop = QEventLoop()                 # 动画推进需真事件循环
@@ -494,3 +498,79 @@ def test_wheel_mid_jump_animation_continues_from_reality(qapp):
     # 从中断帧 +120 续走（修复前回跳到点击前附近：终值 ≈120）
     assert abs(fl.verticalScrollBar().value() - (v_mid + 120)) <= 2
     assert v_mid > 0                        # 护栏：确已停在动画中段
+
+
+def test_row_segmented_switches_selected_face(qapp):
+    # 多 face 行：字重 SegmentedWidget / 斜体 ToggleToolButton 点击就地切
+    # row.selected，预览条换 face 重渲（tag 随 fingerprint 换），元信息与
+    # 分段当前项、斜体钮 checked 同步；单 face 行无控件；picked 双路发
+    # 当前 selected（列表 itemClicked）
+    from ass_font_substitute.gui.preview_vm import FamilyRow
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
+    fl.resize(400, 600)
+    fl.show()
+    qapp.processEvents()
+    faces = [_ent("400", "A"), _ent("700", "A", weight=700),
+             _ent("400i", "A", weight=400, italic=True)]
+    fl.set_rows([FamilyRow("A", faces, faces[0]),
+                 FamilyRow("B", [_ent("solo", "B")], _ent("solo", "B"))])
+    qapp.processEvents()
+    w = fl.itemWidget(fl.item(0))
+    solo = fl.itemWidget(fl.item(1))
+    assert solo._seg is None and solo._it_btn is None
+    assert list(w._seg.items) == ["400", "700"]   # 段=字重，斜态由钮表达
+    assert w._it_btn is not None and not w._it_btn.isChecked()
+
+    picked = []
+    fl.entity_picked.connect(picked.append)
+    n_submits = len(fl._worker.submits)
+    w._seg.items["700"].click()             # 分段：700 该字重仅直立 face
+    assert fl._rows[0].selected.fingerprint == "700"
+    assert w.bar._entity.fingerprint == "700"
+    assert "W700" in w._meta.text()
+    assert len(fl._worker.submits) == n_submits + 1
+    assert fl._worker.submits[-1][0].startswith("plist:700:")
+    assert w._seg.currentRouteKey() == "700"
+
+    w._it_btn.click()                       # 斜体开：700 无斜 → 退 400 斜
+    assert fl._rows[0].selected.fingerprint == "400i"
+    assert "斜体" in w._meta.text()
+    assert w._it_btn.isChecked()
+
+    w._seg.items["700"].click()             # 700 从斜态：同字重无斜 → 直立
+    assert fl._rows[0].selected.fingerprint == "700"
+    assert not w._it_btn.isChecked()        # 斜体钮随 selected 回弹
+
+    fl._on_click(fl.item(0))                # picked：列表项点击发 selected
+    assert picked[-1].fingerprint == "700"
+
+
+def test_preview_bar_set_entity_switches_face(qapp):
+    # set_entity：换 entity+tag 重派渲染；同 face 早退不重派
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
+
+    worker = _FakeWorker()
+    pvm = PreviewVM()
+    bar = PreviewBar(worker, pvm, _ent("fp1", "甲"), "永", "t:fp1")
+    try:
+        n = len(worker.submits)
+        bar.set_entity(_ent("fp2", "甲"), "t:fp2")
+        assert bar._entity.fingerprint == "fp2"
+        assert len(worker.submits) == n + 1
+        assert worker.submits[-1][0] == "t:fp2"
+        bar.set_entity(bar._entity, "t:fp2")        # 同 face：早退
+        assert len(worker.submits) == n + 1
+        # 换 face 断开旧结果槽：旧 tag 回传被丢弃（不写缓存、不再提交），
+        # 新 tag 回传被消费且消费后断连（二次发射无重复处理）
+        worker.result.emit("t:fp1", ("永", None, None))
+        assert pvm.get_tiles(("fp2", "永")) is None
+        assert len(worker.submits) == n + 1
+        worker.result.emit("t:fp2", ("永", None, None))
+        assert not bar._connected and not bar._inflight
+        assert pvm.get_tiles(("fp2", "永")) is not None
+    finally:
+        bar.deleteLater()

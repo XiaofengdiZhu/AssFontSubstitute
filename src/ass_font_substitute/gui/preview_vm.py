@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from dataclasses import dataclass
 
 from ass_font_substitute.core.fontindex.library import FontEntity
 
@@ -9,9 +10,40 @@ SCRIPT_ORDER = ["简", "繁", "简繁"]
 TILE_CACHE_MAX = 500     # 条带缓存条数；典型预览（字体名）≈30MB，
                          # 随预览文字长度线性增长（预览输入已限 60 字）
 
+# 裸样式名：烂字体的 name 记录全填样式词（family 名就叫 "Bold"），名称里
+# 零家族信息——同名的全是无关字体（截图实证：十几个不同家族都叫 "Bold"）。
+# 全等命中（strip+casefold）则永不合并；"XXX Bold" 这类带前缀的不命中，
+# 其 display 已含家族信息，照常合并
+_BARE_STYLE_NAMES = frozenset([
+    "regular", "bold", "italic", "oblique", "normal", "book", "roman",
+    "medium", "demi", "demibold", "semibold", "semilight", "ultralight",
+    "extralight", "extrabold", "ultrabold", "black", "heavy", "light",
+    "thin", "hairline", "narrow", "condensed", "extended",
+    "粗体", "斜体", "常规",
+])
+
 
 def weight_tag(w: int) -> str:
-    return f"W{w // 100 * 100}"
+    # 显示真实值不取整：Semilight 350 曾被折进 W300 桶，与 Light 300
+    # 同桶同斜态，合并行里 chip 只剩一个可切（真库微软雅黑实测）
+    return f"W{w}"
+
+
+@dataclass
+class FamilyRow:
+    """预览列表行：严格同展示名的 face 归组（斜体 toggle/字重 chip 行内
+    切换预览）。selected 是当前预览与 picked 的目标：filtered() 按筛选
+    重算，chip 手选由行控件就地改字段（下次筛选变化重建时重置）。
+    faces = 行全量（chips 与切换范围，筛选不隐藏其他字重）；
+    matching = 通过当前筛选的子集（行保留与 selected 的来源）。"""
+    display_name: str
+    faces: list[FontEntity]
+    selected: FontEntity
+    matching: list[FontEntity] | None = None
+
+    def __post_init__(self):
+        if self.matching is None:
+            self.matching = self.faces
 
 
 class PreviewVM:
@@ -39,24 +71,68 @@ class PreviewVM:
         present = {e.script for e in self.entities}
         return [s for s in SCRIPT_ORDER if s in present]
 
-    def filtered(self) -> list[FontEntity]:
+    def filtered(self) -> list[FamilyRow]:
+        """行保留 = 行内任一 face 通过全部筛选；faces 全量保留（chips 不
+        随筛选隐藏其他字重，点chip 可切看），selected 从通过筛选的子集
+        里选——锚点 = 筛选字重桶（筛 W300 时精确 300 胜同桶 350），无
+        筛选时 400。行序按展示名 casefold。"""
         q = self.name_query.strip().casefold()
-        out = []
-        for e in self.entities:
+
+        def ok(e: FontEntity) -> bool:
             if q and not any(q in a.casefold() for a in e.aliases):
-                continue
+                return False
             if self.category and e.category != self.category:
-                continue
+                return False
             if self.script and e.script != self.script:
-                continue
-            if self.weight is not None and e.weight // 100 * 100 != self.weight:
-                continue
-            out.append(e)
-        # 索引序是目录/文件序（TTC 各 face 交错，同族各字重被打散）：
-        # 展示按 家族名 → 字重 → 斜体 → 宽度 归组
-        out.sort(key=lambda e: (e.display_name.casefold(), e.weight,
-                                e.italic, e.width))
-        return out
+                return False
+            return (self.weight is None
+                    or e.weight // 100 * 100 == self.weight)
+
+        groups: dict[str, list[FontEntity]] = {}
+        loose: list[FontEntity] = []
+        for e in self.entities:
+            key = e.display_name.strip().casefold()
+            if key in _BARE_STYLE_NAMES:
+                loose.append(e)
+            else:
+                groups.setdefault(key, []).append(e)
+        target = 400 if self.weight is None else self.weight
+
+        def sel_key(e: FontEntity):
+            return abs(e.weight - target), e.italic, e.width
+
+        rows: list[FamilyRow] = []
+        for e in loose:
+            if ok(e):
+                rows.append(FamilyRow(e.display_name, [e], e))
+        for faces in groups.values():
+            # 索引序是目录/文件序（TTC 各 face 交错）：行内按 字重 → 斜体
+            # → 宽度 归位，chip 点击按同键取 face。结构按全量拆（不随筛
+            # 选变，chips/切换范围稳定）
+            faces.sort(key=lambda e: (e.weight, e.italic, e.width))
+            # 同 (精确字重, 斜态) 撞车的 face 不是同族字重关系（同 psname
+            # 早已版本去重，剩下的是别名撞名/同值异字体），拆独立行——藏进
+            # 行里 chip 只剩一个可切（真库方正同名字体双格式实测）
+            buckets: dict[tuple[int, bool], list[FontEntity]] = {}
+            for f in faces:
+                buckets.setdefault((f.weight, f.italic), []).append(f)
+            main = sorted((fl[0] for fl in buckets.values() if len(fl) == 1),
+                          key=lambda e: (e.weight, e.italic, e.width))
+            matching = [f for f in main if ok(f)]
+            if matching:
+                rows.append(FamilyRow(main[0].display_name, main,
+                                      min(matching, key=sel_key), matching))
+            for fl in buckets.values():
+                if len(fl) > 1:
+                    for f in fl:
+                        if ok(f):
+                            rows.append(FamilyRow(f.display_name, [f], f))
+        rows.sort(key=lambda r: r.display_name.casefold())
+        return rows
+
+    def as_rows(self, entities) -> list[FamilyRow]:
+        """face 列表 → 单 face 行（推荐区不合并，逐 face 显示）。"""
+        return [FamilyRow(e.display_name, [e], e) for e in entities]
 
     # ---- tile LRU：键 (fingerprint, 预览文字) ----
     def get_tiles(self, key):

@@ -27,7 +27,9 @@ _STATUS = {"zero": "无对白用字", "keep": "保留", "twin": "孪生对应",
 
 
 def weight_tag(w: int) -> str:
-    return f"W{w // 100 * 100}"
+    # 显示真实值不取整，与 preview_vm.weight_tag 同步（350 谎报 W300 曾
+    # 掩盖 Light/Semilight 两个字重）
+    return f"W{w}"
 
 
 @dataclass
