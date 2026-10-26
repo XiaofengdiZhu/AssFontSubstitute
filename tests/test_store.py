@@ -198,6 +198,20 @@ def test_update_index_parallel_fingerprints(tmp_path):
                                             weight, width, bool(italic))
 
 
+def test_update_index_defers_checkpoints(tmp_path):
+    # 建索引期间停自动 checkpoint、收尾一次 TRUNCATE：-wal 归零，
+    # 连接级 wal_autocheckpoint 还原（连接被 GUI 复用，不能留 0）
+    d = tmp_path / "fonts"
+    d.mkdir()
+    _mklib(d, n=3)
+    db = d / "fontindex.db"
+    conn = open_db(db)
+    update_index(d, conn)
+    assert conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0] == 1000
+    assert db.with_name(db.name + "-wal").stat().st_size == 0
+    conn.close()
+
+
 def test_update_index_parallel_cancel(tmp_path):
     # progress 返 False → 停止消费：cancelled=True，已入库前缀保留，
     # 完成数与回调严格交替（apply 与 progress 不重不漏）

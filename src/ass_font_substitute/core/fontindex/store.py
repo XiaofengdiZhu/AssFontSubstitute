@@ -274,24 +274,36 @@ def update_index(dir_path: Path, conn: sqlite3.Connection,
             conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
 
     total = len(todo)
-    if total > 1 and (executor is not None or max_threads > 1):
-        _update_parallel(dir_path, conn, todo, res, progress, total,
-                         executor=executor, max_threads=max_threads)
-    else:
-        for done, p in enumerate(todo, 1):
-            rel = p.relative_to(dir_path).as_posix()
-            # 解析前取 stat：若解析窗口内文件被外部覆写，记下的是旧 mtime，
-            # 下次必重检；解析后取会记到新 mtime，门误判「未变」→ 静默陈旧
-            st = p.stat()
-            try:
-                recs = parse_font_file(p)
-            except FontParseError as e:
-                recs = e
-            fps = None if isinstance(recs, FontParseError) else _fingerprints(recs)
-            _apply_result(conn, rel, st, recs, res, fps)
-            if progress is not None and not progress(done, total, res):
-                res.cancelled = True
-                break
+    # 建索引期间停自动 checkpoint：逐文件 COMMIT 只 append WAL（页缓存，
+    # NORMAL 无 fsync），默认每 ~4MB 触发一次「WAL 抄回主库+fsync」，17k
+    # 文件首建要 100~200 次；改为主线程全程顺序写 WAL、收尾一次性
+    # TRUNCATE checkpoint，物理 I/O 收敛为 1 次。取消/崩溃语义不变（已
+    # 提交前缀本就活在 WAL，恢复路径同款），代价是建索引期间 -wal 涨到
+    # 与库同量级。checkpoint busy（GUI 恰在读）时忽略，留待 close 兜底。
+    saved_ac = conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
+    conn.execute("PRAGMA wal_autocheckpoint=0")
+    try:
+        if total > 1 and (executor is not None or max_threads > 1):
+            _update_parallel(dir_path, conn, todo, res, progress, total,
+                             executor=executor, max_threads=max_threads)
+        else:
+            for done, p in enumerate(todo, 1):
+                rel = p.relative_to(dir_path).as_posix()
+                # 解析前取 stat：若解析窗口内文件被外部覆写，记下的是旧 mtime，
+                # 下次必重检；解析后取会记到新 mtime，门误判「未变」→ 静默陈旧
+                st = p.stat()
+                try:
+                    recs = parse_font_file(p)
+                except FontParseError as e:
+                    recs = e
+                fps = None if isinstance(recs, FontParseError) else _fingerprints(recs)
+                _apply_result(conn, rel, st, recs, res, fps)
+                if progress is not None and not progress(done, total, res):
+                    res.cancelled = True
+                    break
+    finally:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute(f"PRAGMA wal_autocheckpoint={saved_ac}")
     res.fonts = stats(conn)["fonts"]
     return res
 
