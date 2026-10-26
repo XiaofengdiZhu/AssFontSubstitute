@@ -164,6 +164,40 @@ def test_update_index_parallel_executor(tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM bad").fetchone()[0] == 1
 
 
+def test_update_index_parallel_fingerprints(tmp_path):
+    # 并行路径逐 face 指纹不串位（TTC 3 face 属性各异）：fingerprints 表
+    # 值与按 fonts 行重算 fingerprint_of 逐一相等
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+
+    from ass_font_substitute.core.fontindex.store import FP_ALGO
+    from ass_font_substitute.core.fontindex.store import fingerprint_of
+    from ass_font_substitute.core.models import CmapRanges
+    from tests.fonts import build_ttc
+    d = tmp_path / "fonts"
+    d.mkdir()
+    build_ttc(d / "t.ttc", [{"chars": "永", "family": "A體", "weight": 400},
+                            {"chars": "中", "family": "B體", "weight": 700},
+                            {"chars": "木", "family": "C體", "weight": 900}])
+    _mklib(d, n=1)
+    conn = open_db(d / "fontindex.db")
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        r = update_index(d, conn, executor=ex)
+    assert r.added == 2 and stats(conn)["fonts"] == 4
+    fps = {fi: (algo, fp) for fi, algo, fp in conn.execute(
+        "SELECT face_index, algo, fp FROM fingerprints WHERE rel_path='t.ttc'")}
+    assert sorted(fps) == [0, 1, 2]
+    assert {algo for algo, _ in fps.values()} == {FP_ALGO}
+    assert len({fp for _, fp in fps.values()}) == 3   # 三 face 指纹互异
+    rows = conn.execute(
+        "SELECT face_index, aliases, weight, width, italic, cmap "
+        "FROM fonts WHERE rel_path='t.ttc'").fetchall()
+    for fi, aliases, weight, width, italic, cmap in rows:
+        assert fps[fi][1] == fingerprint_of(json.loads(aliases),
+                                            CmapRanges.from_bytes(cmap),
+                                            weight, width, bool(italic))
+
+
 def test_update_index_parallel_cancel(tmp_path):
     # progress 返 False → 停止消费：cancelled=True，已入库前缀保留，
     # 完成数与回调严格交替（apply 与 progress 不重不漏）

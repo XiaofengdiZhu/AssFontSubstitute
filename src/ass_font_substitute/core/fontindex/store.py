@@ -128,19 +128,32 @@ def scan_dir(root: Path) -> list[Path]:
     return sorted(out)
 
 
-def _parse_task(p: Path) -> list[FontRecord] | FontParseError:
-    """进程池任务体：FontParseError 以值返回（不 raise，免池层异常包装），
-    pickle 回主线程照常入 bad 表。"""
+def _fingerprints(recs: list[FontRecord]) -> list[str]:
+    """逐 face 预计算指纹：worker 解析后立即算（主线程只管写库），
+    串行/池崩回退路径共用。"""
+    return [fingerprint_of(r.aliases, r.cmap, r.weight, r.width, r.italic)
+            for r in recs]
+
+
+def _parse_task(p: Path) -> tuple[list[FontRecord] | FontParseError,
+                                  list[str] | None]:
+    """进程池任务体：解析 + 指纹预计算都在 worker（指纹 ~0.5ms/文件，
+    留主线程曾是写侧天花板）。FontParseError 以值返回（不 raise，免池层
+    异常包装），pickle 回主线程照常入 bad 表，此时指纹为 None。"""
     try:
-        return parse_font_file(p)
+        recs = parse_font_file(p)
     except FontParseError as e:
-        return e
+        return e, None
+    return recs, _fingerprints(recs)
 
 
 def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
                   recs: list[FontRecord] | FontParseError,
-                  res: UpdateResult) -> None:
-    """单文件写库事务（串行/并行共用）：失败入 bad，成功清 bad 重灌条目。"""
+                  res: UpdateResult,
+                  fps: list[str] | None = None) -> None:
+    """单文件写库事务（串行/并行共用）：失败入 bad，成功清 bad 重灌条目。
+    fps 为调用方预计算的逐 face 指纹（对齐 recs；worker 与串行/回退路径
+    均显式传入），None 仅防御兜底就地补算。"""
     with conn:
         if isinstance(recs, FontParseError):
             res.bad += 1
@@ -154,7 +167,7 @@ def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
                      (rel, st.st_size, st.st_mtime_ns))
         conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
         conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
-        for r in recs:
+        for i, r in enumerate(recs):
             conn.execute(
                 "INSERT INTO fonts(rel_path,face_index,psname,version,aliases,"
                 "weight,width,italic,cmap,script,category) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -166,6 +179,7 @@ def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
             conn.execute(
                 "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
                 (rel, r.face_index, st.st_mtime_ns, FP_ALGO,
+                 fps[i] if fps is not None else
                  fingerprint_of(r.aliases, r.cmap, r.weight, r.width,
                                 r.italic)))
 
@@ -174,9 +188,10 @@ def _update_parallel(dir_path: Path, conn: sqlite3.Connection,
                      todo: list[Path], res: UpdateResult,
                      progress: Callable[[int, int, UpdateResult], bool] | None,
                      total: int, executor=None, max_threads: int = 1) -> None:
-    """解析走进程池（fontTools 纯 Python CPU 摊多核），写库仍主线程逐文件
-    事务（SQLite 单写者；取消/中断保留已入库前缀语义不变——progress 返
-    False 停止消费，在途结果丢弃不入库，未派发文件下次增量重跑）。
+    """解析走进程池（fontTools 纯 Python CPU 与指纹预计算同摊多核），
+    写库仍主线程逐文件事务（SQLite 单写者；取消/中断保留已入库前缀语义
+    不变——progress 返 False 停止消费，在途结果丢弃不入库，未派发文件
+    下次增量重跑）。
     executor 供测试注入（行为与真池一致），None 按 max_threads 建
     ProcessPoolExecutor。池整体崩坏（BrokenProcessPool，fontTools 纯
     Python 极难触发，纯保险）时剩余文件回退主线程串行续完。"""
@@ -192,12 +207,12 @@ def _update_parallel(dir_path: Path, conn: sqlite3.Connection,
         done = 0
         for fut in as_completed(futs):
             try:
-                recs = fut.result()
+                recs, fps = fut.result()
             except BrokenProcessPool:
                 break
             rel, st, _ = futs[fut]
             del pending[fut]
-            _apply_result(conn, rel, st, recs, res)
+            _apply_result(conn, rel, st, recs, res, fps)
             done += 1
             if progress is not None and not progress(done, total, res):
                 res.cancelled = True
@@ -207,7 +222,8 @@ def _update_parallel(dir_path: Path, conn: sqlite3.Connection,
                 recs = parse_font_file(p)
             except FontParseError as e:
                 recs = e
-            _apply_result(conn, rel, st, recs, res)
+            fps = None if isinstance(recs, FontParseError) else _fingerprints(recs)
+            _apply_result(conn, rel, st, recs, res, fps)
             done += 1
             if progress is not None and not progress(done, total, res):
                 res.cancelled = True
@@ -271,7 +287,8 @@ def update_index(dir_path: Path, conn: sqlite3.Connection,
                 recs = parse_font_file(p)
             except FontParseError as e:
                 recs = e
-            _apply_result(conn, rel, st, recs, res)
+            fps = None if isinstance(recs, FontParseError) else _fingerprints(recs)
+            _apply_result(conn, rel, st, recs, res, fps)
             if progress is not None and not progress(done, total, res):
                 res.cancelled = True
                 break

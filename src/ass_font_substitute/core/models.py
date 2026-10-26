@@ -4,6 +4,7 @@ import bisect
 import struct
 from dataclasses import dataclass
 from dataclasses import field
+from itertools import chain
 
 
 @dataclass(frozen=True)
@@ -22,8 +23,12 @@ class CmapRanges:
         return sum(self.contains(ord(c)) for c in s) / len(s)
 
     def to_bytes(self) -> bytes:
+        # 不可用 sum(zip(...), ()) 拼元组——O(n²)，CJK 字体 4000+ 区间时
+        # 单次 9ms，曾是索引写库 92% 耗时；chain 展平 O(n)
         n = len(self.starts)
-        return struct.pack(f"<I{n * 2}I", n, *sum(zip(self.starts, self.ends, strict=False), ()))
+        return struct.pack(
+            f"<I{n * 2}I", n,
+            *chain.from_iterable(zip(self.starts, self.ends, strict=False)))
 
     @classmethod
     def from_bytes(cls, b: bytes) -> CmapRanges:
