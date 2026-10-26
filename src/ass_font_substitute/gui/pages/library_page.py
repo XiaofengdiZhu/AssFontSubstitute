@@ -43,6 +43,7 @@ from ass_font_substitute.gui.jobs import retry_bad
 from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.library_vm import LibraryVM
 from ass_font_substitute.gui.pages.subs_page import _ElidedLabel
+from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.workers import IndexWorker
 
 _STAT_KEYS = [("dirs", "字体目录"), ("files", "文件总数"), ("fonts", "字体总数"),
@@ -218,11 +219,11 @@ class LibraryPage(ScrollArea):
 
         # 按钮初始无布局，_rebuild_dir_rows 时装进分组卡标题栏/失败卡
         self.btn_add = PushButton(FIF.FOLDER_ADD, "添加目录")
-        self.btn_add.setToolTip("选择一个字体目录加入列表")
+        install_tip(self.btn_add, "选择一个字体目录加入列表")
         self.btn_refresh = TransparentToolButton(FIF.SYNC)
-        self.btn_refresh.setToolTip("刷新状态")
+        install_tip(self.btn_refresh, "刷新状态")
         self.btn_update = PrimaryPushButton(FIF.UPDATE, "更新全部")
-        self.btn_update.setToolTip("更新全部目录的索引")
+        install_tip(self.btn_update, "更新全部目录的索引")
 
         # 更新态：按钮原地变「[旋转环]取消更新」，宽度锁定防文字变短塌缩
         self._busy_timer = QTimer(self)
@@ -281,13 +282,13 @@ class LibraryPage(ScrollArea):
             btn = PushButton(FIF.UPDATE, _STATUS_TEXT.get(d.state, d.state))
             if d.state == "stale":
                 btn.setEnabled(self._index_worker is None)
-                btn.setToolTip("点击更新该目录索引")
+                install_tip(btn, "点击更新该目录索引")
                 setCustomStyleSheet(btn, _AMBER_QSS_LIGHT, _AMBER_QSS_DARK)
                 btn.clicked.connect(
                     lambda _=False, p=d.path: self._start_update_dir(p))
             elif d.state == "indexing":
                 btn.setIcon(FIF.PAUSE)
-                btn.setToolTip("点击停止该目录的索引更新")
+                install_tip(btn, "点击停止该目录的索引更新")
                 btn.clicked.connect(
                     lambda _=False, p=d.path: self._stop_dir(p))
             else:
@@ -305,7 +306,7 @@ class LibraryPage(ScrollArea):
                                   f" · 失败/旧版 {d.fail}", right)
             # 标题位放路径（组件 titleLabel 不省略，换 _ElidedLabel 防窄窗顶飞）
             path_lbl = _ElidedLabel(d.path)
-            path_lbl.setToolTip(d.path)
+            install_tip(path_lbl, d.path)
             group.textLayout.insertWidget(0, path_lbl)
             group.titleLabel.hide()
             # 左块两行锁同一定宽（统计模板宽）：行中进度文案位置逐行一致
@@ -486,7 +487,7 @@ class LibraryPage(ScrollArea):
     def _on_index_progress(self, d, done, total, res):
         self._index_progress[d] = (done, total)
         # 宽度锁定期间计数不进文字（会撑宽/塌缩），进度走 tooltip
-        self.btn_update.setToolTip(f"正在更新索引（{done}/{total}），点击取消")
+        self.btn_update.setToolTip(f"正在更新索引（{done}/{total}），点击取消")  # 过滤器建时已装
         w = self._progress_widgets.get(d)
         if w is None or not total:
             return                        # 首笔回执前不定态条自转，无需动
@@ -542,7 +543,7 @@ class LibraryPage(ScrollArea):
             self._busy_i = 0
             self.btn_update.setIcon(self._busy_frames()[0])
             self._busy_timer.start()
-            self.btn_update.setToolTip("正在更新索引，点击取消")
+            self.btn_update.setToolTip("正在更新索引，点击取消")  # 同上
         else:
             self._busy_timer.stop()
             self.btn_update.setText("更新全部索引")

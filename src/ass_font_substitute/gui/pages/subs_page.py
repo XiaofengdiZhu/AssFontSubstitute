@@ -35,6 +35,7 @@ from ass_font_substitute.gui.lastdir import pick_open_files
 from ass_font_substitute.gui.paths import decisions_path
 from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.subs_vm import SubsVM
+from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.widgets.font_card import FontCard
 from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
 from ass_font_substitute.gui.widgets.wheel_block import WheelBlock
@@ -207,11 +208,11 @@ class SubsPage(ScrollArea):
             cb.toggled.connect(lambda on, p=f.path: self._on_file_checked(p, on))
             h.addWidget(cb)
             name = _ElidedLabel(Path(f.path).name)
-            name.setToolTip(f.path)
+            install_tip(name, f.path)
             h.addWidget(name, 1)
             if f.error:
                 h.addWidget(InfoBadge.error("解析失败"))
-                row.setToolTip(f.error)
+                install_tip(row, f.error)
             else:
                 h.addWidget(CaptionLabel(f"{f.font_count} 种字体"))
                 if f.unknown_styles:

@@ -9,6 +9,8 @@ from qfluentwidgets import CaptionLabel
 from qfluentwidgets import isDarkTheme
 from qfluentwidgets import qconfig
 
+from ass_font_substitute.gui.tip import install_tip
+
 # 贴图条宽度静态上限（布局未跑时的兜底）；布局定宽后取实际可用宽再扣
 # 呼吸边——顶满标签宽会末字贴死右缘、细笔画被裁半个
 _MAX_BAR_W = 360
@@ -56,6 +58,8 @@ class PreviewBar(CaptionLabel):
         self._stale_theme = False            # 不可见期换肤未贴上，showEvent 补
         self._applied_w = -1                 # 最近一次贴图用的宽度上限
         qconfig.themeChanged.connect(self._on_theme_changed)
+        # 错误详情走 Fluent 气泡（过滤器装一次，set_row 换 tooltip 文本照常生效）
+        install_tip(self)
         self._render()
 
     def _on_theme_changed(self, _theme):
