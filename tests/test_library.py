@@ -235,3 +235,21 @@ def test_name_langs_read_from_db_and_chain_pick(tmp_path):
     # 入库 display_name 不变（CJK 优先旧规则：表序首条 CJK——fontTools
     # 重排后 0x404 繁体在前），作链挑选兜底
     assert e.display_name == "微軟雅黑"
+
+
+def test_load_name_records_from_db(tmp_path):
+    # v8：详情命名卡按需读库（裸连接、行缺失/库不可读一律 None 兜底）
+    from ass_font_substitute.core.fontindex.library import load_name_records
+
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永", family="TestFam")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    conn.close()
+    recs = load_name_records(str(d), "a.ttf", 0)
+    assert (1, 3, 0x409, "TestFam") in recs
+    assert all(isinstance(t, str) for _n, _p, _l, t in recs)
+    # 行缺失 / 库不存在：None（详情走别名平铺兜底）
+    assert load_name_records(str(d), "missing.ttf", 0) is None
+    assert load_name_records(str(tmp_path / "nope"), "a.ttf", 0) is None

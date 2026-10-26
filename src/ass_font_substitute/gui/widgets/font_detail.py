@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 import sys
 from datetime import datetime
-from pathlib import Path
 
 from babel import Locale
 from PySide6.QtCore import QSize
@@ -27,8 +26,9 @@ from qfluentwidgets import SubtitleLabel
 from qfluentwidgets import TransparentDropDownPushButton
 
 from ass_font_substitute.core.fontindex.library import FontEntity
+from ass_font_substitute.core.fontindex.library import load_name_records
 from ass_font_substitute.core.fontindex.library import normalize_name
-from ass_font_substitute.core.fontindex.parser import read_name_records
+from ass_font_substitute.core.fontindex.parser import RECORD_IDS
 from ass_font_substitute.gui.name_lang import _UI_LANG_ORDER
 from ass_font_substitute.gui.name_lang import pick_display_name
 from ass_font_substitute.gui.name_lang import ui_lang
@@ -99,7 +99,9 @@ def group_names(records: list[tuple[int, int, int, str]]
       自然沉底被去重）；ID16 与 ID1 文本全同则整行不出。"""
     by_id: dict[int, list[tuple[int, int, int, str]]] = {}
     for nid, plat, lang, text in records:
-        if nid in (1, 2, 3, 4, 16):
+        # 与入库白名单同源（parser.RECORD_IDS）：单边改动会静默产生
+        # 「入库记录被丢弃」的空洞
+        if nid in RECORD_IDS:
             by_id.setdefault(nid, []).append(
                 (_LANG_PRIO.get(lang, 10 + lang), plat, lang, text))
     id1_texts = {t for (_p, _pl, _l, t) in by_id.get(1, [])}
@@ -259,20 +261,14 @@ def _simple_val(text: str, wrap: bool = False,
     return lab
 
 
-def _names_job(ctx, dir_path: str, rel_path: str, face_index: int):
-    """worker 线程：读单 face name 表原始记录（懒加载只定点读小表）。
-    回传带请求键，_on_names 按键丢弃嵌套多弹窗的他人广播。"""
-    return ((dir_path, rel_path, face_index),
-            read_name_records(Path(dir_path) / rel_path, face_index))
-
-
 class FontDetailDialog(MessageBoxBase):
     """字体详情：大预览条 + 命名/属性/文件三卡 + 同文件、同字体系列表。
 
-    命名卡异步装载：worker 读该 face 的 name 表原始记录（语言标注分组，
-    Windows 查看器样式）；文件不可读则回退平铺别名。两个列表双击条目
-    嵌套再开一个详情（parent=self，可连续跳看）；单击仅高亮。选择对话
-    框（FontPickerDialog）不提供此入口，仅浏览页双击列表行打开。"""
+    命名卡同步装载：打开时从索引库读该 face 的 name 表原始记录
+    （fonts.name_records，SCHEMA v8；本地库亚毫秒，首屏即结构化命名
+    零闪烁），记录缺失/库不可读回退平铺别名。两个列表双击条目嵌套再
+    开一个详情（parent=self，可连续跳看）；单击仅高亮。选择对话框
+    （FontPickerDialog）不提供此入口，仅浏览页双击列表行打开。"""
 
     def __init__(self, e: FontEntity, entities: list[FontEntity],
                  worker, pvm, settings=None, parent=None):
@@ -291,7 +287,7 @@ class FontDetailDialog(MessageBoxBase):
         bar = PreviewBar(worker, pvm, e, self._name,
                          f"detail:{e.fingerprint}:{id(self)}", height=BAR_H)
 
-        # ---- 命名卡：占位（别名平铺兜底）→ 异步结构化记录覆盖；
+        # ---- 命名卡：同步装载（记录缺失/读库失败才兜底平铺）；
         #      标题行右侧语言选择（记录只一种语言时隐藏）----
         name_card = SimpleCardWidget()
         self._name_v = QVBoxLayout(name_card)
@@ -312,8 +308,13 @@ class FontDetailDialog(MessageBoxBase):
         self._grouped: list = []
         self._lang: tuple[int, int] | None = None
         self._lang_actions: list = []
-        self._ps: str | None = None
-        self._fill_names_fallback()
+        # 同步装载（构造内完成，首屏即终态）：读库失败/无记录走兜底，
+        # 不做「先兜底再覆盖」——那种两段渲染正是回填闪帧与闪小窗之源
+        records = load_name_records(e.dir_path, e.rel_path, e.face_index)
+        if records:
+            self._apply_name_records(records)
+        else:
+            self._fill_names_fallback()
 
         # ---- 属性卡 ----
         attr_card, av = _card("属性")
@@ -394,18 +395,25 @@ class FontDetailDialog(MessageBoxBase):
         self.cancelButton.setText("关闭")
         self.cancelButton.setFixedWidth(140)
         self._sections = (file_list, fam_list)
-        # 关闭即 cancel 在途渲染/解析 + 销毁：详情可反复开关，不回收则
-        # 隐藏对话框与已排队任务随打开次数累积（淡出动画完成后才
-        # deleteLater 不截断动画；嵌套时外层被模态挡住，不会先于内层销毁）
+        # 关闭即 cancel 在途渲染 + 销毁：详情可反复开关，不回收则隐藏
+        # 对话框与已排队任务随打开次数累积（淡出动画完成后才 deleteLater
+        # 不截断动画；嵌套时外层被模态挡住，不会先于内层销毁）
         self._bar = bar
         self.finished.connect(self._on_finished)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        worker.result.connect(self._on_names)
-        worker.failed.connect(self._on_names_failed)
-        self._dnames_handle = worker.submit(
-            "dnames", _names_job, e.dir_path, e.rel_path, e.face_index)
 
-    # ---- 命名卡异步装载 ----
+    # ---- 命名卡同步装载 ----
+
+    def _apply_name_records(self, records):
+        """原始记录 → 结构化命名（构造期共用回填体）。PostScript 名不
+        从记录取（RECORD_IDS 白名单不含 ID6），恒走入库的 psname 列。"""
+        self._grouped = group_names(records)
+        self._rebuild_lang_menu()
+        # _rebuild_lang_menu 末尾 _set_lang 已渲染过（有语言记录时）；
+        # 再显式渲染一次=白造一轮行又拆一轮（纯浪费+放大拆行开销）。
+        # 仅无任何语言记录（_set_lang 未被调）时兜底渲染
+        if self._lang is None:
+            self._render_names()
 
     def _swap_names(self, rows: list[tuple[str, QWidget]]):
         # QFormLayout 的行项是 layout 内部 item（非 widget item），外层
@@ -442,26 +450,9 @@ class FontDetailDialog(MessageBoxBase):
         """解析结果未到/失败：平铺别名兜底，命名卡不空窗；语言钮隐藏。"""
         self._grouped = []
         self._lang = None
-        self._ps = None
         self._lang_btn.hide()
         self._swap_names([("全部别名", _simple_val(
             "、".join(self._e.aliases) or "—", wrap=True))])
-
-    def _on_names(self, tag, payload):
-        if tag != "dnames":
-            return
-        key, records = payload
-        if key != (self._e.dir_path, self._e.rel_path, self._e.face_index):
-            return                          # 嵌套多弹窗广播：非本弹窗请求
-        self._grouped = group_names(records)
-        self._ps = next((t for nid, plat, _l, t in records
-                         if nid == 6 and plat == 3), None)
-        self._rebuild_lang_menu()
-        # _rebuild_lang_menu 末尾 _set_lang 已渲染过（有语言记录时）；
-        # 再显式渲染一次=白造一轮行又拆一轮（纯浪费+放大拆行开销）。
-        # 仅无任何语言记录（_set_lang 未被调）时兜底渲染
-        if self._lang is None:
-            self._render_names()
 
     def _rebuild_lang_menu(self):
         """语言下拉：记录中出现过的各语言（跨字段并集，按展示序）。默认
@@ -516,21 +507,10 @@ class FontDetailDialog(MessageBoxBase):
                 for label, pairs in visible_name_rows(self._grouped,
                                                       self._lang)]
         rows.append(("PostScript 名",
-                     _simple_val(self._ps or self._e.psname or "—",
-                                 selectable=True)))
+                     _simple_val(self._e.psname or "—", selectable=True)))
         self._swap_names(rows)
 
-    def _on_names_failed(self, tag, _err):
-        # failed 信号不带请求 key，是跨弹窗广播：已成功回填过结构化命
-        # 名的不回退（嵌套他人文件丢失的失败广播会误伤本弹窗）；自己
-        # 的文件失败发生在回填前（_grouped 空），正常走兜底
-        if tag == "dnames" and not self._grouped:
-            self._fill_names_fallback()     # 文件丢失/解析失败：兜底不动
-
     def _on_finished(self, _result):
-        self._worker.result.disconnect(self._on_names)
-        self._worker.failed.disconnect(self._on_names_failed)
-        self._dnames_handle.cancelled = True
         self._bar.cancel()          # 顶栏在途渲染同出队（原来只存没用）
         # 行内预览在途任务出队：关闭后回传没人接，白占工作者串行时段
         for lst in self._sections:

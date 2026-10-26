@@ -17,6 +17,9 @@ from ass_font_substitute.core.models import FontRecord
 # 别名会污染按名搜索（搜 bold 命中全库粗体）并污染展示名；2（subfamily）
 # 同理从未收过
 NAME_IDS = (1, 4, 6, 16)
+# 详情命名卡消费的原始记录 ID 全集（name_records 入库 SCHEMA v8）：
+# 全平台全语言存，2/3 只进命名卡展示、从不进别名
+RECORD_IDS = (1, 2, 3, 4, 16)
 TTC_EXTS = {".ttc", ".otc"}
 _VER_RE = re.compile(r"([\d]+(?:\.\d+)*)")
 
@@ -91,29 +94,6 @@ def _load_fonts(path: Path) -> list[TTFont]:
         raise FontParseError(f"{path.name}: {e}") from e
 
 
-def read_name_records(path: Path, face_index: int = 0
-                      ) -> list[tuple[int, int, int, str]]:
-    """按需读单个 face 的 name 表原始记录 (nameID, platformID, langID,
-    text)，详情页命名区专用。不进索引不落库：展示语义（语言标注/分组）
-    随时改零 SCHEMA 成本；文件丢失/face 超界抛 FontParseError。"""
-    fonts = _load_fonts(path)
-    try:
-        if face_index >= len(fonts):
-            raise FontParseError(f"{path.name}: face {face_index} 超界")
-        out = []
-        for r in fonts[face_index]["name"].names:
-            try:
-                s = r.toUnicode()
-            except Exception:
-                continue
-            if s:
-                out.append((r.nameID, r.platformID, r.langID, s))
-        return out
-    finally:
-        for tt in fonts:
-            tt.close()
-
-
 def parse_font_file(path: Path) -> list[FontRecord]:
     # 不读全文：lazy 加载只定点取 name/OS/2/cmap 三张小表，文件级变更
     # 检测由 update_index 的 size+mtime 门负责，解析层无需内容指纹
@@ -128,10 +108,16 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                 # 展示名语言链候选：ID1/4/16 的 Windows 平台记录带 langID
                 # 入库（GUI 按界面语言链挑名用；@ 变体不参与）
                 by_lang: dict[int, list[tuple[int, str]]] = {}
+                # 命名卡原始记录（SCHEMA v8 入库，详情打开同步读零闪烁）
+                records: list[tuple[int, int, int, str]] = []
                 all_names: set[str] = set()
                 for r in name.names:
                     s = r.toUnicode()
-                    if not s or r.nameID not in NAME_IDS:
+                    if not s:
+                        continue
+                    if r.nameID in RECORD_IDS:
+                        records.append((r.nameID, r.platformID, r.langID, s))
+                    if r.nameID not in NAME_IDS:
                         continue
                     all_names.add(s)
                     if r.platformID == 3 and r.nameID in (1, 4, 16) \
@@ -158,7 +144,7 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                     script=classify_script(cmap), category=classify_category(aliases),
                     display_name=_display_name(by_id, aliases),
                     family_names=_family_names(by_id),
-                    name_langs=by_lang,
+                    name_langs=by_lang, name_records=tuple(records),
                 ))
             except Exception as e:
                 # spec §11：TTC 个别子字体解析失败 → 跳过该子字体，其余照常

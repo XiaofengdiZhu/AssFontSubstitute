@@ -34,7 +34,11 @@ from ass_font_substitute.core.models import FontRecord
 # {nameID: [[langID, 文本]]} 入库）——展示名从「入库时选好单值」改为
 # 「装载后各界面按界面语言链现挑」（简中：简→繁→英→日；繁中前两对调），
 # 列只存原始语言记录，链语义再改零重建成本。
-SCHEMA_VERSION = 7
+# v8：fonts 表新增 name_records BLOB（zlib 压 JSON，ID1/2/3/4/16 全平台
+# 全语言原始记录）——详情命名卡从「worker 按需读字体文件（异步，首帧
+# 闪全部别名占位）」改为「打开时同步读库（亚毫秒，首屏即结构化命名，
+# 零闪烁）」。load_font_rows 不取此列：全量装进实体是几十 MB 常驻内存。
+SCHEMA_VERSION = 8
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 
@@ -51,7 +55,7 @@ CREATE TABLE IF NOT EXISTS fonts(
   id INTEGER PRIMARY KEY, rel_path TEXT, face_index INTEGER, psname TEXT,
   version TEXT, aliases TEXT, weight INTEGER, width INTEGER, italic INTEGER,
   cmap_id INTEGER NOT NULL, script TEXT, category TEXT, display_name TEXT,
-  family_names TEXT, name_langs TEXT,
+  family_names TEXT, name_langs TEXT, name_records BLOB,
   UNIQUE(rel_path, face_index));
 CREATE TABLE IF NOT EXISTS bad(
   rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, reason TEXT);
@@ -200,14 +204,18 @@ def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
             conn.execute(
                 "INSERT INTO fonts(rel_path,face_index,psname,version,aliases,"
                 "weight,width,italic,cmap_id,script,category,display_name,"
-                "family_names,name_langs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "family_names,name_langs,name_records) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (rel, r.face_index, r.psname,
                  json.dumps(r.version) if r.version else None,
                  json.dumps(r.aliases, ensure_ascii=False),
                  r.weight, r.width, int(r.italic),
                  cid, r.script, r.category, r.display_name,
                  json.dumps(r.family_names, ensure_ascii=False),
-                 json.dumps(r.name_langs, ensure_ascii=False)))
+                 json.dumps(r.name_langs, ensure_ascii=False),
+                 zlib.compress(
+                     json.dumps(r.name_records, ensure_ascii=False)
+                     .encode("utf-8"), 1)))
             conn.execute(
                 "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
                 (rel, r.face_index, st.st_mtime_ns, FP_ALGO,

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import zlib
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
+from urllib.parse import quote
 
+from ass_font_substitute.core.fontindex.store import DB_NAME
 from ass_font_substitute.core.fontindex.store import FP_ALGO
 from ass_font_substitute.core.fontindex.store import fingerprint_of
 from ass_font_substitute.core.fontindex.store import load_font_rows
@@ -16,6 +19,31 @@ from ass_font_substitute.core.models import CmapRanges
 def normalize_name(name: str) -> str:
     """名称规范化：strip 空白 + 剥 @ 前缀 + casefold。"""
     return name.strip().lstrip("@").casefold()
+
+
+def load_name_records(dir_path: str, rel_path: str, face_index: int
+                      ) -> list[tuple[int, int, int, str]] | None:
+    """按需读单 face 命名卡原始记录 (nameID, platformID, langID, 文本)
+    （fonts.name_records，SCHEMA v8）。详情打开时 UI 线程同步调：本地库
+    亚毫秒（zlib 解压 ~1KB），NAS 库几十 ms，双击场景可感阈值内。URI
+    mode=ro 只读打开——普通 connect 在库文件缺失时会静默创建空库并取
+    写锁（NAS 上正是慢点与故障点）；行缺失/库损坏/任何异常一律 None
+    （调用方走别名平铺兜底）。"""
+    p = Path(dir_path) / DB_NAME
+    try:
+        conn = sqlite3.connect(f"file:{quote(str(p))}?mode=ro", uri=True,
+                               timeout=5)
+        try:
+            row = conn.execute(
+                "SELECT name_records FROM fonts WHERE rel_path=? AND "
+                "face_index=?", (rel_path, face_index)).fetchone()
+        finally:
+            conn.close()
+        if row is None or row[0] is None:
+            return None
+        return [tuple(rec) for rec in json.loads(zlib.decompress(row[0]))]
+    except Exception:
+        return None
 
 
 @dataclass(frozen=True)

@@ -174,32 +174,6 @@ def test_parse_display_name_priority(tmp_path):
     assert _display_name({}, []) == ""
 
 
-def test_read_name_records(tmp_path):
-    # 详情页命名区按需解析：name 表原始记录全量出（含未入索引的 ID2/3/5），
-    # 多语言同 ID 各记录都在；face 超界报错
-    from fontTools.ttLib import TTFont
-
-    from ass_font_substitute.core.fontindex.parser import FontParseError
-    from ass_font_substitute.core.fontindex.parser import read_name_records
-
-    p = tmp_path / "n.ttf"
-    build_font(p, chars="永", family="Test體")
-    f = TTFont(str(p))
-    f["name"].setName("Full Name", 4, 3, 1, 0x409)
-    f["name"].setName("全名", 4, 3, 1, 0x804)
-    f["name"].setName("Sub", 2, 3, 1, 0x409)
-    f["name"].setName("Test體; v1", 3, 3, 1, 0x409)
-    f.save(p)
-    f.close()
-    recs = read_name_records(p)
-    assert (4, 3, 0x409, "Full Name") in recs
-    assert (4, 3, 0x804, "全名") in recs
-    assert (2, 3, 0x409, "Sub") in recs
-    assert (3, 3, 0x409, "Test體; v1") in recs
-    with pytest.raises(FontParseError):
-        read_name_records(p, face_index=5)
-
-
 def test_parse_family_names(tmp_path):
     # 字体系（FontCreator「字体系名称」）= ID16 实字段；缺失视 ID1
     # （spec：4 样式内字体 ID16 本就缺）；全语言集合；@ 竖排变体跳过
@@ -237,3 +211,25 @@ def test_parse_name_langs(tmp_path):
     assert rec.name_langs[4] == [
         (0x404, "繁體家族"), (0x409, "TestFam"), (0x804, "简体家族")]
     assert set(rec.name_langs) == {1, 4}    # 无 ID16/6（工厂不写 16）
+
+
+def test_parse_name_records(tmp_path):
+    # v8 命名卡原始记录：ID 1/2/3/4/16 全平台全语言入库（Mac 平台保留，
+    # group_names 靠它去重）、保表序；PostScript(6)/版本(5) 不入
+    from fontTools.ttLib import TTFont
+
+    p = tmp_path / "recs.ttf"
+    build_font(p, chars="永", family="Rec體")
+    rec = parse_font_file(p)[0]
+    nids = {nid for nid, _p, _l, _t in rec.name_records}
+    assert nids == {1, 2, 3, 4}          # 工厂不写 16；6 不收
+    assert (1, 3, 0x409, "Rec體") in rec.name_records
+    # Mac 平台记录保留；@ 变体照存（展示层语义，别名侧才排除）
+    f = TTFont(str(p))
+    f["name"].setName("Mac Rec", 1, 1, 0, 0)
+    f["name"].setName("@Rec體 Vertical", 4, 3, 1, 0x409)
+    f.save(p)
+    f.close()
+    rec = parse_font_file(p)[0]
+    assert (1, 1, 0, "Mac Rec") in rec.name_records
+    assert (4, 3, 0x409, "@Rec體 Vertical") in rec.name_records

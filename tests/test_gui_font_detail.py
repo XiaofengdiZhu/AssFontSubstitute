@@ -1,5 +1,5 @@
 """字体详情对话框：命名记录分组/语言标注、同文件/同字体系、嵌套双击、
-异步命名装载与失败回退。"""
+v8 同步命名装载（零闪烁）与失败回退。"""
 import os
 
 import pytest
@@ -195,55 +195,49 @@ def test_dialog_nested_double_click(qapp, monkeypatch):
     assert opened[0].parent() is dlg                # 嵌套：parent=self
 
 
-def test_dialog_async_names_fill_and_fallback(qapp):
+def test_dialog_sync_names_fill_and_fallback(qapp, monkeypatch):
+    # v8 同步装载：构造期从索引库读 name 记录，首屏即结构化命名（零闪
+    # 烁，无「先兜底再覆盖」二段渲染）；读不到/失败回退别名平铺
     from PySide6.QtWidgets import QLabel
     from PySide6.QtWidgets import QWidget
 
     from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets import font_detail as fd
     from ass_font_substitute.gui.widgets.font_detail import FontDetailDialog
 
     pool = _pool()
     a1 = pool[0]
-    w = _FakeWorker()
-    host = QWidget()
-    dlg = FontDetailDialog(a1, pool, w, PreviewVM(), parent=host)
-
-    # 兜底先行：别名平铺
-    texts = {x.text() for x in dlg.findChildren(QLabel)}
-    assert "合并体" in texts
-
-    # 解析回填：结构化命名（语言标注）覆盖兜底
-    _tag, _fn, args, handle = next(t for t in w.submits if t[0] == "dnames")
-    assert args == (a1.dir_path, a1.rel_path, a1.face_index)
+    key = (a1.dir_path, a1.rel_path, a1.face_index)
+    # name_records 生产形态：RECORD_IDS 白名单无 ID6（PostScript 名走
+    # fonts.psname 列，测试夹具同口径，防死路径假阳性）
     recs = [(1, 3, 0x0409, "Merge"), (1, 3, 0x0804, "合并体"),
-            (2, 3, 0x0409, "Light"), (6, 3, 0x0409, "Merge-Light")]
-    w.result.emit("dnames", (args, recs))
-    # 默认语言链（简中）：字体系只显中文行；PostScript 名恒显
+            (2, 3, 0x0409, "Light")]
+    table = {key: recs}
+
+    def fake_load(d, r, fi):
+        return table.get((d, r, fi))
+
+    monkeypatch.setattr(fd, "load_name_records", fake_load)
+
+    host = QWidget()
+    # 有记录：结构化命名直接上屏（默认语言链简中→中文名；PostScript 名
+    # 恒显 = 实体 psname 列「合并体」，不从记录取）
+    dlg = FontDetailDialog(a1, pool, _FakeWorker(), PreviewVM(),
+                           parent=host)
+    assert "全部别名" not in {x.text() for x in dlg.findChildren(QLabel)}
     texts = _name_texts(dlg)
-    assert "合并体" in texts
-    assert "Merge-Light" in texts
+    assert "合并体" in texts          # 中文名 + PS 行同文（a1.psname）
+    assert not dlg._lang_btn.isHidden()
+    dlg.reject()
 
-    # 他人广播（嵌套多弹窗）不串：key 不符丢弃
-    w.result.emit("dnames", (("x", "y", 9), [(1, 3, 0x0409, "别的字体")]))
-    assert "别的字体" not in _name_texts(dlg)
-
-    # 失败广播不误伤已回填弹窗：failed 不带请求 key（嵌套他人文件丢
-    # 失的失败会广播到本弹窗），已成功回填的不回退兜底
-    w.failed.emit("dnames", "FileNotFoundError: x")
-    texts = _name_texts(dlg)
-    assert "Merge-Light" in texts and "合并体" in texts
-
-    # 尚未回填成功的弹窗收到失败 → 正常走别名兜底
-    dlg2 = FontDetailDialog(a1, pool, w, PreviewVM(), parent=host)
-    w.failed.emit("dnames", "FileNotFoundError: x")
-    texts2 = _name_texts(dlg2)
+    # 无记录（库缺行/读库失败）→ 别名平铺兜底、语言钮隐藏
+    table.clear()
+    dlg2 = FontDetailDialog(a1, pool, _FakeWorker(), PreviewVM(),
+                            parent=host)
+    texts2 = {x.text() for x in dlg2.findChildren(QLabel)}
     assert "全部别名" in texts2
-    dlg2.finished.emit(0)
-
-    # 关闭：断连 + 取消在途任务
-    assert not handle.cancelled
-    dlg.finished.emit(0)
-    assert handle.cancelled
+    assert dlg2._lang_btn.isHidden()
+    dlg2.reject()
 
 
 def test_human_size():
@@ -254,7 +248,7 @@ def test_human_size():
     assert _human_size(3 * 1024 * 1024) == "3.0 MB"
 
 
-def test_lang_selector_default_chain_and_filter(qapp):
+def test_lang_selector_default_chain_and_filter(qapp, monkeypatch):
     # 语言下拉无「全部」：默认按界面语言链选（简中：简→繁→英→日），
     # 记录缺该语言时顺延；单语言隐藏按钮但仍按其语言过滤
     from types import SimpleNamespace
@@ -262,6 +256,7 @@ def test_lang_selector_default_chain_and_filter(qapp):
     from PySide6.QtWidgets import QWidget
 
     from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets import font_detail as fd
     from ass_font_substitute.gui.widgets.font_detail import FontDetailDialog
     from ass_font_substitute.gui.widgets.font_detail import _lang_label
 
@@ -269,16 +264,19 @@ def test_lang_selector_default_chain_and_filter(qapp):
     a1 = pool[0]
     w = _FakeWorker()
     host = QWidget()
+    key = (a1.dir_path, a1.rel_path, a1.face_index)
+    recs = [(1, 3, 0x0409, "Merge"), (1, 3, 0x0804, "合并体"),
+            (1, 3, 0x0404, "合併體"), (2, 3, 0x0407, "Fein")]
+    table = {}
+    monkeypatch.setattr(fd, "load_name_records",
+                        lambda d, r, fi: table.get((d, r, fi)))
+
     dlg = FontDetailDialog(a1, pool, w, PreviewVM(), parent=host)
     assert dlg._lang_btn.isHidden()         # 兜底态无语言钮
 
-    recs = [(1, 3, 0x0409, "Merge"), (1, 3, 0x0804, "合并体"),
-            (1, 3, 0x0404, "合併體"), (2, 3, 0x0407, "Fein"),
-            (6, 3, 0x0409, "Merge-Light")]
-    key = (a1.dir_path, a1.rel_path, a1.face_index)
-
     # 简中界面（settings 缺省按简中）：默认简中
-    w.result.emit("dnames", (key, recs))
+    table[key] = recs
+    dlg._apply_name_records(recs)
     assert not dlg._lang_btn.isHidden()
     assert dlg._lang_btn.text() == _lang_label(3, 0x804)
     assert dlg._lang == (3, 0x804)
@@ -289,48 +287,34 @@ def test_lang_selector_default_chain_and_filter(qapp):
     texts = _name_texts(dlg)
     assert "合并体" in texts and "Merge" not in texts
 
-    # 切英语
+    # 切英语：结构化行只显该语言（PS 行恒显实体 psname「合并体」，不在断言排除列）
     dlg._set_lang((3, 0x409))
     assert dlg._lang_btn.text() == _lang_label(3, 0x409)
     texts = _name_texts(dlg)
-    assert "Merge" in texts and "合并体" not in texts
+    assert "Merge" in texts and "合併體" not in texts and "Fein" not in texts
 
     # 繁中界面：默认繁体
     w3 = _FakeWorker()
     dlg3 = FontDetailDialog(
         a1, pool, w3, PreviewVM(),
         settings=SimpleNamespace(get=lambda _k: "zh-Hant"), parent=host)
-    w3.result.emit("dnames", (key, recs))
+    dlg3._apply_name_records(recs)
     assert dlg3._lang == (3, 0x404)
     assert "合併體" in _name_texts(dlg3)
 
     # 链全不中（只有德语记录）：退语言集首
     w4 = _FakeWorker()
     dlg4 = FontDetailDialog(a1, pool, w4, PreviewVM(), parent=host)
-    w4.result.emit("dnames", (key, [(2, 3, 0x0407, "Fein")]))
+    dlg4._apply_name_records([(2, 3, 0x0407, "Fein")])
     assert dlg4._lang == (3, 0x407)
     assert "Fein" in _name_texts(dlg4)
 
     # 单语言记录：按钮隐藏、仍按其语言过滤
     w2 = _FakeWorker()
     dlg2 = FontDetailDialog(a1, pool, w2, PreviewVM(), parent=host)
-    w2.result.emit("dnames", (key, [(1, 3, 0x0409, "Only")]))
+    dlg2._apply_name_records([(1, 3, 0x0409, "Only")])
     assert dlg2._lang_btn.isHidden()
     assert "Only" in _name_texts(dlg2)
-
-
-def test_names_job_wraps_request_key(tmp_path):
-    # 回归：_names_job 回传必须带请求键（此前裸 records，_on_names 解包
-    # 崩 → 命名卡永远停在「全部别名」兜底）；测试 emit 走手造结构测不出，
-    # 钉 job 真实返回结构
-    from ass_font_substitute.gui.widgets.font_detail import _names_job
-    from tests.fonts import build_font
-
-    p = tmp_path / "j.ttf"
-    build_font(p, chars="永", family="J體")
-    key, recs = _names_job(None, str(tmp_path), p.name, 0)
-    assert key == (str(tmp_path), p.name, 0)
-    assert any(nid == 1 for nid, _p, _l, _t in recs)
 
 
 def test_lang_icon_and_lcid_0c0a():
@@ -453,17 +437,20 @@ def test_no_top_level_flash_on_names_fill(qapp, monkeypatch):
     monkeypatch.setattr(fd.FontDetailDialog, "_swap_names",
                         lambda self, rows: (swaps.append(1),
                                             orig_swap(self, rows)))
+    # 注入结构化记录：钉住的是 _apply_name_records 结构化路径单渲染
+    # （旧 _on_names 双渲染病根的回归钉；不注入则走兜底路径测不到）
+    monkeypatch.setattr(
+        fd, "load_name_records",
+        lambda d, r, fi: [(1, 3, 0x0409, "Merge"), (1, 3, 0x0804, "合并体")])
     try:
+        # v8 同步装载：构造内一次渲染（不再「先兜底再回填」二段）；若
+        # _apply_name_records 内部双渲染（_set_lang 已渲染又显式渲染），
+        # 此处即 2
         dlg = FontDetailDialog(a1, pool, w, PreviewVM(), parent=host)
+        assert len(swaps) == 1
         dlg.show()                          # 卡进入可见树=拆除/重挂危险态
-        key = (a1.dir_path, a1.rel_path, a1.face_index)
-        recs = [(1, 3, 0x0409, "Merge"), (1, 3, 0x0804, "合并体"),
-                (6, 3, 0x0409, "Merge-Light")]
-        w.result.emit("dnames", (key, recs))   # 回填：拆兜底行+装命名行
-        assert len(swaps) == 2             # 兜底+回填恰 2 次——_on_names
-        # 内 _set_lang 已渲染，若再显式渲染一次即 3 次（双渲染回归）
-        dlg._set_lang((3, 0x409))              # 切语言：再拆再装
-        assert len(swaps) == 3
+        dlg._set_lang((3, 0x409))              # 切语言：拆可见行再装（危险态主路径）
+        assert len(swaps) == 2
         dlg.reject()
     finally:
         qapp.removeEventFilter(spy)

@@ -336,3 +336,22 @@ def test_name_langs_roundtrip(tmp_path):
     assert nl["1"] == [[0x404, "繁體家族"], [0x409, "TestFam"],
                        [0x804, "简体家族"]]   # name 表按 langID 升序
     assert set(nl) == {"1", "4"}
+
+
+def test_name_records_blob_roundtrip(tmp_path):
+    # v8：name_records BLOB（zlib JSON）入库；load_font_rows 不取此列
+    # （全量装实体是几十 MB 常驻内存），消费方按需单行读
+    import json
+    import zlib
+
+    d = tmp_path / "fonts"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永", family="TestFam")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    (blob,) = conn.execute(
+        "SELECT name_records FROM fonts WHERE rel_path='a.ttf'").fetchone()
+    recs = [tuple(r) for r in json.loads(zlib.decompress(blob))]
+    assert (1, 3, 0x409, "TestFam") in recs
+    assert all(r[0] in (1, 2, 3, 4, 16) for r in recs)
+    assert all(r[1] in (1, 3) for r in recs)   # Windows+Mac 平台

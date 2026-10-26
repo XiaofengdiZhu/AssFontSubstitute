@@ -82,6 +82,9 @@ class FontRecord:
     # 展示名语言候选：{nameID: [(langID, 文本)]}，仅 Windows 平台 ID1/4/16
     # 记录（GUI 按界面语言链挑名用）
     name_langs: dict[int, list[tuple[int, str]]] = field(default_factory=dict)
+    # 命名卡原始记录 (nameID, platformID, langID, 文本)，ID1/2/3/4/16
+    # 全平台全语言（SCHEMA v8 入库，详情打开同步读零闪烁）
+    name_records: tuple[tuple[int, int, int, str], ...] = ()
 
 
 @dataclass
