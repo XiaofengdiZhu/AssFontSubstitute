@@ -72,6 +72,7 @@ class FontRecord:
     cmap: CmapRanges
     script: str  # 简/繁/简繁/未标注
     category: str  # 黑/宋/圆/楷/仿/未分类
+    display_name: str = ""  # 展示名（parser 按 name ID 官方优先选好入库）
 
 
 @dataclass

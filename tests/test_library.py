@@ -174,10 +174,15 @@ def test_category_read_from_db(tmp_path):
     assert lib.entities()[0].category == "未分类"
 
 
-def test_display_name_skips_vertical_and_halfwidth_kana():
-    # @ 前缀是竖排变体别名不作展示名；半角假名也计 CJK
-    from ass_font_substitute.core.fontindex.library import _display_name
-
-    assert _display_name(("@ＭＳ ゴシック", "ＭＳ ゴシック")) == "ＭＳ ゴシック"
-    assert _display_name(("MS Gothic", "ｺﾞｼﾞｯｸ")) == "ｺﾞｼﾞｯｸ"
-    assert _display_name(("Arial",)) == "Arial"
+def test_display_name_read_from_db(tmp_path):
+    # 展示名同分类：parser 按 name ID 官方优先（ID16→ID1→ID4，Windows
+    # 字体查看器同款）选好入库，装载直读库列——改展示规则走升版重建
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永", family="微软雅黑")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    conn.execute("UPDATE fonts SET display_name='改过的名'")
+    conn.commit()
+    lib = LibraryIndex.open([d])
+    assert lib.entities()[0].display_name == "改过的名"

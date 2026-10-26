@@ -23,12 +23,16 @@ from ass_font_substitute.core.models import FontRecord
 # 内容哈希（xxh 列废除，解析不再读全文），fingerprints 校验列改 mtime_ns。
 # v4：cmap 区间拆 cmap_data 表去重+zlib（同族各字重共享 cmap，18539
 # face 仅 1455 份 distinct，232.9→21.8MB；zlib-1 再 3.2x），fonts 行存引用。
-SCHEMA_VERSION = 4
+# v5：别名剔除 name ID 17（样式名称/typographic subfamily）——FOTPunchello
+# 家族它填 'Condensed Bold'、微软雅黑填 'Regular'，是样式描述不是名称；
+# fonts 表新增 display_name 列（parser 按 ID16→ID1→ID4 官方优先选好入库，
+# 装载直读，展示规则改进同分类规则走升版重建）。
+SCHEMA_VERSION = 5
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 
 # 指纹算法版本：fingerprint_of 的规范化方式变化时递增，旧缓存整批失效重算
-FP_ALGO = 2
+FP_ALGO = 3
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_version(v INTEGER NOT NULL);
@@ -39,7 +43,7 @@ CREATE TABLE IF NOT EXISTS cmap_data(
 CREATE TABLE IF NOT EXISTS fonts(
   id INTEGER PRIMARY KEY, rel_path TEXT, face_index INTEGER, psname TEXT,
   version TEXT, aliases TEXT, weight INTEGER, width INTEGER, italic INTEGER,
-  cmap_id INTEGER NOT NULL, script TEXT, category TEXT,
+  cmap_id INTEGER NOT NULL, script TEXT, category TEXT, display_name TEXT,
   UNIQUE(rel_path, face_index));
 CREATE TABLE IF NOT EXISTS bad(
   rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, reason TEXT);
@@ -187,12 +191,13 @@ def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
                     cmap_ids[blob] = cid
             conn.execute(
                 "INSERT INTO fonts(rel_path,face_index,psname,version,aliases,"
-                "weight,width,italic,cmap_id,script,category) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "weight,width,italic,cmap_id,script,category,display_name) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (rel, r.face_index, r.psname,
                  json.dumps(r.version) if r.version else None,
                  json.dumps(r.aliases, ensure_ascii=False),
                  r.weight, r.width, int(r.italic),
-                 cid, r.script, r.category))
+                 cid, r.script, r.category, r.display_name))
             conn.execute(
                 "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
                 (rel, r.face_index, st.st_mtime_ns, FP_ALGO,
@@ -347,8 +352,9 @@ def load_font_rows(conn: sqlite3.Connection) -> Iterator[tuple]:
     消费方解压；同 blob 解压多次的调用方建议 memo 化）。"""
     yield from conn.execute(
             "SELECT f.rel_path, f.face_index, f.psname, f.version, f.aliases, "
-            "f.weight, f.width, f.italic, cd.data, f.script, f.category, "
-            "fi.size, fi.mtime_ns FROM fonts f JOIN files fi USING(rel_path) "
+            "f.display_name, f.weight, f.width, f.italic, cd.data, f.script, "
+            "f.category, fi.size, fi.mtime_ns FROM fonts f "
+            "JOIN files fi USING(rel_path) "
             "JOIN cmap_data cd ON cd.id = f.cmap_id")
 
 

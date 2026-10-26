@@ -17,24 +17,6 @@ def normalize_name(name: str) -> str:
     return name.strip().lstrip("@").casefold()
 
 
-def _display_name(aliases: tuple[str, ...]) -> str:
-    """展示名：优先含 CJK 的别名（中文环境可读，如 微软雅黑 优先于
-    Microsoft YaHei），退回排序首名。@ 前缀是竖排变体别名（@MS Gothic），
-    不作展示名。"""
-    for a in aliases:
-        if a.startswith("@"):
-            continue
-        if any("\u3040" <= c <= "\u30ff"      # 假名
-               or "\u3400" <= c <= "\u9fff"   # 汉字
-               or "\uf900" <= c <= "\ufaff"   # 兼容汉字
-               or "\uac00" <= c <= "\ud7af"   # 谚文
-               or "\uff66" <= c <= "\uff9f"   # 半角假名
-               or "\U00020000" <= c <= "\U0002ffff"   # CJK 扩展 B+
-               for c in a):
-            return a
-    return aliases[0]
-
-
 @dataclass(frozen=True)
 class FontEntity:
     fingerprint: str
@@ -78,7 +60,7 @@ class LibraryIndex:
                     "SELECT rel_path, face_index, mtime_ns, fp FROM fingerprints "
                     "WHERE algo=?", (FP_ALGO,))}
                 writeback = []
-                for (rel, fi, ps, ver, al, w, wd, it, cmb, script, cat,
+                for (rel, fi, ps, ver, al, disp, w, wd, it, cmb, script, cat,
                      _size, _mtime) in load_font_rows(conn):
                     aliases = tuple(json.loads(al))
                     version = tuple(json.loads(ver)) if ver else None
@@ -93,8 +75,8 @@ class LibraryIndex:
                         # 缓存缺失（旧库/新文件/mtime 变化）→ 现算并回写
                         fp = fingerprint_of(list(aliases), cmap, w, wd, bool(it))
                         writeback.append((rel, fi, _mtime, fp))
-                    raw.append((di, rel, fi, ps, version, aliases, w, wd, bool(it),
-                                script, cat, cmap, fp))
+                    raw.append((di, rel, fi, ps, version, aliases, disp, w, wd,
+                                bool(it), script, cat, cmap, fp))
                 if writeback:
                     with conn:
                         conn.executemany(
@@ -118,9 +100,10 @@ class LibraryIndex:
                 self._skipped.append(f"{self.dirs[item[0]]}/{item[1]}#{item[2]} 旧版本")
         self._files_count = len({(item[0], item[1]) for item in raw})
         self._entities = [
-            FontEntity(fp, _display_name(aliases), aliases, ps, ver, w, wd, it,
+            FontEntity(fp, disp, aliases, ps, ver, w, wd, it,
                        script, cat, cmap, str(self.dirs[di]), rel, fi)
-            for (di, rel, fi, ps, ver, aliases, w, wd, it, script, cat, cmap, fp)
+            for (di, rel, fi, ps, ver, aliases, disp, w, wd, it, script, cat,
+                 cmap, fp)
             in best.values()]
 
     def entities(self) -> list[FontEntity]:

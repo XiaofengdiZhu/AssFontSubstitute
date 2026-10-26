@@ -65,16 +65,19 @@ def test_no_merge_across_different_names():
         "XXX", "XXX Bold", "华康宋体W5", "华康宋体W7"]
 
 
-def test_bare_style_names_never_merge():
-    # 烂字体 name 全填样式词（五个无关家族都叫 "Bold"）：裸样式名零家族
-    # 信息，永不合并；"XXX Bold" 带前缀含家族信息，照常合并
+def test_same_display_name_groups_normally():
+    # display 全等即归组（v5 起 display 不可能再是纯样式词：parser 按
+    # ID1/16 官方语义选名入库，真库抽样 400 face ID1/16 纯样式词 0 个，
+    # 历史「十几个 Bold」全来自已剔除的 ID17）——异字重 5 个 "Bold"
+    # display 合并一行 5 face，chip 各自可切
     vm = PreviewVM()
-    vm.set_entities([_ent(f"b{i}", "Bold", weight=700) for i in range(5)]
+    vm.set_entities([_ent(f"b{i}", "Bold", weight=w)
+                     for i, w in enumerate((400, 500, 700, 800, 900))]
                     + [_ent("xb1", "XXX Bold", weight=400),
                        _ent("xb2", "XXX Bold", weight=700)])
     rows = vm.filtered()
     bold_rows = [r for r in rows if r.display_name == "Bold"]
-    assert len(bold_rows) == 5 and all(len(r.faces) == 1 for r in bold_rows)
+    assert len(bold_rows) == 1 and len(bold_rows[0].faces) == 5
     xb = [r for r in rows if r.display_name == "XXX Bold"]
     assert len(xb) == 1 and len(xb[0].faces) == 2
     assert xb[0].selected.weight == 400

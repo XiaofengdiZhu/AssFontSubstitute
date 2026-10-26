@@ -11,7 +11,12 @@ from ass_font_substitute.core.fontindex.probes import classify_script
 from ass_font_substitute.core.models import CmapRanges
 from ass_font_substitute.core.models import FontRecord
 
-NAME_IDS = (1, 4, 6, 16, 17)
+# 1=family 4=full 6=PostScript 16=typographic family。17（typographic
+# subfamily，即 FontCreator 的「样式名称」）是样式描述不是名称——
+# FOTPunchello 家族它填 'Condensed Bold'、微软雅黑填 'Regular'，收进
+# 别名会污染按名搜索（搜 bold 命中全库粗体）并污染展示名；2（subfamily）
+# 同理从未收过
+NAME_IDS = (1, 4, 6, 16)
 TTC_EXTS = {".ttc", ".otc"}
 _VER_RE = re.compile(r"([\d]+(?:\.\d+)*)")
 
@@ -30,6 +35,36 @@ def parse_version(s: str | None) -> tuple[int, ...] | None:
         return tuple(int(x) for x in m.group(1).split("."))
     except ValueError:
         return None
+
+
+def _cjk_first(names: list[str]) -> str | None:
+    """多语言名里挑 CJK 名优先（中文环境可读），无 CJK 退首名。"""
+    for s in names:
+        if any("\u3040" <= c <= "\u30ff"      # 假名
+               or "\u3400" <= c <= "\u9fff"   # 汉字
+               or "\uf900" <= c <= "\ufaff"   # 兼容汉字
+               or "\uac00" <= c <= "\ud7af"   # 谚文
+               or "\uff66" <= c <= "\uff9f"   # 半角假名
+               or "\U00020000" <= c <= "\U0002ffff"   # CJK 扩展 B+
+               for c in s):
+            return s
+    return names[0] if names else None
+
+
+def _display_name(by_id: dict[int, list[str]], aliases: list[str]) -> str:
+    """展示名 = ID1 legacy family（Windows 字体查看器/字体列表显示的
+    就是它——FOTPunchelloCondBold 的 ID1='FOTPunchello Cond Bold'；超
+    出 4 样式的字重 MS 官方也拆进 ID1，如 微软雅黑 Light）。ID1 缺失
+    回退 ID16 typographic family（spec：ID16 缺失时视 ID1 为其，反向
+    回退同理）→ ID4 full name → 别名首；每级多语言 CJK 优先。样式名
+    （ID2/17）绝不参与——它们是样式描述；@ 前缀是竖排变体名，不作
+    展示名。"""
+    for nid in (1, 16, 4):
+        names = [s for s in by_id.get(nid, []) if not s.startswith("@")]
+        pick = _cjk_first(names)
+        if pick:
+            return pick
+    return aliases[0] if aliases else ""
 
 
 def _load_fonts(path: Path) -> list[TTFont]:
@@ -52,8 +87,20 @@ def parse_font_file(path: Path) -> list[FontRecord]:
         for idx, tt in enumerate(fonts):
             try:
                 name = tt["name"]
-                aliases = sorted({r.toUnicode() for r in name.names
-                                  if r.nameID in NAME_IDS and r.toUnicode()})
+                by_id: dict[int, list[str]] = {}
+                all_names: set[str] = set()
+                for r in name.names:
+                    s = r.toUnicode()
+                    if not s or r.nameID not in NAME_IDS:
+                        continue
+                    all_names.add(s)
+                    # display 只取 Windows 平台记录：Windows 字体查看器
+                    # 显示的就是它；Macintosh 平台同名记录序在前会劫持
+                    # 选择（FOTPunchelloCondBold 实证：Mac ID1='FOTPunchello'
+                    # 排在 Win ID1='FOTPunchello Cond Bold' 前）
+                    if r.platformID == 3:
+                        by_id.setdefault(r.nameID, []).append(s)
+                aliases = sorted(all_names)
                 psname = next((r.toUnicode() for r in name.names if r.nameID == 6), None)
                 version = parse_version(next((r.toUnicode() for r in name.names
                                               if r.nameID == 5), None))
@@ -66,6 +113,7 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                     italic=bool(os2.fsSelection & 1),
                     cmap=cmap,
                     script=classify_script(cmap), category=classify_category(aliases),
+                    display_name=_display_name(by_id, aliases),
                 ))
             except Exception as e:
                 # spec §11：TTC 个别子字体解析失败 → 跳过该子字体，其余照常

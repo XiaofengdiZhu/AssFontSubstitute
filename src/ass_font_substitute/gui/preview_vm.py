@@ -10,18 +10,6 @@ SCRIPT_ORDER = ["简", "繁", "简繁"]
 TILE_CACHE_MAX = 500     # 条带缓存条数；典型预览（字体名）≈30MB，
                          # 随预览文字长度线性增长（预览输入已限 60 字）
 
-# 裸样式名：烂字体的 name 记录全填样式词（family 名就叫 "Bold"），名称里
-# 零家族信息——同名的全是无关字体（截图实证：十几个不同家族都叫 "Bold"）。
-# 全等命中（strip+casefold）则永不合并；"XXX Bold" 这类带前缀的不命中，
-# 其 display 已含家族信息，照常合并
-_BARE_STYLE_NAMES = frozenset([
-    "regular", "bold", "italic", "oblique", "normal", "book", "roman",
-    "medium", "demi", "demibold", "semibold", "semilight", "ultralight",
-    "extralight", "extrabold", "ultrabold", "black", "heavy", "light",
-    "thin", "hairline", "narrow", "condensed", "extended",
-    "粗体", "斜体", "常规",
-])
-
 
 def weight_tag(w: int) -> str:
     # 显示真实值不取整：Semilight 350 曾被折进 W300 桶，与 Light 300
@@ -89,22 +77,15 @@ class PreviewVM:
                     or e.weight // 100 * 100 == self.weight)
 
         groups: dict[str, list[FontEntity]] = {}
-        loose: list[FontEntity] = []
         for e in self.entities:
             key = e.display_name.strip().casefold()
-            if key in _BARE_STYLE_NAMES:
-                loose.append(e)
-            else:
-                groups.setdefault(key, []).append(e)
+            groups.setdefault(key, []).append(e)
         target = 400 if self.weight is None else self.weight
 
         def sel_key(e: FontEntity):
             return abs(e.weight - target), e.italic, e.width
 
         rows: list[FamilyRow] = []
-        for e in loose:
-            if ok(e):
-                rows.append(FamilyRow(e.display_name, [e], e))
         for faces in groups.values():
             # 索引序是目录/文件序（TTC 各 face 交错）：行内按 字重 → 斜体
             # → 宽度 归位，chip 点击按同键取 face。结构按全量拆（不随筛
