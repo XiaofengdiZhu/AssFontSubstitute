@@ -17,6 +17,8 @@ from ass_font_substitute.gui.jobs import ApplyFileResult
 from ass_font_substitute.gui.jobs import FileParse
 from ass_font_substitute.gui.jobs import apply_to_file
 from ass_font_substitute.gui.jobs import classify_one
+from ass_font_substitute.gui.name_lang import pick_display_name
+from ass_font_substitute.gui.name_lang import ui_lang
 
 KEEP = "__keep__"           # 「保留原字体名」选项键（missing/zero 卡）
 SIM_FLOOR = 0.50            # 放宽重算下限（= SIM_BOUNDS[0]）
@@ -163,7 +165,8 @@ class SubsVM:
         if cls.kind == "twin":
             twin = cls.twin_hit
             tcov, _ = coverage_detail(twin.cmap, usage.chars)
-            twin_opt = OptionItem(twin.fingerprint, twin.display_name, coverage=tcov,
+            twin_opt = OptionItem(twin.fingerprint, self._dname(twin),
+                                  coverage=tcov,
                                   meta=self._meta(twin), badges=["孪生对应"],
                                   source="twin", entity=twin)
             card.options = [twin_opt] + [o for o in opts
@@ -175,10 +178,14 @@ class SubsVM:
         card.min_sim = float(self._settings.get("min_sim"))
         return card
 
+    def _dname(self, e: FontEntity) -> str:
+        """选项展示名：按界面语言链从 name 表语言记录现挑。"""
+        return pick_display_name(e, ui_lang(self._settings))
+
     def _entity_option(self, e: FontEntity, usage: FontUsage) -> OptionItem:
         cov, _ = coverage_detail(e.cmap, usage.chars)
         is_orig = usage.norm_name in {normalize_name(a) for a in e.aliases}
-        return OptionItem(e.fingerprint, e.display_name, coverage=cov,
+        return OptionItem(e.fingerprint, self._dname(e), coverage=cov,
                           meta=self._meta(e),
                           badges=(["原字体", "不改动"] if is_orig else []),
                           source="original" if is_orig else "recommend",
@@ -234,12 +241,16 @@ class SubsVM:
         for c in candidates:
             if card.option(c.fingerprint) is not None:
                 continue
-            o = OptionItem(c.fingerprint, c.display_name, coverage=c.coverage,
+            ent = self.ent_by_fp.get(c.fingerprint)
+            o = OptionItem(c.fingerprint,
+                           self._dname(ent) if ent is not None
+                           else c.display_name,
+                           coverage=c.coverage,
                            similarity=c.similarity, size_ratio=c.size_ratio,
-                           meta=self._meta(self.ent_by_fp[c.fingerprint])
-                           if c.fingerprint in self.ent_by_fp else [],
+                           meta=self._meta(ent)
+                           if ent is not None else [],
                            source="search", n_chars=c.n_chars,
-                           entity=self.ent_by_fp.get(c.fingerprint))
+                           entity=ent)
             card.options.append(o)
             added.append(o)
         return added
@@ -288,7 +299,8 @@ class SubsVM:
         cov, _ = coverage_detail(entity.cmap, chars)
         o = card.option(entity.fingerprint)
         if o is None:
-            o = OptionItem(entity.fingerprint, entity.display_name, coverage=cov,
+            o = OptionItem(entity.fingerprint, self._dname(entity),
+                           coverage=cov,
                            meta=self._meta(entity), source="pick", entity=entity)
             card.options.append(o)
         card.checked_key = o.key
@@ -296,14 +308,17 @@ class SubsVM:
 
     # ---- 应用层 ----
     def build_mapping(self) -> dict[str, str]:
-        """raw 拼写全集 → 选中实体名。勾选原字体行（source=original）不改写。"""
+        """raw 拼写全集 → 选中实体名。勾选原字体行（source=original）不改写。
+        写回用入库 display_name（功能名，渲染器匹配用），不随界面语言链
+        挑名走——展示名换语言不该改变落盘字幕里的字体名。"""
         m: dict[str, str] = {}
         for c in self.cards:
             if not c.replaced:
                 continue
             o = c.option(c.checked_key)
             for v in c.variants:
-                m[v] = o.display_name
+                m[v] = (o.entity.display_name if o.entity is not None
+                        else o.display_name)
         return m
 
     def replacement_counts(self) -> tuple[int, int]:

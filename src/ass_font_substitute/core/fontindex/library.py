@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import zlib
 from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 
 from ass_font_substitute.core.fontindex.store import FP_ALGO
@@ -34,6 +35,9 @@ class FontEntity:
     rel_path: str
     face_index: int
     family_names: tuple[str, ...] = ()   # 字体系全语言名（ID16 缺视 ID1）
+    # 展示名语言候选 {nameID: [(langID, 文本)]}（ID1/4/16 平台3 记录，
+    # GUI 按界面语言链挑名）
+    name_langs: dict[int, list[tuple[int, str]]] = field(default_factory=dict)
     size: int = 0
     mtime_ns: int = 0
 
@@ -63,11 +67,16 @@ class LibraryIndex:
                     "SELECT rel_path, face_index, mtime_ns, fp FROM fingerprints "
                     "WHERE algo=?", (FP_ALGO,))}
                 writeback = []
-                for (rel, fi, ps, ver, al, disp, fam, w, wd, it, cmb, script,
-                     cat, size, mtime) in load_font_rows(conn):
+                for (rel, fi, ps, ver, al, disp, fam, nl, w, wd, it, cmb,
+                     script, cat, size, mtime) in load_font_rows(conn):
                     aliases = tuple(json.loads(al))
                     version = tuple(json.loads(ver)) if ver else None
                     family = tuple(json.loads(fam)) if fam else ()
+                    # JSON 键恒为串、对为列表：还原 int 键/元组对，GUI
+                    # 侧链挑选按 int nameID/langID 匹配
+                    name_langs = ({int(k): [(int(lg), t) for lg, t in v]
+                                   for k, v in json.loads(nl).items()}
+                                  if nl else {})
                     cmap = memo.get(cmb)
                     if cmap is None:
                         cmap = CmapRanges.from_bytes(zlib.decompress(cmb))
@@ -80,8 +89,8 @@ class LibraryIndex:
                         fp = fingerprint_of(list(aliases), cmap, w, wd, bool(it))
                         writeback.append((rel, fi, mtime, fp))
                     raw.append((di, rel, fi, ps, version, aliases, disp, family,
-                                w, wd, bool(it), script, cat, cmap, fp, size,
-                                mtime))
+                                name_langs, w, wd, bool(it), script, cat, cmap,
+                                fp, size, mtime))
                 if writeback:
                     with conn:
                         conn.executemany(
@@ -107,8 +116,9 @@ class LibraryIndex:
         self._entities = [
             FontEntity(fp, disp, aliases, ps, ver, w, wd, it,
                        script, cat, cmap, str(self.dirs[di]), rel, fi,
-                       family_names=family, size=size, mtime_ns=mtime)
-            for (di, rel, fi, ps, ver, aliases, disp, family, w, wd, it,
+                       family_names=family, name_langs=nl,
+                       size=size, mtime_ns=mtime)
+            for (di, rel, fi, ps, ver, aliases, disp, family, nl, w, wd, it,
                  script, cat, cmap, fp, size, mtime)
             in best.values()]
 

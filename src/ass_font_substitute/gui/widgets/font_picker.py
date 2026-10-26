@@ -11,6 +11,8 @@ from qfluentwidgets import SubtitleLabel
 
 from ass_font_substitute.gui.jobs import make_searcher
 from ass_font_substitute.gui.jobs import pull_chunk
+from ass_font_substitute.gui.name_lang import pick_display_name
+from ass_font_substitute.gui.name_lang import ui_lang
 from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.widgets.font_list import FontListWidget
 
@@ -25,7 +27,8 @@ class FontPickerDialog(MessageBoxBase):
         super().__init__(parent)
         self.worker = worker            # _on_reco 取消订阅需要（brief 漏存）
         self.selected = None
-        self.pvm = PreviewVM()
+        self._settings = settings
+        self.pvm = PreviewVM(settings)
         self.pvm.set_entities(entities)
 
         self.titleLabel = SubtitleLabel("从字体库选择")
@@ -158,7 +161,7 @@ class FontPickerDialog(MessageBoxBase):
 
     def _pick(self, e):
         self.selected = e
-        self.hint.setText(f"已选：{e.display_name}")
+        self.hint.setText(f"已选：{pick_display_name(e, ui_lang(self._settings))}")
         self.yesButton.setEnabled(True)
 
     def _accept_pick(self, e):

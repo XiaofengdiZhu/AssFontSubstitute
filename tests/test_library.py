@@ -212,3 +212,26 @@ def test_family_names_read_from_db(tmp_path):
     update_index(d, conn)
     e = LibraryIndex.open([d]).entities()[0]
     assert e.family_names == ("Punchello",)
+
+
+def test_name_langs_read_from_db_and_chain_pick(tmp_path):
+    # v7：语言记录入库装载还原 int 键；展示名按界面语言链现挑——
+    # 简中出简体名、繁中出繁体名，链不中退表序首条
+    from ass_font_substitute.gui.name_lang import pick_display_name
+
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永", family="Microsoft YaHei",
+               extra_aliases={"zh-CN": "微软雅黑", "zh-TW": "微軟雅黑"})
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    e = LibraryIndex.open([d]).entities()[0]
+    assert e.name_langs[1] == [
+        (0x404, "微軟雅黑"), (0x409, "Microsoft YaHei"), (0x804, "微软雅黑")]
+    assert all(isinstance(lg, int) and isinstance(t, str)
+               for lg, t in e.name_langs[1])
+    assert pick_display_name(e, "zh-Hans") == "微软雅黑"
+    assert pick_display_name(e, "zh-Hant") == "微軟雅黑"
+    # 入库 display_name 不变（CJK 优先旧规则：表序首条 CJK——fontTools
+    # 重排后 0x404 繁体在前），作链挑选兜底
+    assert e.display_name == "微軟雅黑"

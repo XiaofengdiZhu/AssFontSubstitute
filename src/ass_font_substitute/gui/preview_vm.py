@@ -4,6 +4,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 
 from ass_font_substitute.core.fontindex.library import FontEntity
+from ass_font_substitute.gui.name_lang import pick_display_name
+from ass_font_substitute.gui.name_lang import ui_lang
 
 CATEGORY_ORDER = ["黑", "宋", "圆", "楷", "仿", "未分类"]
 SCRIPT_ORDER = ["简", "繁", "简繁"]
@@ -37,7 +39,8 @@ class FamilyRow:
 class PreviewVM:
     """字体库预览页与「从字体库选择」对话框共享的筛选 + 预览 tile LRU（零 Qt）。"""
 
-    def __init__(self):
+    def __init__(self, settings=None):
+        self._settings = settings
         self.entities: list[FontEntity] = []
         self.name_query = ""
         self.category: str | None = None
@@ -59,11 +62,18 @@ class PreviewVM:
         present = {e.script for e in self.entities}
         return [s for s in SCRIPT_ORDER if s in present]
 
+    def _name(self, e: FontEntity) -> str:
+        """行展示名：按界面语言链从 name 表语言记录现挑（归组键仍用入
+        库 display_name——按链挑名会因各 face 语言记录集不同裂行）。"""
+        return pick_display_name(e, ui_lang(self._settings))
+
     def filtered(self) -> list[FamilyRow]:
         """行保留 = 行内任一 face 通过全部筛选；faces 全量保留（chips 不
         随筛选隐藏其他字重，点chip 可切看），selected 从通过筛选的子集
         里选——锚点 = 筛选字重桶（筛 W300 时精确 300 胜同桶 350），无
-        筛选时 400。行序按展示名 casefold。"""
+        筛选时 400。行序按展示名 casefold。行名 = 语言链挑名、归组/拆
+        行 = legacy display_name：二者口径不同，同 legacy 组各行行名可
+        偶发不同名、不同 legacy 组可偶发撞出同名行（纯外观边角）。"""
         q = self.name_query.strip().casefold()
 
         def ok(e: FontEntity) -> bool:
@@ -101,19 +111,19 @@ class PreviewVM:
                           key=lambda e: (e.weight, e.italic, e.width))
             matching = [f for f in main if ok(f)]
             if matching:
-                rows.append(FamilyRow(main[0].display_name, main,
+                rows.append(FamilyRow(self._name(main[0]), main,
                                       min(matching, key=sel_key), matching))
             for fl in buckets.values():
                 if len(fl) > 1:
                     for f in fl:
                         if ok(f):
-                            rows.append(FamilyRow(f.display_name, [f], f))
+                            rows.append(FamilyRow(self._name(f), [f], f))
         rows.sort(key=lambda r: r.display_name.casefold())
         return rows
 
     def as_rows(self, entities) -> list[FamilyRow]:
         """face 列表 → 单 face 行（推荐区不合并，逐 face 显示）。"""
-        return [FamilyRow(e.display_name, [e], e) for e in entities]
+        return [FamilyRow(self._name(e), [e], e) for e in entities]
 
     # ---- tile LRU：键 (fingerprint, 预览文字) ----
     def get_tiles(self, key):

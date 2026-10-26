@@ -472,3 +472,28 @@ def test_no_top_level_flash_on_names_fill(qapp, monkeypatch):
     assert "X" not in order
     # ② 只有对话框自身与主窗级顶层 Show，零孤儿控件
     assert [x for x in spy.flashed if x is not dlg] == []
+
+
+def test_dialog_title_uses_lang_chain(qapp):
+    # 详情标题/预览文字/列表行名按界面语言链现挑（v7 语言记录入库）
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_detail import FontDetailDialog
+
+    e = replace(_ent("a1", "合并体"),
+                name_langs={1: [(0x409, "Merged"), (0x804, "合并简"),
+                                (0x404, "合併繁")]})
+    host = QWidget()            # 留引用：临时父对象被回收会连带销毁子控件
+    w = _FakeWorker()
+    dlg = FontDetailDialog(e, [e], w, PreviewVM(), parent=host)
+    assert dlg.titleLabel.text() == "合并简"
+    dlg2 = FontDetailDialog(
+        e, [e], w, PreviewVM(),
+        settings=SimpleNamespace(get=lambda _k: "zh-Hant"), parent=host)
+    assert dlg2.titleLabel.text() == "合併繁"
+    dlg.reject()
+    dlg2.reject()

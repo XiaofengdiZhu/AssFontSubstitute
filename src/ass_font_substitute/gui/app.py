@@ -201,6 +201,10 @@ class AFSWindow(FluentWindow):
             self._apply_bg_effect(value)
         elif key == "theme_color":
             self._apply_theme_color(value)
+        elif key == "language":
+            # 各界面展示名按界面语言链重挑：浏览页行模型即建即显，重建
+            # 列表即可；处理页卡片选项名随下轮分析重建，弹窗类打开时现取
+            self.browse_page.reload_names()
 
     def _apply_theme(self, name: str):
         setTheme(_THEME_OF[name])

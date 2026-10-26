@@ -675,3 +675,19 @@ def test_failures_dialog_constructs(qapp, tmp_path, monkeypatch):
         assert dlg.titleLabel.text() == "失败清单"
         dlg.deleteLater()
     host.deleteLater()
+
+
+def test_language_change_triggers_browse_name_reload(qapp, tmp_path, monkeypatch):
+    # 展示名随界面语言链重挑的接线：valueChanged("language") →
+    # browse_page.reload_names（browse 列表重建）；断线即名称滞留旧语言
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    s = Settings(tmp_path / "settings.json")
+    w = AFSWindow(s)
+    calls = []
+    w.browse_page.reload_names = lambda: calls.append(1)
+    s.set("language", "zh-Hant")
+    assert calls == [1]
+    w.close()

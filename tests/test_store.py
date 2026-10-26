@@ -229,9 +229,9 @@ def test_cmap_dedup_and_roundtrip(tmp_path):
               "diff.ttf": CmapRanges.from_chars(base | {ord("木")})}
     for row in load_font_rows(conn):
         # 列序：rel_path(0) face_index(1) psname(2) version(3) aliases(4)
-        # display_name(5) family_names(6) weight(7) width(8) italic(9)
-        # cmap blob(10) ……
-        assert CmapRanges.from_bytes(zlib.decompress(row[10])) == expect[row[0]]
+        # display_name(5) family_names(6) name_langs(7) weight(8) width(9)
+        # italic(10) cmap blob(11) ……
+        assert CmapRanges.from_bytes(zlib.decompress(row[11])) == expect[row[0]]
 
 
 def test_cmap_gc_on_incremental(tmp_path):
@@ -317,3 +317,22 @@ def test_update_index_real_process_pool(tmp_path):
     conn = open_db(d / "fontindex.db")
     r = update_index(d, conn, max_threads=2)
     assert r.added == 2 and stats(conn)["fonts"] == 2
+
+
+def test_name_langs_roundtrip(tmp_path):
+    # v7：name_langs 列 {nameID: [[langID, 文本]]} 原样入库，装载侧
+    # （library）还原 int 键；无对应记录的 nameID 不出键
+    import json
+
+    from ass_font_substitute.core.fontindex.store import load_font_rows
+    d = tmp_path / "fonts"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永", family="TestFam",
+               extra_aliases={"zh-CN": "简体家族", "zh-TW": "繁體家族"})
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    row = next(load_font_rows(conn))
+    nl = json.loads(row[7])            # 列序见 test_cmap_dedup_and_roundtrip
+    assert nl["1"] == [[0x404, "繁體家族"], [0x409, "TestFam"],
+                       [0x804, "简体家族"]]   # name 表按 langID 升序
+    assert set(nl) == {"1", "4"}

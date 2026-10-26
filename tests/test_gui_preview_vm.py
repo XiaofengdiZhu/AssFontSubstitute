@@ -181,3 +181,27 @@ def test_invalidate():
     vm.put_tiles(("a", "t"), 1)
     vm.invalidate()
     assert vm.get_tiles(("a", "t")) is None
+
+
+def test_row_label_uses_lang_chain_but_grouping_stays_legacy():
+    # 行展示名按界面语言链现挑；行归组键仍用入库 display_name——按链挑
+    # 名会因各 face 语言记录集不同裂行（同族 face 记录语言数可能不同）
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    a = replace(_ent("1", "YaHei", weight=400),
+                name_langs={1: [(0x409, "YaHei"), (0x804, "雅黑"),
+                                (0x404, "雅黑繁")]})
+    b = replace(_ent("2", "YaHei", weight=700),
+                name_langs={1: [(0x409, "YaHei")]})   # 无中文记录
+    vm = PreviewVM(SimpleNamespace(get=lambda _k: "zh-Hans"))
+    vm.set_entities([a, b])
+    rows = vm.filtered()
+    assert len(rows) == 1                    # 归组未裂（同 display_name）
+    assert rows[0].display_name == "雅黑"     # 行名 = 链挑 main[0]
+    vm2 = PreviewVM(SimpleNamespace(get=lambda _k: "zh-Hant"))
+    vm2.set_entities([a, b])
+    assert vm2.filtered()[0].display_name == "雅黑繁"   # 繁中链命中 0x404
+    # 单 face 行（as_rows）同走链挑选
+    rec = vm.as_rows([b])[0]
+    assert rec.display_name == "YaHei"

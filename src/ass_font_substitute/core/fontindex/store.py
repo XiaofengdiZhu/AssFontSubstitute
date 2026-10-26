@@ -25,12 +25,16 @@ from ass_font_substitute.core.models import FontRecord
 # face 仅 1455 份 distinct，232.9→21.8MB；zlib-1 再 3.2x），fonts 行存引用。
 # v5：别名剔除 name ID 17（样式名称/typographic subfamily）——FOTPunchello
 # 家族它填 'Condensed Bold'、微软雅黑填 'Regular'，是样式描述不是名称；
-# fonts 表新增 display_name 列（parser 按 ID16→ID1→ID4 官方优先选好入库，
+# fonts 表新增 display_name 列（parser 按 ID1→ID16→ID4 官方优先选好入库，
 # 装载直读，展示规则改进同分类规则走升版重建）。
 # v6：fonts 表新增 family_names 列（ID16 typographic family 全语言名，
 # 缺失视 ID1——字体系是 name 表实字段，详情页「同字体系」按它归族；
 # display_name 是 ID1 优先的展示名，两回事）。
-SCHEMA_VERSION = 6
+# v7：fonts 表新增 name_langs 列（ID1/4/16 的 Windows 平台记录按
+# {nameID: [[langID, 文本]]} 入库）——展示名从「入库时选好单值」改为
+# 「装载后各界面按界面语言链现挑」（简中：简→繁→英→日；繁中前两对调），
+# 列只存原始语言记录，链语义再改零重建成本。
+SCHEMA_VERSION = 7
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 
@@ -47,7 +51,7 @@ CREATE TABLE IF NOT EXISTS fonts(
   id INTEGER PRIMARY KEY, rel_path TEXT, face_index INTEGER, psname TEXT,
   version TEXT, aliases TEXT, weight INTEGER, width INTEGER, italic INTEGER,
   cmap_id INTEGER NOT NULL, script TEXT, category TEXT, display_name TEXT,
-  family_names TEXT,
+  family_names TEXT, name_langs TEXT,
   UNIQUE(rel_path, face_index));
 CREATE TABLE IF NOT EXISTS bad(
   rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, reason TEXT);
@@ -196,13 +200,14 @@ def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
             conn.execute(
                 "INSERT INTO fonts(rel_path,face_index,psname,version,aliases,"
                 "weight,width,italic,cmap_id,script,category,display_name,"
-                "family_names) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "family_names,name_langs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (rel, r.face_index, r.psname,
                  json.dumps(r.version) if r.version else None,
                  json.dumps(r.aliases, ensure_ascii=False),
                  r.weight, r.width, int(r.italic),
                  cid, r.script, r.category, r.display_name,
-                 json.dumps(r.family_names, ensure_ascii=False)))
+                 json.dumps(r.family_names, ensure_ascii=False),
+                 json.dumps(r.name_langs, ensure_ascii=False)))
             conn.execute(
                 "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
                 (rel, r.face_index, st.st_mtime_ns, FP_ALGO,
@@ -357,7 +362,8 @@ def load_font_rows(conn: sqlite3.Connection) -> Iterator[tuple]:
     消费方解压；同 blob 解压多次的调用方建议 memo 化）。"""
     yield from conn.execute(
             "SELECT f.rel_path, f.face_index, f.psname, f.version, f.aliases, "
-            "f.display_name, f.family_names, f.weight, f.width, f.italic, "
+            "f.display_name, f.family_names, f.name_langs, f.weight, "
+            "f.width, f.italic, "
             "cd.data, f.script, f.category, fi.size, fi.mtime_ns FROM fonts f "
             "JOIN files fi USING(rel_path) "
             "JOIN cmap_data cd ON cd.id = f.cmap_id")

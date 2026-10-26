@@ -371,3 +371,25 @@ def test_apply_conflict_requires_confirm(vm_full, tmp_path):
     assert rs[0].error == "exists" and out.read_text("utf-8") == "旧文件"
     rs = vm.apply_files(overwrite_confirm=True)
     assert rs[0].error is None
+
+
+def test_option_display_uses_chain_but_mapping_writes_legacy(vm, tmp_path):
+    # 选项展示名按界面语言链现挑；写回字幕的映射仍用入库 display_name
+    # （功能名，渲染器匹配用）——展示名换语言不改变落盘字体名
+    from dataclasses import replace
+
+    from ass_font_substitute.gui.subs_vm import Card
+    from ass_font_substitute.gui.subs_vm import OptionItem
+
+    e = replace(_ent("fp1", "Legacy", "永"),
+                name_langs={1: [(0x409, "Legacy"), (0x804, "简名")]})
+    u = _usage("Legacy", "永")
+    o = vm._entity_option(e, u)
+    assert o.display_name == "简名"
+    card = Card(norm_name="legacy", raw_name="Legacy", kind="replace")
+    card.options = [OptionItem(e.fingerprint, vm._dname(e), source="search",
+                               entity=e)]
+    card.checked_key = e.fingerprint
+    card.variants = {"Legacy", "legacy"}
+    vm.cards = [card]
+    assert vm.build_mapping() == {"Legacy": "Legacy", "legacy": "Legacy"}

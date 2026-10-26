@@ -125,12 +125,18 @@ def parse_font_file(path: Path) -> list[FontRecord]:
             try:
                 name = tt["name"]
                 by_id: dict[int, list[str]] = {}
+                # 展示名语言链候选：ID1/4/16 的 Windows 平台记录带 langID
+                # 入库（GUI 按界面语言链挑名用；@ 变体不参与）
+                by_lang: dict[int, list[tuple[int, str]]] = {}
                 all_names: set[str] = set()
                 for r in name.names:
                     s = r.toUnicode()
                     if not s or r.nameID not in NAME_IDS:
                         continue
                     all_names.add(s)
+                    if r.platformID == 3 and r.nameID in (1, 4, 16) \
+                            and not s.startswith("@"):
+                        by_lang.setdefault(r.nameID, []).append((r.langID, s))
                     # display 只取 Windows 平台记录：Windows 字体查看器
                     # 显示的就是它；Macintosh 平台同名记录序在前会劫持
                     # 选择（FOTPunchelloCondBold 实证：Mac ID1='FOTPunchello'
@@ -152,6 +158,7 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                     script=classify_script(cmap), category=classify_category(aliases),
                     display_name=_display_name(by_id, aliases),
                     family_names=_family_names(by_id),
+                    name_langs=by_lang,
                 ))
             except Exception as e:
                 # spec §11：TTC 个别子字体解析失败 → 跳过该子字体，其余照常

@@ -29,6 +29,9 @@ from qfluentwidgets import TransparentDropDownPushButton
 from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.core.fontindex.library import normalize_name
 from ass_font_substitute.core.fontindex.parser import read_name_records
+from ass_font_substitute.gui.name_lang import _UI_LANG_ORDER
+from ass_font_substitute.gui.name_lang import pick_display_name
+from ass_font_substitute.gui.name_lang import ui_lang
 from ass_font_substitute.gui.preview_vm import weight_tag
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 
@@ -115,12 +118,8 @@ def group_names(records: list[tuple[int, int, int, str]]
     return out
 
 
-# 界面语言 → 默认显示语言优先链（langID 依次取记录集中首个命中；
-# 未知设置值按简序列）
-_UI_LANG_ORDER = {
-    "zh-Hans": (0x804, 0x1004, 0x404, 0xC04, 0x409, 0x411),
-    "zh-Hant": (0x404, 0xC04, 0x804, 0x1004, 0x409, 0x411),
-}
+# 默认显示语言优先链常量在 gui/name_lang.py（各界面展示名共用同一条
+# 链）；此处只做命名卡视图过滤与默认语言选择
 
 
 def visible_name_rows(grouped: list[tuple[str, list[tuple[str, int, int]]]],
@@ -180,14 +179,14 @@ class _FaceRow(QWidget):
     预览页 _RowWidget 同构验证过）。只读导航行，无分段/斜体钮。"""
 
     def __init__(self, worker, pvm, f: FontEntity, text, tag,
-                 show_face: bool):
+                 show_face: bool, name: str):
         super().__init__()
         v = QVBoxLayout(self)
         v.setContentsMargins(12, 6, 12, 6)
         v.setSpacing(3)
         top = QHBoxLayout()
         top.setSpacing(6)
-        top.addWidget(StrongBodyLabel(f.display_name))
+        top.addWidget(StrongBodyLabel(name))
         # meta 对齐预览页（script · 字重 · 斜体分类），斜体仅斜体时显；
         # 同文件节附 face 序号区分 TTC 内位置，家族节不再缀文件（太长）
         it = "斜体 · " if f.italic else ""
@@ -282,9 +281,14 @@ class FontDetailDialog(MessageBoxBase):
         self._settings = settings
         self._e = e
         self._row_seq = 0                   # 列表行 tag 自增号（防撞车）
+        # 展示名按界面语言链挑（与列表行同源）；预览文字同走——空预览
+        # 设置下条上渲的就是这个名字。口径与命名卡默认语言可偶发不同：
+        # 标题是逐字段链（ID1 有记录即止），命名卡是对全字段语言并集套
+        # 链（ID1 缺该语言时卡片可默认显 ID4/16 的该语言行）
+        self._name = pick_display_name(e, ui_lang(settings))
 
-        self.titleLabel = SubtitleLabel(e.display_name)
-        bar = PreviewBar(worker, pvm, e, e.display_name,
+        self.titleLabel = SubtitleLabel(self._name)
+        bar = PreviewBar(worker, pvm, e, self._name,
                          f"detail:{e.fingerprint}:{id(self)}", height=BAR_H)
 
         # ---- 命名卡：占位（别名平铺兜底）→ 异步结构化记录覆盖；
@@ -488,10 +492,8 @@ class FontDetailDialog(MessageBoxBase):
             by_lcid.setdefault(lg, []).append((p, lg))
         for keys in by_lcid.values():
             keys.sort(key=lambda k: k[0] != 3)
-        ui = "zh-Hant" if (self._settings is not None
-                           and self._settings.get("language") == "zh-Hant"
-                           ) else "zh-Hans"
-        chosen = next((by_lcid[lcid][0] for lcid in _UI_LANG_ORDER[ui]
+        chosen = next((by_lcid[lcid][0]
+                       for lcid in _UI_LANG_ORDER[ui_lang(self._settings)]
                        if lcid in by_lcid), langs[0] if langs else None)
         if chosen is not None:
             self._set_lang(chosen)
@@ -552,12 +554,13 @@ class FontDetailDialog(MessageBoxBase):
         lst.setWordWrap(False)
         lst.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         lst.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        text = self._e.display_name
+        text = self._name
         for f in faces:
             # tag 带实例 id+自增号：同 face 跨弹窗/同现两节时 tag 不撞车
             self._row_seq += 1
             w = _FaceRow(self._worker, self._pvm, f, text,
-                         f"dlist:{id(self)}:{self._row_seq}", show_face)
+                         f"dlist:{id(self)}:{self._row_seq}", show_face,
+                         pick_display_name(f, ui_lang(self._settings)))
             it = QListWidgetItem()
             it.setSizeHint(QSize(10, FACE_ROW_H))
             it.setData(Qt.ItemDataRole.UserRole, f)

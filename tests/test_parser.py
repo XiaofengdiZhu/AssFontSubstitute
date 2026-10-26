@@ -222,3 +222,18 @@ def test_parse_family_names(tmp_path):
     f.close()
     assert parse_font_file(p)[0].family_names == (
         "Punchello Typo", "Punchello 排印")
+
+
+def test_parse_name_langs(tmp_path):
+    # 展示名语言候选（SCHEMA v7）：ID1/4/16 的 Windows 平台记录带
+    # langID 入库，表序保序；样式名/PostScript/Mac 记录不参与
+    p = tmp_path / "langs.ttf"
+    build_font(p, chars="永", family="TestFam",
+               extra_aliases={"zh-CN": "简体家族", "zh-TW": "繁體家族"})
+    rec = parse_font_file(p)[0]
+    # fontTools 保存时 name 表按 langID 升序重排，表序即 langID 序
+    assert rec.name_langs[1] == [
+        (0x404, "繁體家族"), (0x409, "TestFam"), (0x804, "简体家族")]
+    assert rec.name_langs[4] == [
+        (0x404, "繁體家族"), (0x409, "TestFam"), (0x804, "简体家族")]
+    assert set(rec.name_langs) == {1, 4}    # 无 ID16/6（工厂不写 16）

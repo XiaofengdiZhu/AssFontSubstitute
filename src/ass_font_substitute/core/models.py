@@ -79,6 +79,9 @@ class FontRecord:
     category: str  # 黑/宋/圆/楷/仿/未分类
     display_name: str = ""  # 展示名（parser 按 name ID 官方优先选好入库）
     family_names: tuple[str, ...] = ()  # 字体系全语言名（ID16 缺视 ID1）
+    # 展示名语言候选：{nameID: [(langID, 文本)]}，仅 Windows 平台 ID1/4/16
+    # 记录（GUI 按界面语言链挑名用）
+    name_langs: dict[int, list[tuple[int, str]]] = field(default_factory=dict)
 
 
 @dataclass

@@ -21,7 +21,7 @@ class BrowsePage(ScrollArea):
         super().__init__(parent)
         self.settings, self.worker = settings, worker
         self.setObjectName("browsePage")
-        self.pvm = PreviewVM()
+        self.pvm = PreviewVM(settings)
 
         self.view = _inner_view(self)
         v = self.view.vbox
@@ -111,6 +111,11 @@ class BrowsePage(ScrollArea):
     def _on_preview_text(self, _):
         # 预览文字变化：整页 tile 缓存键含文字，无需失效，行内异步重渲
         self._debounce.start()
+
+    def reload_names(self):
+        """界面语言变更：行展示名按语言链重挑（行模型即建即显，重建
+        列表即可）。设置页 valueChanged("language") → app 转发。"""
+        self._reload_list()
 
     def _reload_list(self):
         self.pvm.name_query = self.name_edit.text()

@@ -56,7 +56,7 @@ class SubsPage(ScrollArea):
         db = decisions_path()
         db.parent.mkdir(parents=True, exist_ok=True)   # 首启无 afs 目录：决策库随用随建
         self.vm = SubsVM(settings, db)
-        self._pvm = PreviewVM()                    # 字体卡预览条共享 tile LRU
+        self._pvm = PreviewVM(settings)            # 字体卡预览条共享 tile LRU
         self._cards_ui: dict[str, FontCard] = {}
         self._cancels: dict[str, dict] = {}        # norm → 取消标志（pull 任务读）
         self._parsing: set[str] = set()            # 批次解析中（收齐才重算）
