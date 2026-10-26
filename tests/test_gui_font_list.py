@@ -574,3 +574,28 @@ def test_preview_bar_set_entity_switches_face(qapp):
         assert pvm.get_tiles(("fp2", "永")) is not None
     finally:
         bar.deleteLater()
+
+
+def test_double_click_emits_detail_requested(qapp):
+    # 双击行发详情信号（选择对话框不接此信号，仅浏览页）；发行当前
+    # selected——chip 切过哪个 face 就看哪个
+    from ass_font_substitute.gui.preview_vm import FamilyRow
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
+    fl.resize(300, 600)
+    fl.show()
+    qapp.processEvents()
+    e1 = _ent("1", "甲", weight=300)
+    e2 = _ent("1b", "甲", weight=700)
+    row = FamilyRow("甲", [e1, e2], e1)
+    fl.set_rows([row])
+
+    got = []
+    fl.detail_requested.connect(got.append)
+    fl.itemDoubleClicked.emit(fl.item(0))
+    assert [e.fingerprint for e in got] == ["1"]
+    row.selected = e2                    # 模拟行内 chip 切换
+    fl.itemDoubleClicked.emit(fl.item(0))
+    assert [e.fingerprint for e in got] == ["1", "1b"]

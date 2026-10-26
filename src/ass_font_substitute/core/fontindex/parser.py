@@ -67,6 +67,20 @@ def _display_name(by_id: dict[int, list[str]], aliases: list[str]) -> str:
     return aliases[0] if aliases else ""
 
 
+def _family_names(by_id: dict[int, list[str]]) -> tuple[str, ...]:
+    """字体系（FontCreator「字体系名称」栏，写进 name 表的实字段，
+    非推导）：ID16 typographic family 全部 Windows 平台记录；ID16 缺失
+    视 ID1 为其（spec 语义，4 样式内字体如 微软雅黑 Regular/Bold 的
+    ID16 本就缺）。全语言集合入库——同族各 face 记录语言数可能不同，
+    单值 CJK 优先会误裂，归组按集合交集判。样式名/@ 变体不参与。"""
+    for nid in (16, 1):
+        names = tuple(dict.fromkeys(
+            s for s in by_id.get(nid, []) if not s.startswith("@")))
+        if names:
+            return names
+    return ()
+
+
 def _load_fonts(path: Path) -> list[TTFont]:
     try:
         if path.suffix.lower() in TTC_EXTS:
@@ -75,6 +89,29 @@ def _load_fonts(path: Path) -> list[TTFont]:
         return [TTFont(str(path), lazy=True)]
     except Exception as e:  # fontTools 各类异常统一包装
         raise FontParseError(f"{path.name}: {e}") from e
+
+
+def read_name_records(path: Path, face_index: int = 0
+                      ) -> list[tuple[int, int, int, str]]:
+    """按需读单个 face 的 name 表原始记录 (nameID, platformID, langID,
+    text)，详情页命名区专用。不进索引不落库：展示语义（语言标注/分组）
+    随时改零 SCHEMA 成本；文件丢失/face 超界抛 FontParseError。"""
+    fonts = _load_fonts(path)
+    try:
+        if face_index >= len(fonts):
+            raise FontParseError(f"{path.name}: face {face_index} 超界")
+        out = []
+        for r in fonts[face_index]["name"].names:
+            try:
+                s = r.toUnicode()
+            except Exception:
+                continue
+            if s:
+                out.append((r.nameID, r.platformID, r.langID, s))
+        return out
+    finally:
+        for tt in fonts:
+            tt.close()
 
 
 def parse_font_file(path: Path) -> list[FontRecord]:
@@ -114,6 +151,7 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                     cmap=cmap,
                     script=classify_script(cmap), category=classify_category(aliases),
                     display_name=_display_name(by_id, aliases),
+                    family_names=_family_names(by_id),
                 ))
             except Exception as e:
                 # spec §11：TTC 个别子字体解析失败 → 跳过该子字体，其余照常

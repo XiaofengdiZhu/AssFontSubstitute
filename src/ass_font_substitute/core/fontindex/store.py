@@ -27,7 +27,10 @@ from ass_font_substitute.core.models import FontRecord
 # 家族它填 'Condensed Bold'、微软雅黑填 'Regular'，是样式描述不是名称；
 # fonts 表新增 display_name 列（parser 按 ID16→ID1→ID4 官方优先选好入库，
 # 装载直读，展示规则改进同分类规则走升版重建）。
-SCHEMA_VERSION = 5
+# v6：fonts 表新增 family_names 列（ID16 typographic family 全语言名，
+# 缺失视 ID1——字体系是 name 表实字段，详情页「同字体系」按它归族；
+# display_name 是 ID1 优先的展示名，两回事）。
+SCHEMA_VERSION = 6
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 
@@ -44,6 +47,7 @@ CREATE TABLE IF NOT EXISTS fonts(
   id INTEGER PRIMARY KEY, rel_path TEXT, face_index INTEGER, psname TEXT,
   version TEXT, aliases TEXT, weight INTEGER, width INTEGER, italic INTEGER,
   cmap_id INTEGER NOT NULL, script TEXT, category TEXT, display_name TEXT,
+  family_names TEXT,
   UNIQUE(rel_path, face_index));
 CREATE TABLE IF NOT EXISTS bad(
   rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, reason TEXT);
@@ -191,13 +195,14 @@ def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
                     cmap_ids[blob] = cid
             conn.execute(
                 "INSERT INTO fonts(rel_path,face_index,psname,version,aliases,"
-                "weight,width,italic,cmap_id,script,category,display_name) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "weight,width,italic,cmap_id,script,category,display_name,"
+                "family_names) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (rel, r.face_index, r.psname,
                  json.dumps(r.version) if r.version else None,
                  json.dumps(r.aliases, ensure_ascii=False),
                  r.weight, r.width, int(r.italic),
-                 cid, r.script, r.category, r.display_name))
+                 cid, r.script, r.category, r.display_name,
+                 json.dumps(r.family_names, ensure_ascii=False)))
             conn.execute(
                 "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
                 (rel, r.face_index, st.st_mtime_ns, FP_ALGO,
@@ -352,8 +357,8 @@ def load_font_rows(conn: sqlite3.Connection) -> Iterator[tuple]:
     消费方解压；同 blob 解压多次的调用方建议 memo 化）。"""
     yield from conn.execute(
             "SELECT f.rel_path, f.face_index, f.psname, f.version, f.aliases, "
-            "f.display_name, f.weight, f.width, f.italic, cd.data, f.script, "
-            "f.category, fi.size, fi.mtime_ns FROM fonts f "
+            "f.display_name, f.family_names, f.weight, f.width, f.italic, "
+            "cd.data, f.script, f.category, fi.size, fi.mtime_ns FROM fonts f "
             "JOIN files fi USING(rel_path) "
             "JOIN cmap_data cd ON cd.id = f.cmap_id")
 

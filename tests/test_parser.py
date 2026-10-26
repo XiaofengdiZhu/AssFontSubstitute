@@ -172,3 +172,53 @@ def test_parse_display_name_priority(tmp_path):
                          ["@ＭＳ ゴシック", "ＭＳ ゴシック"]) == "ＭＳ ゴシック"
     assert _display_name({}, ["Whatever"]) == "Whatever"
     assert _display_name({}, []) == ""
+
+
+def test_read_name_records(tmp_path):
+    # 详情页命名区按需解析：name 表原始记录全量出（含未入索引的 ID2/3/5），
+    # 多语言同 ID 各记录都在；face 超界报错
+    from fontTools.ttLib import TTFont
+
+    from ass_font_substitute.core.fontindex.parser import FontParseError
+    from ass_font_substitute.core.fontindex.parser import read_name_records
+
+    p = tmp_path / "n.ttf"
+    build_font(p, chars="永", family="Test體")
+    f = TTFont(str(p))
+    f["name"].setName("Full Name", 4, 3, 1, 0x409)
+    f["name"].setName("全名", 4, 3, 1, 0x804)
+    f["name"].setName("Sub", 2, 3, 1, 0x409)
+    f["name"].setName("Test體; v1", 3, 3, 1, 0x409)
+    f.save(p)
+    f.close()
+    recs = read_name_records(p)
+    assert (4, 3, 0x409, "Full Name") in recs
+    assert (4, 3, 0x804, "全名") in recs
+    assert (2, 3, 0x409, "Sub") in recs
+    assert (3, 3, 0x409, "Test體; v1") in recs
+    with pytest.raises(FontParseError):
+        read_name_records(p, face_index=5)
+
+
+def test_parse_family_names(tmp_path):
+    # 字体系（FontCreator「字体系名称」）= ID16 实字段；缺失视 ID1
+    # （spec：4 样式内字体 ID16 本就缺）；全语言集合；@ 竖排变体跳过
+    from fontTools.ttLib import TTFont
+
+    from ass_font_substitute.core.fontindex.parser import parse_font_file
+
+    p = tmp_path / "fam.ttf"
+    build_font(p, chars="永", family="Punchello")
+    rec = parse_font_file(p)[0]
+    assert rec.family_names == ("Punchello",)
+
+    # ID16 在 → 压过 ID1；多语言去重保序
+    f = TTFont(str(p))
+    f["name"].setName("Punchello Typo", 16, 3, 1, 0x409)
+    f["name"].setName("Punchello 排印", 16, 3, 1, 0x804)
+    f["name"].setName("Punchello Typo", 16, 3, 1, 0x409)  # 重复记录
+    f["name"].setName("@Punchello Vertical", 16, 3, 1, 0x411)
+    f.save(p)
+    f.close()
+    assert parse_font_file(p)[0].family_names == (
+        "Punchello Typo", "Punchello 排印")

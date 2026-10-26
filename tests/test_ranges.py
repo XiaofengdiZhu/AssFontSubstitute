@@ -19,3 +19,10 @@ def test_empty():
     r = CmapRanges.from_chars(set())
     assert not r.contains(0x4E00)
     assert r.starts == ()
+
+
+def test_total_chars():
+    # 区间求和总码点（详情页「字符覆盖（总）」）：from_chars 归并连续段
+    assert CmapRanges.from_chars({1, 2, 3, 4, 5}).total_chars() == 5
+    assert CmapRanges.from_chars({1, 2, 100}).total_chars() == 3
+    assert CmapRanges((), ()).total_chars() == 0

@@ -33,6 +33,9 @@ class FontEntity:
     dir_path: str
     rel_path: str
     face_index: int
+    family_names: tuple[str, ...] = ()   # 字体系全语言名（ID16 缺视 ID1）
+    size: int = 0
+    mtime_ns: int = 0
 
 
 class LibraryIndex:
@@ -60,23 +63,25 @@ class LibraryIndex:
                     "SELECT rel_path, face_index, mtime_ns, fp FROM fingerprints "
                     "WHERE algo=?", (FP_ALGO,))}
                 writeback = []
-                for (rel, fi, ps, ver, al, disp, w, wd, it, cmb, script, cat,
-                     _size, _mtime) in load_font_rows(conn):
+                for (rel, fi, ps, ver, al, disp, fam, w, wd, it, cmb, script,
+                     cat, size, mtime) in load_font_rows(conn):
                     aliases = tuple(json.loads(al))
                     version = tuple(json.loads(ver)) if ver else None
+                    family = tuple(json.loads(fam)) if fam else ()
                     cmap = memo.get(cmb)
                     if cmap is None:
                         cmap = CmapRanges.from_bytes(zlib.decompress(cmb))
                         memo[cmb] = cmap
                     hit = cached.get((rel, fi))
-                    if hit is not None and hit[0] == _mtime:
+                    if hit is not None and hit[0] == mtime:
                         fp = hit[1]
                     else:
                         # 缓存缺失（旧库/新文件/mtime 变化）→ 现算并回写
                         fp = fingerprint_of(list(aliases), cmap, w, wd, bool(it))
-                        writeback.append((rel, fi, _mtime, fp))
-                    raw.append((di, rel, fi, ps, version, aliases, disp, w, wd,
-                                bool(it), script, cat, cmap, fp))
+                        writeback.append((rel, fi, mtime, fp))
+                    raw.append((di, rel, fi, ps, version, aliases, disp, family,
+                                w, wd, bool(it), script, cat, cmap, fp, size,
+                                mtime))
                 if writeback:
                     with conn:
                         conn.executemany(
@@ -101,9 +106,10 @@ class LibraryIndex:
         self._files_count = len({(item[0], item[1]) for item in raw})
         self._entities = [
             FontEntity(fp, disp, aliases, ps, ver, w, wd, it,
-                       script, cat, cmap, str(self.dirs[di]), rel, fi)
-            for (di, rel, fi, ps, ver, aliases, disp, w, wd, it, script, cat,
-                 cmap, fp)
+                       script, cat, cmap, str(self.dirs[di]), rel, fi,
+                       family_names=family, size=size, mtime_ns=mtime)
+            for (di, rel, fi, ps, ver, aliases, disp, family, w, wd, it,
+                 script, cat, cmap, fp, size, mtime)
             in best.values()]
 
     def entities(self) -> list[FontEntity]:

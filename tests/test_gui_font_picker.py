@@ -64,3 +64,23 @@ def test_picker_close_cancels_reco_and_none_payload_hides_rec(qapp, tmp_path):
     dlg._on_reco("pickreco", None)
     assert dlg._reco is None
     assert not dlg.rec_title.isVisible()
+
+
+def test_double_click_accepts_and_closes(qapp, tmp_path, monkeypatch):
+    # 双击=快捷接受：置 selected 并调 accept（qfw done 走淡出动画，
+    # result 非同步可断，钉 accept 调用本身；真关闭链路由实机手测覆盖）
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+
+    s = Settings(tmp_path / "s.json")
+    w = _FakeWorker()
+    ents = [_ent("fp1", "甲字体"), _ent("fp2", "乙字体")]
+    host = QWidget()
+    dlg = FontPickerDialog(s, w, ents, parent=host)
+    calls = []
+    monkeypatch.setattr(dlg, "accept", lambda: calls.append(1))
+    dlg.all_list.detail_requested.emit(ents[1])
+    assert dlg.selected.fingerprint == "fp2"
+    assert calls == [1]

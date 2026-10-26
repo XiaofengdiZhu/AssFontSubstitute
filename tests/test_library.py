@@ -186,3 +186,29 @@ def test_display_name_read_from_db(tmp_path):
     conn.commit()
     lib = LibraryIndex.open([d])
     assert lib.entities()[0].display_name == "改过的名"
+
+
+def test_size_mtime_read_from_db(tmp_path):
+    # 详情页文件信息：size/mtime_ns 随实体直读（SELECT 本就查出，
+    # 此前被 _load 丢弃）
+    d = tmp_path / "lib"
+    d.mkdir()
+    p = d / "a.ttf"
+    build_font(p, chars="永", family="A體")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    e = LibraryIndex.open([d]).entities()[0]
+    assert e.size == p.stat().st_size
+    assert e.mtime_ns == p.stat().st_mtime_ns
+
+
+def test_family_names_read_from_db(tmp_path):
+    # 字体系库列直读（ID16 缺视 ID1，全语言集合）；详情页同字体系归族
+    # 按集合交集，不入库则每次解析全库不可行
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永", family="Punchello")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    e = LibraryIndex.open([d]).entities()[0]
+    assert e.family_names == ("Punchello",)

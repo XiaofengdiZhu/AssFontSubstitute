@@ -106,6 +106,8 @@ class FontListWidget(QListWidget):
 
     count_changed = Signal(int)
     entity_picked = Signal(FontEntity)
+    detail_requested = Signal(FontEntity)   # 双击行：浏览页开详情；选择
+    #                                         对话框转作快捷接受（选定+关窗）
 
     def __init__(self, worker, pvm, preview_text_fn, parent=None):
         super().__init__(parent)
@@ -176,6 +178,7 @@ class FontListWidget(QListWidget):
             QTimer.singleShot(0, _finalize)
         bar.ani.finished.connect(_on_ani_done)
         self.itemClicked.connect(self._on_click)
+        self.itemDoubleClicked.connect(self._on_double_click)
         self.verticalScrollBar().valueChanged.connect(
             self._on_scroll_value_changed)
         self.verticalScrollBar().rangeChanged.connect(
@@ -207,6 +210,13 @@ class FontListWidget(QListWidget):
         row = self.row(item)
         if 0 <= row < len(self._rows):
             self.entity_picked.emit(self._rows[row].selected)
+
+    def _on_double_click(self, item):
+        # 双击先发一次 itemClicked（选择语义先走），再发详情；发行当前
+        # selected——chip 切过哪个 face 就看哪个
+        row = self.row(item)
+        if 0 <= row < len(self._rows):
+            self.detail_requested.emit(self._rows[row].selected)
 
     def _row_widget(self, i: int) -> _RowWidget:
         row = self._rows[i]

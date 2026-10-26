@@ -12,6 +12,7 @@ from qfluentwidgets import SearchLineEdit
 from ass_font_substitute.gui.jobs import ensure_library
 from ass_font_substitute.gui.jobs import lib_key
 from ass_font_substitute.gui.preview_vm import PreviewVM
+from ass_font_substitute.gui.widgets.font_detail import FontDetailDialog
 from ass_font_substitute.gui.widgets.font_list import FontListWidget
 
 
@@ -49,6 +50,7 @@ class BrowsePage(ScrollArea):
                                    lambda: self.preview_edit.text())
         self.list.count_changed.connect(
             lambda n: self.count_label.setText(f"{n} 款字体"))
+        self.list.detail_requested.connect(self._open_detail)
         v.addWidget(self.list)
 
         self._debounce = QTimer(self)
@@ -115,6 +117,12 @@ class BrowsePage(ScrollArea):
         rows = self.pvm.filtered()
         self.hint.setVisible(not rows and not self.pvm.entities)
         self.list.set_rows(rows)
+
+    def _open_detail(self, e):
+        # 实体全集现场取 pvm（弹窗开着时后台重拉会整体换列表——弹窗是
+        # 快照视图，可接受；基嵌套弹窗共用同一份 entities 引用）
+        FontDetailDialog(e, self.pvm.entities, self.worker, self.pvm,
+                         settings=self.settings, parent=self).exec()
 
 
 def _pick(cb: ComboBox) -> str | None:

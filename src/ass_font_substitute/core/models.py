@@ -22,6 +22,11 @@ class CmapRanges:
             return 0.0
         return sum(self.contains(ord(c)) for c in s) / len(s)
 
+    def total_chars(self) -> int:
+        """区间求和的总码点数（详情页字符覆盖用）。"""
+        return sum(e - s + 1
+                   for s, e in zip(self.starts, self.ends, strict=False))
+
     def to_bytes(self) -> bytes:
         # 不可用 sum(zip(...), ()) 拼元组——O(n²)，CJK 字体 4000+ 区间时
         # 单次 9ms，曾是索引写库 92% 耗时；chain 展平 O(n)
@@ -73,6 +78,7 @@ class FontRecord:
     script: str  # 简/繁/简繁/未标注
     category: str  # 黑/宋/圆/楷/仿/未分类
     display_name: str = ""  # 展示名（parser 按 name ID 官方优先选好入库）
+    family_names: tuple[str, ...] = ()  # 字体系全语言名（ID16 缺视 ID1）
 
 
 @dataclass

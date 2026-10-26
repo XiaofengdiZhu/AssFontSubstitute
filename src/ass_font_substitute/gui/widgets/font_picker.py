@@ -33,6 +33,7 @@ class FontPickerDialog(MessageBoxBase):
         self.rec_title = SubtitleLabel("推荐（覆盖达标）")
         self.rec_list = FontListWidget(worker, self.pvm, lambda: self._preview())
         self.rec_list.entity_picked.connect(self._pick)
+        self.rec_list.detail_requested.connect(self._accept_pick)
         self.rec_list.setFixedHeight(120)
         self.rec_title.hide()
         self.rec_list.hide()
@@ -53,6 +54,7 @@ class FontPickerDialog(MessageBoxBase):
 
         self.all_list = FontListWidget(worker, self.pvm, lambda: self._preview())
         self.all_list.entity_picked.connect(self._pick)
+        self.all_list.detail_requested.connect(self._accept_pick)
         self.all_list.setMinimumHeight(120)
 
         self.hint = CaptionLabel("未选择")
@@ -158,6 +160,13 @@ class FontPickerDialog(MessageBoxBase):
         self.selected = e
         self.hint.setText(f"已选：{e.display_name}")
         self.yesButton.setEnabled(True)
+
+    def _accept_pick(self, e):
+        # 双击=快捷接受：选定并关窗（详情入口仅浏览页提供，此处不发）。
+        # 绕过 validate()——MessageBoxBase 默认恒 True 未覆写；将来覆写
+        # validate 时须让双击路径同走
+        self._pick(e)
+        self.accept()
 
     _reco = None
 

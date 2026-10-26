@@ -229,8 +229,9 @@ def test_cmap_dedup_and_roundtrip(tmp_path):
               "diff.ttf": CmapRanges.from_chars(base | {ord("木")})}
     for row in load_font_rows(conn):
         # 列序：rel_path(0) face_index(1) psname(2) version(3) aliases(4)
-        # display_name(5) weight(6) width(7) italic(8) cmap blob(9) ……
-        assert CmapRanges.from_bytes(zlib.decompress(row[9])) == expect[row[0]]
+        # display_name(5) family_names(6) weight(7) width(8) italic(9)
+        # cmap blob(10) ……
+        assert CmapRanges.from_bytes(zlib.decompress(row[10])) == expect[row[0]]
 
 
 def test_cmap_gc_on_incremental(tmp_path):
