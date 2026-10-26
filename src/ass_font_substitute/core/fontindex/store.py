@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import zlib
 from collections.abc import Callable
 from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
@@ -20,7 +21,9 @@ from ass_font_substitute.core.models import FontRecord
 # 库列即最终分类（建索引时由别名算好入库，装载直读）。分类规则改进属
 # 内容语义变化：升此版本触发旧库备份+全量重建（spec §5）。v3：指纹去
 # 内容哈希（xxh 列废除，解析不再读全文），fingerprints 校验列改 mtime_ns。
-SCHEMA_VERSION = 3
+# v4：cmap 区间拆 cmap_data 表去重+zlib（同族各字重共享 cmap，18539
+# face 仅 1455 份 distinct，232.9→21.8MB；zlib-1 再 3.2x），fonts 行存引用。
+SCHEMA_VERSION = 4
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 
@@ -31,10 +34,12 @@ DDL = """
 CREATE TABLE IF NOT EXISTS schema_version(v INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS files(
   rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER);
+CREATE TABLE IF NOT EXISTS cmap_data(
+  id INTEGER PRIMARY KEY, data BLOB NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS fonts(
   id INTEGER PRIMARY KEY, rel_path TEXT, face_index INTEGER, psname TEXT,
   version TEXT, aliases TEXT, weight INTEGER, width INTEGER, italic INTEGER,
-  cmap BLOB, script TEXT, category TEXT,
+  cmap_id INTEGER NOT NULL, script TEXT, category TEXT,
   UNIQUE(rel_path, face_index));
 CREATE TABLE IF NOT EXISTS bad(
   rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, reason TEXT);
@@ -150,10 +155,13 @@ def _parse_task(p: Path) -> tuple[list[FontRecord] | FontParseError,
 def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
                   recs: list[FontRecord] | FontParseError,
                   res: UpdateResult,
-                  fps: list[str] | None = None) -> None:
+                  fps: list[str] | None = None,
+                  cmap_ids: dict[bytes, int] | None = None) -> None:
     """单文件写库事务（串行/并行共用）：失败入 bad，成功清 bad 重灌条目。
     fps 为调用方预计算的逐 face 指纹（对齐 recs；worker 与串行/回退路径
-    均显式传入），None 仅防御兜底就地补算。"""
+    均显式传入），None 仅防御兜底就地补算。cmap_ids 是本次 update 的
+    blob→id 进程内缓存（命中免 SQL），miss 走 cmap_data UNIQUE 去重
+    （增量场景跨 run 也会命中历史行）。"""
     with conn:
         if isinstance(recs, FontParseError):
             res.bad += 1
@@ -168,14 +176,23 @@ def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
         conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
         conn.execute("DELETE FROM fonts WHERE rel_path=?", (rel,))
         for i, r in enumerate(recs):
+            blob = zlib.compress(r.cmap.to_bytes(), 1)
+            cid = cmap_ids.get(blob) if cmap_ids is not None else None
+            if cid is None:
+                conn.execute("INSERT OR IGNORE INTO cmap_data(data) VALUES (?)",
+                             (blob,))
+                cid = conn.execute(
+                    "SELECT id FROM cmap_data WHERE data=?", (blob,)).fetchone()[0]
+                if cmap_ids is not None:
+                    cmap_ids[blob] = cid
             conn.execute(
                 "INSERT INTO fonts(rel_path,face_index,psname,version,aliases,"
-                "weight,width,italic,cmap,script,category) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "weight,width,italic,cmap_id,script,category) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (rel, r.face_index, r.psname,
                  json.dumps(r.version) if r.version else None,
                  json.dumps(r.aliases, ensure_ascii=False),
                  r.weight, r.width, int(r.italic),
-                 r.cmap.to_bytes(), r.script, r.category))
+                 cid, r.script, r.category))
             conn.execute(
                 "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
                 (rel, r.face_index, st.st_mtime_ns, FP_ALGO,
@@ -187,7 +204,8 @@ def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
 def _update_parallel(dir_path: Path, conn: sqlite3.Connection,
                      todo: list[Path], res: UpdateResult,
                      progress: Callable[[int, int, UpdateResult], bool] | None,
-                     total: int, executor=None, max_threads: int = 1) -> None:
+                     total: int, cmap_ids: dict[bytes, int],
+                     executor=None, max_threads: int = 1) -> None:
     """解析走进程池（fontTools 纯 Python CPU 与指纹预计算同摊多核），
     写库仍主线程逐文件事务（SQLite 单写者；取消/中断保留已入库前缀语义
     不变——progress 返 False 停止消费，在途结果丢弃不入库，未派发文件
@@ -212,7 +230,7 @@ def _update_parallel(dir_path: Path, conn: sqlite3.Connection,
                 break
             rel, st, _ = futs[fut]
             del pending[fut]
-            _apply_result(conn, rel, st, recs, res, fps)
+            _apply_result(conn, rel, st, recs, res, fps, cmap_ids)
             done += 1
             if progress is not None and not progress(done, total, res):
                 res.cancelled = True
@@ -223,7 +241,7 @@ def _update_parallel(dir_path: Path, conn: sqlite3.Connection,
             except FontParseError as e:
                 recs = e
             fps = None if isinstance(recs, FontParseError) else _fingerprints(recs)
-            _apply_result(conn, rel, st, recs, res, fps)
+            _apply_result(conn, rel, st, recs, res, fps, cmap_ids)
             done += 1
             if progress is not None and not progress(done, total, res):
                 res.cancelled = True
@@ -282,10 +300,11 @@ def update_index(dir_path: Path, conn: sqlite3.Connection,
     # 与库同量级。checkpoint busy（GUI 恰在读）时忽略，留待 close 兜底。
     saved_ac = conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
     conn.execute("PRAGMA wal_autocheckpoint=0")
+    cmap_ids: dict[bytes, int] = {}
     try:
         if total > 1 and (executor is not None or max_threads > 1):
             _update_parallel(dir_path, conn, todo, res, progress, total,
-                             executor=executor, max_threads=max_threads)
+                             cmap_ids, executor=executor, max_threads=max_threads)
         else:
             for done, p in enumerate(todo, 1):
                 rel = p.relative_to(dir_path).as_posix()
@@ -297,10 +316,17 @@ def update_index(dir_path: Path, conn: sqlite3.Connection,
                 except FontParseError as e:
                     recs = e
                 fps = None if isinstance(recs, FontParseError) else _fingerprints(recs)
-                _apply_result(conn, rel, st, recs, res, fps)
+                _apply_result(conn, rel, st, recs, res, fps, cmap_ids)
                 if progress is not None and not progress(done, total, res):
                     res.cancelled = True
                     break
+        # cmap GC：增量路径（变更重灌/坏文件/文件删除）只删 fonts 行不回收
+        # cmap，孤儿随更新无上界积累；收尾统一清一次（表 ~1.5k 行，成本
+        # 可忽略）。取消时 cmap_data 与 fonts 同事务写入、前缀自洽，此处
+        # 最多清掉历史崩溃遗留孤儿，同样安全。
+        with conn:
+            conn.execute("DELETE FROM cmap_data "
+                         "WHERE id NOT IN (SELECT cmap_id FROM fonts)")
     finally:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         conn.execute(f"PRAGMA wal_autocheckpoint={saved_ac}")
@@ -317,10 +343,13 @@ def stats(conn: sqlite3.Connection) -> dict:
 
 
 def load_font_rows(conn: sqlite3.Connection) -> Iterator[tuple]:
+    """cmap 列 = zlib 压缩的 CmapRanges.to_bytes()（v4 去重存储，
+    消费方解压；同 blob 解压多次的调用方建议 memo 化）。"""
     yield from conn.execute(
             "SELECT f.rel_path, f.face_index, f.psname, f.version, f.aliases, "
-            "f.weight, f.width, f.italic, f.cmap, f.script, f.category, "
-            "fi.size, fi.mtime_ns FROM fonts f JOIN files fi USING(rel_path)")
+            "f.weight, f.width, f.italic, cd.data, f.script, f.category, "
+            "fi.size, fi.mtime_ns FROM fonts f JOIN files fi USING(rel_path) "
+            "JOIN cmap_data cd ON cd.id = f.cmap_id")
 
 
 __all__ = [

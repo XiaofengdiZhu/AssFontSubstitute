@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,6 +68,9 @@ class LibraryIndex:
 
     def _load(self):
         raw = []
+        # v4 去重存储：同 blob 解压一次并共享同一 CmapRanges 实例——
+        # 同族各字重共享 cmap，18k face 仅 ~1.5k 份 distinct（内存同享）
+        memo: dict[bytes, CmapRanges] = {}
         for di, d in enumerate(self.dirs):
             conn = open_db(d / "fontindex.db")
             try:
@@ -78,7 +82,10 @@ class LibraryIndex:
                      _size, _mtime) in load_font_rows(conn):
                     aliases = tuple(json.loads(al))
                     version = tuple(json.loads(ver)) if ver else None
-                    cmap = CmapRanges.from_bytes(cmb)
+                    cmap = memo.get(cmb)
+                    if cmap is None:
+                        cmap = CmapRanges.from_bytes(zlib.decompress(cmb))
+                        memo[cmb] = cmap
                     hit = cached.get((rel, fi))
                     if hit is not None and hit[0] == _mtime:
                         fp = hit[1]

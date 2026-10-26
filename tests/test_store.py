@@ -168,6 +168,7 @@ def test_update_index_parallel_fingerprints(tmp_path):
     # 并行路径逐 face 指纹不串位（TTC 3 face 属性各异）：fingerprints 表
     # 值与按 fonts 行重算 fingerprint_of 逐一相等
     import json
+    import zlib
     from concurrent.futures import ThreadPoolExecutor
 
     from ass_font_substitute.core.fontindex.store import FP_ALGO
@@ -190,12 +191,64 @@ def test_update_index_parallel_fingerprints(tmp_path):
     assert {algo for algo, _ in fps.values()} == {FP_ALGO}
     assert len({fp for _, fp in fps.values()}) == 3   # 三 face 指纹互异
     rows = conn.execute(
-        "SELECT face_index, aliases, weight, width, italic, cmap "
-        "FROM fonts WHERE rel_path='t.ttc'").fetchall()
-    for fi, aliases, weight, width, italic, cmap in rows:
+        "SELECT f.face_index, f.aliases, f.weight, f.width, f.italic, cd.data "
+        "FROM fonts f JOIN cmap_data cd ON cd.id=f.cmap_id "
+        "WHERE f.rel_path='t.ttc'").fetchall()
+    for fi, aliases, weight, width, italic, blob in rows:
         assert fps[fi][1] == fingerprint_of(json.loads(aliases),
-                                            CmapRanges.from_bytes(cmap),
+                                            CmapRanges.from_bytes(zlib.decompress(blob)),
                                             weight, width, bool(italic))
+
+
+def test_cmap_dedup_and_roundtrip(tmp_path):
+    # v4：同 cmap（同 chars 异字重）入库共享一行 cmap_data，fonts 行存
+    # 引用；不同 chars 各自一行；load_font_rows 解压往返精确无损
+    import zlib
+    from concurrent.futures import ThreadPoolExecutor
+
+    from ass_font_substitute.core.fontindex.store import load_font_rows
+    from ass_font_substitute.core.models import CmapRanges
+    from tests.fonts import build_ttc
+    d = tmp_path / "fonts"
+    d.mkdir()
+    build_ttc(d / "same.ttc", [{"chars": "永中", "family": "A體", "weight": 400},
+                               {"chars": "永中", "family": "A體", "weight": 700}])
+    build_font(d / "diff.ttf", chars="木", family="B體")
+    conn = open_db(d / "fontindex.db")
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        r = update_index(d, conn, executor=ex)
+    assert r.added == 2 and stats(conn)["fonts"] == 3
+    assert conn.execute("SELECT COUNT(*) FROM cmap_data").fetchone()[0] == 2
+    same_ids = [c for (c,) in conn.execute(
+        "SELECT cmap_id FROM fonts WHERE rel_path='same.ttc' ORDER BY face_index")]
+    assert same_ids[0] == same_ids[1]
+    # tests/fonts.py 字形集 = 空格 + 数字字母 + 指定 chars；往返须与
+    # from_chars 期望精确相等（抓 starts/ends 错位与区间截断）
+    base = {0x20} | {ord(c) for c in "0123456789Aa"}
+    expect = {"same.ttc": CmapRanges.from_chars(base | {ord("永"), ord("中")}),
+              "diff.ttf": CmapRanges.from_chars(base | {ord("木")})}
+    for row in load_font_rows(conn):
+        assert CmapRanges.from_bytes(zlib.decompress(row[8])) == expect[row[0]]
+
+
+def test_cmap_gc_on_incremental(tmp_path):
+    # 独占 cmap 的文件被删除/变更 → 收尾 GC 回收孤儿 cmap_data 行
+    d = tmp_path / "fonts"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永中木水火", family="A體")
+    build_font(d / "b.ttf", chars="永中木水火", family="B體")   # 与 a 共享 cmap
+    build_font(d / "c.ttf", chars="山河大海", family="C體")     # 独占 cmap
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    assert conn.execute("SELECT COUNT(*) FROM cmap_data").fetchone()[0] == 2
+    (d / "c.ttf").unlink()
+    update_index(d, conn)
+    assert conn.execute("SELECT COUNT(*) FROM cmap_data").fetchone()[0] == 1
+    build_font(d / "a.ttf", chars="风云雷电", family="A體")     # 共享组换 blob
+    update_index(d, conn)
+    assert conn.execute("SELECT COUNT(*) FROM cmap_data").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM cmap_data WHERE id NOT IN "
+                        "(SELECT cmap_id FROM fonts)").fetchone()[0] == 0
 
 
 def test_update_index_defers_checkpoints(tmp_path):
