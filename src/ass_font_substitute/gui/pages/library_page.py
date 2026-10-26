@@ -65,7 +65,7 @@ def _progress_text(done: int, total: int) -> str:
 # 行中进度文案的横向位置才逐行对齐。超限（单目录 10 万+文件量级）实际
 # 文案会宽于定宽被静默截尾，当前量级安全
 _STATS_TMPL = ("文件 00000 · 字体 00000 · 支持简体 0000"
-               " · 支持繁体 0000 · 失败/旧版 0000")
+               " · 支持繁体 0000 · 失败/重复 0000")
 
 
 def _bottom_clip_path(bar) -> QPainterPath:
@@ -303,7 +303,7 @@ class LibraryPage(ScrollArea):
             group = card.addGroup(FIF.FOLDER, "",
                                   f"文件 {d.files} · 字体 {d.fonts}"
                                   f" · 支持简体 {d.sc} · 支持繁体 {d.tc}"
-                                  f" · 失败/旧版 {d.fail}", right)
+                                  f" · 失败/重复 {d.fail}", right)
             # 标题位放路径（组件 titleLabel 不省略，换 _ElidedLabel 防窄窗顶飞）
             path_lbl = _ElidedLabel(d.path)
             install_tip(path_lbl, d.path)
@@ -362,7 +362,7 @@ class LibraryPage(ScrollArea):
         bad = sum(d.bad for d in self.vm.dirs)
         skipped = sum(d.skipped for d in self.vm.dirs)
         self.failures_card.setContent(
-            f"坏文件 {bad} · 旧版跳过 {skipped}" if bad or skipped
+            f"坏文件 {bad} · 重复跳过 {skipped}" if bad or skipped
             else "暂无失败文件")
 
     def _add_dir(self):
@@ -629,7 +629,7 @@ class _FailuresDialog(MessageBoxBase):
                 lines.append(f"  {rel} —— {reason}")
         skipped = data.get("skipped", [])
         if skipped:
-            lines.append("【跳过的旧版本】")
+            lines.append("【跳过的重复版本】")
             lines.extend(f"  {s}" for s in skipped)
         text.setPlainText("\n".join(lines))
         self.viewLayout.addWidget(self.titleLabel)
@@ -657,11 +657,11 @@ class _FailuresDialog(MessageBoxBase):
 
 
 def _dir_library_stats(snap, dirs: list[str]) -> dict:
-    """每目录库内统计（worker 线程纯数据）：字体/支持简繁/旧版跳过数。
+    """每目录库内统计（worker 线程纯数据）：字体/支持简繁/重复跳过数。
 
     实体 dir_path 是 str(Path(dir)) 规范化形（反斜杠），目录表是原样
     字符串（可能正斜杠），按 Path 归一映射回原键；skipped 条目形如
-    「<目录>/<rel>#<face> 旧版本」，同样按归一前缀归目录。"""
+    「<目录>/<rel>#<face> 重复版本」，同样按归一前缀归目录。"""
     out = {d: {"fonts": 0, "sc": 0, "tc": 0, "skipped": 0} for d in dirs}
     by_norm = {str(Path(d)): d for d in dirs}
     for e in snap.lib.entities():

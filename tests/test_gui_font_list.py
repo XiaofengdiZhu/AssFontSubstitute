@@ -599,3 +599,13 @@ def test_double_click_emits_detail_requested(qapp):
     row.selected = e2                    # 模拟行内 chip 切换
     fl.itemDoubleClicked.emit(fl.item(0))
     assert [e.fingerprint for e in got] == ["1", "1b"]
+
+
+def test_meta_text_hides_unmarked_script():
+    # 未标注（探针简繁双不中）不上屏：meta 只剩字重/分类
+    from dataclasses import replace
+
+    from ass_font_substitute.gui.widgets.font_list import _meta_text
+
+    assert _meta_text(replace(_ent("1", "A"), script="未标注")) == "W400 · 黑"
+    assert _meta_text(_ent("2", "B")) == "简 · W400 · 黑"

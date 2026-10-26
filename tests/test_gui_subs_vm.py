@@ -120,8 +120,17 @@ def test_make_card_replace_missing_preview(vm_full):
     card = vm.make_card(usage, cls)
     assert card.kind == "replace"
     assert card.missing_preview == list("之外的字")[:12]
+    assert card.n_missing == 4
     vm.apply_default_check(card)
     assert card.checked_key == "fp-hei"
+
+    # 缺字超预览上限：预览截 12 字，n_missing 是未覆盖总数
+    long_chars = "永宇的好" + "一二三四五六七八九" + "甲乙丙丁"
+    usage2 = _usage("黑体", long_chars)
+    cls2 = UsageClass("replace", [ents[0]], 0.1, list("之外" + "一二三四五六七八九甲乙丙丁"))
+    card2 = vm.make_card(usage2, cls2)
+    assert card2.n_missing == 15
+    assert len(card2.missing_preview) == 12
 
 
 def test_make_card_missing_and_zero(vm_full):

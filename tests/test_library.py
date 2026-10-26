@@ -32,7 +32,7 @@ def test_version_dedup(tmp_path):
     assert len(ents) == 2  # X-Medium 去重 + Y-Light
     x = next(e for e in ents if e.psname == "X-Medium")
     assert x.version == (2, 0)
-    assert any("旧版本" in s for s in lib.skipped())
+    assert any("重复版本" in s for s in lib.skipped())
 
 
 def test_find_by_name_normalized(tmp_path):

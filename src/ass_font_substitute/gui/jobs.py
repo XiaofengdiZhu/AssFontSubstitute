@@ -128,7 +128,7 @@ def update_dir(dir_path: str, progress=None, max_threads: int = 1):
 
 
 def read_failures(ctx) -> dict:
-    """各目录 bad 清单 + 跨目录跳过（旧版本）。mode=ro 只读。"""
+    """各目录 bad 清单 + 跨目录跳过（重复版本）。mode=ro 只读。"""
     out: dict[str, list[tuple[str, str]]] = {}
     for d in ctx.settings.get("font_dirs"):
         dbf = Path(d) / "fontindex.db"

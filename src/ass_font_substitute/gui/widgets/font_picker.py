@@ -9,6 +9,7 @@ from qfluentwidgets import MessageBoxBase
 from qfluentwidgets import SearchLineEdit
 from qfluentwidgets import SubtitleLabel
 
+from ass_font_substitute.gui import script_filter
 from ass_font_substitute.gui.jobs import make_searcher
 from ass_font_substitute.gui.jobs import pull_chunk
 from ass_font_substitute.gui.name_lang import pick_display_name
@@ -44,7 +45,8 @@ class FontPickerDialog(MessageBoxBase):
         all_title = SubtitleLabel("全部字体")
         self.name_edit = SearchLineEdit()
         self.name_edit.setPlaceholderText("搜索字体名")
-        self.cb_cat, self.cb_script, self.cb_weight = ComboBox(), ComboBox(), ComboBox()
+        self.cb_cat, self.cb_weight = ComboBox(), ComboBox()
+        self.cb_script = script_filter.StrikeTailComboBox()
         for cb, ph in ((self.cb_cat, "分类"), (self.cb_script, "简繁"),
                        (self.cb_weight, "字重")):
             cb.setPlaceholderText(ph)
@@ -122,8 +124,9 @@ class FontPickerDialog(MessageBoxBase):
         return ""
 
     def _fill_filters(self):
+        script_items = ["全部", *script_filter.options(self.pvm)]
         for cb, items in ((self.cb_cat, ["全部", *self.pvm.categories()]),
-                          (self.cb_script, ["全部", *self.pvm.scripts()]),
+                          (self.cb_script, script_items),
                           (self.cb_weight, ["全部", *self.pvm.weight_buckets()])):
             cb.blockSignals(True)
             cb.clear()
@@ -134,7 +137,8 @@ class FontPickerDialog(MessageBoxBase):
         def pick(cb):
             t = cb.currentText()
             return None if (not t or t == "全部") else t
-        self.pvm.category, self.pvm.script = pick(self.cb_cat), pick(self.cb_script)
+        self.pvm.category = pick(self.cb_cat)
+        self.pvm.script = script_filter.pick(self.cb_script)
         wt = pick(self.cb_weight)
         self.pvm.weight = int(wt) if wt else None
         self._reload_all()

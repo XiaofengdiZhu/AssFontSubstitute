@@ -42,7 +42,9 @@ BAR_H = 32                 # 预览条逻辑高
 
 def _meta_text(e: FontEntity) -> str:
     it = "斜体 · " if e.italic else ""
-    return f"{e.script} · {weight_tag(e.weight)} · {it}{e.category}"
+    # 未标注（探针简繁双不中）不上屏：空位无信息量，行 meta 只剩字重/分类
+    script = "" if e.script == "未标注" else f"{e.script} · "
+    return f"{script}{weight_tag(e.weight)} · {it}{e.category}"
 
 
 def _draw_italic_pixmap(color: QColor) -> QPixmap:

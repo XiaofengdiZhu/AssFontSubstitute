@@ -430,7 +430,7 @@ def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
             break
     assert page.vm.stats.get("fonts") == 1
     row = page.vm.dirs[0]
-    # 目录行统计：文件=盘上全部支持后缀（含坏文件）；失败/旧版=bad 表
+    # 目录行统计：文件=盘上全部支持后缀（含坏文件）；失败/重复=bad 表
     assert (row.files, row.fonts, row.fail) == (2, 1, 1)
     # 失败清单卡动态计数（PushSettingCard 无 content() 读口，走 contentLabel）
     assert "坏文件 1" in page.failures_card.contentLabel.text()
@@ -504,7 +504,7 @@ def test_dir_library_stats_maps_normalized_paths(qapp, tmp_path, monkeypatch):
     fwd = str(tmp_path).replace("\\", "/")
     snap = SimpleNamespace(lib=SimpleNamespace(
         entities=lambda: [ent],
-        skipped=lambda: [f"{tmp_path!s}\\a.ttf#1 旧版本"]))
+        skipped=lambda: [f"{tmp_path!s}\\a.ttf#1 重复版本"]))
     out = _dir_library_stats(snap, [fwd])
     assert out[fwd] == {"fonts": 1, "sc": 1, "tc": 0, "skipped": 1}
     # 未知目录（非本库目录）不进结果

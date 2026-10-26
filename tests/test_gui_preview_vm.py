@@ -1,4 +1,6 @@
 
+import pytest
+
 from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.core.models import CmapRanges
 from ass_font_substitute.gui.preview_vm import CATEGORY_ORDER
@@ -205,3 +207,46 @@ def test_row_label_uses_lang_chain_but_grouping_stays_legacy():
     # 单 face 行（as_rows）同走链挑选
     rec = vm.as_rows([b])[0]
     assert rec.display_name == "YaHei"
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    yield app
+
+
+def test_script_filter_no_script_option_strikethrough_and_pick(qapp):
+    # 未标注（探针简繁双不中）不在行 meta 上屏，但筛选要能圈出这批：
+    # 「简/繁」选项（GUI 删除线渲染 = 两个脚本都划掉）映射 script=未标注
+    from PySide6.QtGui import QAction
+
+    from ass_font_substitute.gui import script_filter
+
+    vm = PreviewVM()
+    vm.set_entities([_ent("1", "A"), _ent("2", "B", script="未标注")])
+    assert script_filter.options(vm) == ["简", "简/繁"]
+
+    # 弹层末项删除线：菜单构建期挂钩生效（镜像 _showComboMenu 的建菜单
+    # 循环——exec 模态内联，整段 _showComboMenu 测不了）
+    cb = script_filter.StrikeTailComboBox()
+    cb.addItems(["全部", *script_filter.options(vm)])
+    menu = cb._createComboMenu()
+    for it in cb.items:
+        menu.addAction(QAction(it.icon, it.text))
+    assert menu.view.item(cb.count() - 1).font().strikeOut()
+    assert not menu.view.item(0).font().strikeOut()
+
+    cb.setCurrentIndex(2)
+    assert script_filter.pick(cb) == "未标注"
+    vm.script = script_filter.pick(cb)
+    assert [r.display_name for r in vm.filtered()] == ["B"]
+    # 按钮上的选定文本同步删除线（弹层外 QPushButton.setText 不吃 FontRole）
+    assert cb.font().strikeOut()
+    cb.setCurrentIndex(0)
+    assert not cb.font().strikeOut()           # 切走即复原
+    assert script_filter.pick(cb) is None      # 全部 = 不筛
+
+    vm2 = PreviewVM()
+    vm2.set_entities([_ent("1", "A")])
+    assert script_filter.options(vm2) == ["简"]   # 无未标注不出选项

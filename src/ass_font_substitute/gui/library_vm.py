@@ -18,7 +18,7 @@ class DirRow:
     tc: int = 0                 # 支持繁体
     bad: int = 0                # 坏文件表行数
     skipped: int = 0            # 版本去重跳过数
-    fail: int = 0               # 失败/旧版 = bad + skipped
+    fail: int = 0               # 失败/重复 = bad + skipped
 
 
 class LibraryVM:

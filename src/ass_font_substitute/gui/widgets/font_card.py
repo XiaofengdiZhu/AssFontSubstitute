@@ -152,9 +152,10 @@ class FontCard(CardWidget):
         h = QHBoxLayout(box)
         h.setContentsMargins(10, 6, 10, 6)
         lab = CaptionLabel(
-            "缺字：" + " ".join(self.card.missing_preview)
-            + (f" 等 {self.card.n_chars} 字中 {len(self.card.missing_preview)}+ 字"
-               if len(self.card.missing_preview) >= 12 else ""))
+            f"未覆盖 {self.card.n_missing} 字："
+            + "".join(self.card.missing_preview)
+            + ("……" if self.card.n_missing > len(self.card.missing_preview)
+               else ""))
         lab.setWordWrap(True)
         h.addWidget(lab, 1)
         return box
@@ -253,7 +254,7 @@ class FontCard(CardWidget):
         if "原字体" in o.badges:
             n_missing = round(self.card.n_chars * (1 - (o.coverage or 0)))
             if n_missing > 0:
-                return f"覆盖 {_pct(o.coverage)} · 有 {n_missing} 字未覆盖"
+                return f"覆盖 {_pct(o.coverage)} · 未覆盖 {n_missing} 字"
             return f"覆盖 {_pct(o.coverage)} · 无需替换"
         parts = [p for p in (
             f"相似 {_pct(o.similarity)}" if o.similarity is not None else None,
@@ -278,7 +279,7 @@ class FontCard(CardWidget):
         elif card.search_state == "paused":
             n = sum(1 for o in card.options if o.source == "search")
             foot.addWidget(CaptionLabel(f"已找到 {n} 个相似字体，暂停搜索。"))
-            more = TransparentPushButton(FIF.SEARCH, "继续找更多")
+            more = TransparentPushButton(FIF.SEARCH, "继续寻找更多")
             more.clicked.connect(
                 lambda: self.continue_clicked.emit(self.card.norm_name))
             foot.addWidget(more)
@@ -296,7 +297,7 @@ class FontCard(CardWidget):
             foot.addWidget(CaptionLabel("原字体无法渲染，无法比较相似度"))
         elif (ekind in ("replace", "twin", "keep") and card.n_chars > 0):
             # 0 字卡无可比字型：不给搜索入口（空池/全池放行都无意义）
-            cont = TransparentPushButton(FIF.SEARCH, "继续找其他相似字体")
+            cont = TransparentPushButton(FIF.SEARCH, "继续寻找更多")
             cont.clicked.connect(
                 lambda: self.continue_clicked.emit(self.card.norm_name))
             foot.addWidget(cont)

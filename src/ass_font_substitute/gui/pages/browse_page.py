@@ -9,6 +9,7 @@ from qfluentwidgets import ComboBox
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import SearchLineEdit
 
+from ass_font_substitute.gui import script_filter
 from ass_font_substitute.gui.jobs import ensure_library
 from ass_font_substitute.gui.jobs import lib_key
 from ass_font_substitute.gui.preview_vm import PreviewVM
@@ -33,7 +34,8 @@ class BrowsePage(ScrollArea):
         filters = QHBoxLayout()
         self.name_edit = SearchLineEdit()
         self.name_edit.setPlaceholderText("搜索字体名")
-        self.cb_cat, self.cb_script, self.cb_weight = ComboBox(), ComboBox(), ComboBox()
+        self.cb_cat, self.cb_weight = ComboBox(), ComboBox()
+        self.cb_script = script_filter.StrikeTailComboBox()
         for cb, ph in ((self.cb_cat, "分类"), (self.cb_script, "简繁"),
                        (self.cb_weight, "字重")):
             cb.setPlaceholderText(ph)
@@ -93,8 +95,9 @@ class BrowsePage(ScrollArea):
         self._reload_list()
 
     def _fill_filters(self):
+        script_items = ["全部", *script_filter.options(self.pvm)]
         for cb, items in ((self.cb_cat, ["全部", *self.pvm.categories()]),
-                          (self.cb_script, ["全部", *self.pvm.scripts()]),
+                          (self.cb_script, script_items),
                           (self.cb_weight, ["全部", *self.pvm.weight_buckets()])):
             cb.blockSignals(True)
             cb.clear()
@@ -103,7 +106,7 @@ class BrowsePage(ScrollArea):
 
     def _apply_filters(self):
         self.pvm.category = _pick(self.cb_cat)
-        self.pvm.script = _pick(self.cb_script)
+        self.pvm.script = script_filter.pick(self.cb_script)
         wt = _pick(self.cb_weight)
         self.pvm.weight = int(wt) if wt else None
         self._reload_list()

@@ -58,6 +58,7 @@ class Card:
     n_chars: int = 0
     variants: set[str] = field(default_factory=set)
     missing_preview: list[str] = field(default_factory=list)   # 需替换卡 tofu 预览
+    n_missing: int = 0                                # 未覆盖总字数（预览截 12 字）
     options: list[OptionItem] = field(default_factory=list)
     checked_key: str | None = None
     searching: bool = False
@@ -174,6 +175,7 @@ class SubsVM:
         else:
             card.options = opts
         if cls.kind == "replace":
+            card.n_missing = len(cls.missing_chars)
             card.missing_preview = list(cls.missing_chars)[:12]
         card.min_sim = float(self._settings.get("min_sim"))
         return card

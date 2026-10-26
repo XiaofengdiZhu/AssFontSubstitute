@@ -136,10 +136,10 @@ class LibraryIndex:
             if cur is None:
                 best[key] = item
             elif ver is not None and (cur[4] is None or ver > cur[4]):
-                self._skipped.append(f"{self.dirs[cur[0]]}/{cur[1]}#{cur[2]} 旧版本")
+                self._skipped.append(f"{self.dirs[cur[0]]}/{cur[1]}#{cur[2]} 重复版本")
                 best[key] = item
             else:
-                self._skipped.append(f"{self.dirs[item[0]]}/{item[1]}#{item[2]} 旧版本")
+                self._skipped.append(f"{self.dirs[item[0]]}/{item[1]}#{item[2]} 重复版本")
         self._files_count = len({(item[0], item[1]) for item in raw})
         self._entities = [
             FontEntity(fp, disp, aliases, ps, ver, w, wd, it,
