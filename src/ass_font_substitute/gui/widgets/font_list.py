@@ -17,7 +17,6 @@ from PySide6.QtWidgets import QListWidget
 from PySide6.QtWidgets import QListWidgetItem
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
-from qfluentwidgets import CaptionLabel
 from qfluentwidgets import SegmentedWidget
 from qfluentwidgets import SmoothScrollDelegate
 from qfluentwidgets import StrongBodyLabel
@@ -28,6 +27,7 @@ from qfluentwidgets import themeColor
 from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.gui.preview_vm import FamilyRow
 from ass_font_substitute.gui.preview_vm import weight_tag
+from ass_font_substitute.gui.widgets.pill import PillRow
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 
 ROW_H = 82                 # 行高初值：控制行 + 32px 预览条；物化首行后
@@ -40,11 +40,14 @@ WINDOW_PAD = 20            # 可视区窗口向外各扩的行数（懒物化缓
 BAR_H = 32                 # 预览条逻辑高
 
 
-def _meta_text(e: FontEntity) -> str:
-    it = "斜体 · " if e.italic else ""
-    # 未标注（探针简繁双不中）不上屏：空位无信息量，行 meta 只剩字重/分类
-    script = "" if e.script == "未标注" else f"{e.script} · "
-    return f"{script}{weight_tag(e.weight)} · {it}{e.category}"
+def meta_items(e: FontEntity) -> list[str]:
+    """行 meta 药丸项：script（未标注不上屏）· 字重 · 斜体 · 分类。"""
+    items = [] if e.script == "未标注" else [e.script]
+    items.append(weight_tag(e.weight))
+    if e.italic:
+        items.append("斜体")
+    items.append(e.category)
+    return items
 
 
 def _draw_italic_pixmap(color: QColor) -> QPixmap:
@@ -317,7 +320,8 @@ class _RowWidget(QWidget):
         top = QHBoxLayout()
         top.setSpacing(8)
         top.addWidget(StrongBodyLabel(row.display_name))
-        self._meta = CaptionLabel(_meta_text(row.selected))
+        self._meta = PillRow()
+        self._meta.set_items(meta_items(row.selected))
         top.addWidget(self._meta)
         top.addStretch(1)
         self._build_controls(top)
@@ -384,7 +388,7 @@ class _RowWidget(QWidget):
         if e is self._row.selected:
             return
         self._row.selected = e
-        self._meta.setText(_meta_text(e))
+        self._meta.set_items(meta_items(e))
         self.bar.set_entity(e, self._tag_for(e))
         self._sync_controls()
 

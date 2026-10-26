@@ -530,14 +530,14 @@ def test_row_segmented_switches_selected_face(qapp):
     w._seg.items["700"].click()             # 分段：700 该字重仅直立 face
     assert fl._rows[0].selected.fingerprint == "700"
     assert w.bar._entity.fingerprint == "700"
-    assert "W700" in w._meta.text()
+    assert "W700" in w._meta.texts()
     assert len(fl._worker.submits) == n_submits + 1
     assert fl._worker.submits[-1][0].startswith("plist:700:")
     assert w._seg.currentRouteKey() == "700"
 
     w._it_btn.click()                       # 斜体开：700 无斜 → 退 400 斜
     assert fl._rows[0].selected.fingerprint == "400i"
-    assert "斜体" in w._meta.text()
+    assert "斜体" in w._meta.texts()
     assert w._it_btn.isChecked()
 
     w._seg.items["700"].click()             # 700 从斜态：同字重无斜 → 直立
@@ -601,11 +601,36 @@ def test_double_click_emits_detail_requested(qapp):
     assert [e.fingerprint for e in got] == ["1", "1b"]
 
 
-def test_meta_text_hides_unmarked_script():
-    # 未标注（探针简繁双不中）不上屏：meta 只剩字重/分类
+def test_meta_items_hides_unmarked_script():
+    # 未标注（探针简繁双不中）不上屏：meta 药丸只剩字重/分类
     from dataclasses import replace
 
-    from ass_font_substitute.gui.widgets.font_list import _meta_text
+    from ass_font_substitute.gui.widgets.font_list import meta_items
 
-    assert _meta_text(replace(_ent("1", "A"), script="未标注")) == "W400 · 黑"
-    assert _meta_text(_ent("2", "B")) == "简 · W400 · 黑"
+    assert meta_items(replace(_ent("1", "A"), script="未标注")) == [
+        "W400", "黑"]
+    assert meta_items(_ent("2", "B")) == ["简", "W400", "黑"]
+    assert meta_items(replace(_ent("3", "C"), italic=True)) == [
+        "简", "W400", "斜体", "黑"]
+
+
+def test_pill_fixed_policy_and_pill_row(qapp):
+    # 药丸锁 sizeHint：QFormLayout 值列曾横向铺满整行、QHBoxLayout 里被
+    # 拉到与行内最高控件同高；Fixed 后按内容给位
+    from PySide6.QtWidgets import QSizePolicy
+
+    from ass_font_substitute.gui.widgets.pill import PillRow
+    from ass_font_substitute.gui.widgets.pill import pill
+
+    p = pill("W400")
+    sp = p.sizePolicy()
+    assert sp.horizontalPolicy() == QSizePolicy.Policy.Fixed
+    assert sp.verticalPolicy() == QSizePolicy.Policy.Fixed
+    p.deleteLater()
+
+    row = PillRow()
+    row.set_items(["简", "W400", "黑"])
+    assert row.texts() == ["简", "W400", "黑"]
+    row.set_items(["W400", "黑"])          # 重建：旧药丸清空
+    assert row.texts() == ["W400", "黑"]
+    row.deleteLater()

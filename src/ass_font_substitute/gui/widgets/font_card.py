@@ -3,10 +3,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor
-from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QFrame
 from PySide6.QtWidgets import QHBoxLayout
-from PySide6.QtWidgets import QLabel
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import BodyLabel
@@ -19,13 +17,18 @@ from qfluentwidgets import IndeterminateProgressRing
 from qfluentwidgets import InfoBadge
 from qfluentwidgets import StrongBodyLabel
 from qfluentwidgets import TransparentPushButton
-from qfluentwidgets import isDarkTheme
-from qfluentwidgets import qconfig
 
 from ass_font_substitute.gui.subs_vm import KEEP
 from ass_font_substitute.gui.subs_vm import SIM_FLOOR
 from ass_font_substitute.gui.subs_vm import Card
+from ass_font_substitute.gui.widgets.pill import PillLabel
+from ass_font_substitute.gui.widgets.pill import pill
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
+
+
+def _pill(text: str) -> PillLabel:
+    return pill(text)
+
 
 # 状态图标/徽章配色（亮/暗各一份，线框配色）
 _KIND_STYLE = {
@@ -54,36 +57,6 @@ QFrame#tofu{ border: 1px dashed rgba(198,43,28,0.55); border-radius: 6px; }
 def _pct(v: float | None) -> str:
     return f"{v * 100:.1f}%" if v is not None else ""
 
-
-class _PillLabel(QLabel):
-    """中性灰药丸标签（原字体/简繁/字重/分类）：InfoBadge.custom 底色自定义
-    但文字色死在样式表白字上——浅底白字直接隐形。qfw VerticalSeparator 同法
-    paintEvent 现取主题配色，换肤自动跟随，无需外部重刷。"""
-
-    def __init__(self, text: str):
-        super().__init__(text)
-        font = self.font()
-        font.setPixelSize(11)
-        self.setFont(font)
-        self.setContentsMargins(8, 1, 8, 1)
-        # 绑定方法连接：随接收者析构自动断开；lambda 挂永生 qconfig 上，
-        # 卡片 deleteLater 后死槽每次换肤喷 RuntimeError 噪声且连接泄漏
-        qconfig.themeChanged.connect(self.update)
-
-    def paintEvent(self, e):
-        painter = QPainter(self)
-        dark = isDarkTheme()
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 26) if dark
-                         else QColor(0, 0, 0, 15))
-        painter.drawRoundedRect(self.rect(), 4, 4)
-        painter.setPen(QColor("#cccccc") if dark else QColor("#5c5c5c"))
-        painter.drawText(self.rect(), Qt.AlignCenter, self.text())
-
-
-def _pill(text: str) -> QLabel:
-    return _PillLabel(text)
 
 
 class FontCard(CardWidget):

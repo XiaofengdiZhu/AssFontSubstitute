@@ -33,6 +33,9 @@ from ass_font_substitute.gui.name_lang import _UI_LANG_ORDER
 from ass_font_substitute.gui.name_lang import pick_display_name
 from ass_font_substitute.gui.name_lang import ui_lang
 from ass_font_substitute.gui.preview_vm import weight_tag
+from ass_font_substitute.gui.widgets.font_list import meta_items
+from ass_font_substitute.gui.widgets.pill import PillRow
+from ass_font_substitute.gui.widgets.pill import pill
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 
 BAR_H = 48                 # 详情预览条高（列表行内条是 32，这里给大号）
@@ -189,13 +192,14 @@ class _FaceRow(QWidget):
         top = QHBoxLayout()
         top.setSpacing(6)
         top.addWidget(StrongBodyLabel(name))
-        # meta 对齐预览页（script · 字重 · 斜体分类），斜体仅斜体时显；
-        # 同文件节附 face 序号区分 TTC 内位置，家族节不再缀文件（太长）
-        it = "斜体 · " if f.italic else ""
-        meta = f"{f.script} · {weight_tag(f.weight)} · {it}{f.category}"
+        # meta 药丸对齐预览页（script · 字重 · 斜体 · 分类），斜体仅斜体
+        # 时显；同文件节附 face 序号区分 TTC 内位置，家族节不再缀文件（太长）
+        items = meta_items(f)
         if show_face:
-            meta += f" · face {f.face_index}"
-        top.addWidget(CaptionLabel(meta))
+            items.append(f"face {f.face_index}")
+        row = PillRow()
+        row.set_items(items)
+        top.addWidget(row)
         top.addStretch(1)
         v.addLayout(top)
         self.bar = PreviewBar(worker, pvm, f, text, tag, height=LIST_BAR_H)
@@ -325,8 +329,10 @@ class FontDetailDialog(MessageBoxBase):
             ("字重", _simple_val(f"{weight_tag(e.weight)}（{e.weight}）")),
             ("宽度", _simple_val(f"{wd}（{e.width}）")),
             ("斜体", _simple_val("是" if e.italic else "否")),
-            ("简繁", _simple_val(e.script)),
-            ("分类", _simple_val(e.category)),
+            # 详情卡=全量事实：「未标注」也上屏（行 meta 才隐藏空值，
+            # 见 font_list.meta_items）
+            ("简繁", pill(e.script)),
+            ("分类", pill(e.category)),
             ("字符覆盖", _simple_val(f"{e.cmap.total_chars():,}")),
         ])
 
