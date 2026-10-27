@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QVBoxLayout
@@ -8,14 +9,17 @@ from qfluentwidgets import CaptionLabel
 from qfluentwidgets import ComboBox
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import SearchLineEdit
+from qfluentwidgets import setFont
 
 from ass_font_substitute.gui import script_filter
 from ass_font_substitute.gui.jobs import ensure_library
 from ass_font_substitute.gui.jobs import lib_key
+from ass_font_substitute.gui.pages.subs_page import _fld
 from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.widgets.font_detail import FontDetailDialog
 from ass_font_substitute.gui.widgets.font_list import FontListWidget
 from ass_font_substitute.gui.widgets.preview_input import PreviewInput
+from ass_font_substitute.gui.widgets.wheel_block import WheelBlock
 
 
 class BrowsePage(ScrollArea):
@@ -27,24 +31,48 @@ class BrowsePage(ScrollArea):
 
         self.view = _inner_view(self)
         v = self.view.vbox
+        # 间距节奏对齐处理字幕页：页边距 (36,24,36,24)，区块间 12
+        v.setContentsMargins(36, 24, 36, 24)
+        v.setSpacing(12)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # 页头：标题 + 预览文字输入（页级工具，宽度封顶；与下方筛选行
+        # 分开——预览只改渲染不改清单，搜索/筛选才收窄列表）
+        head = QHBoxLayout()
+        self.page_title = BodyLabel("字体库预览")
+        setFont(self.page_title, 20)   # qfw setFont：20px Normal 字重不变
+        head.addWidget(self.page_title)
+        head.addStretch(1)
         # 可键入 + 下拉最近 10 条历史（与字幕编辑页共享，回车记一条）
         self.preview_edit = PreviewInput(settings)
-        v.addWidget(self.preview_edit)
+        self.preview_edit.setFixedWidth(340)
+        head.addWidget(self.preview_edit, 0, Qt.AlignVCenter)
+        v.addLayout(head)
 
-        filters = QHBoxLayout()
+        # 筛选行：搜索撑满剩余（封顶），下拉带标签（裸「全部」看不出维度），
+        # 计数贴行尾——筛选结果的规模随筛选变化，语义归筛选行
+        bar = QHBoxLayout()
+        bar.setSpacing(8)
         self.name_edit = SearchLineEdit()
         self.name_edit.setPlaceholderText("搜索字体名")
+        self.name_edit.setMinimumWidth(200)
+        self.name_edit.setMaximumWidth(400)
         self.cb_cat, self.cb_weight = ComboBox(), ComboBox()
         self.cb_script = script_filter.StrikeTailComboBox()
-        for cb, ph in ((self.cb_cat, "分类"), (self.cb_script, "简繁"),
-                       (self.cb_weight, "字重")):
-            cb.setPlaceholderText(ph)
+        # 滚动页面扫过下拉会误改筛选——吞滚轮
+        self._wheel_block = WheelBlock(self)
+        for cb in (self.cb_cat, self.cb_script, self.cb_weight):
+            cb.setFixedWidth(104)
             cb.currentIndexChanged.connect(self._apply_filters)
-        self.count_label = CaptionLabel("0")
-        for w in (self.name_edit, self.cb_cat, self.cb_script, self.cb_weight,
-                  self.count_label):
-            filters.addWidget(w)
-        v.addLayout(filters)
+            cb.installEventFilter(self._wheel_block)
+        self.count_label = CaptionLabel("0 款字体")
+        bar.addWidget(self.name_edit, 1)
+        bar.addWidget(_fld("分类", self.cb_cat))
+        bar.addWidget(_fld("简繁", self.cb_script))
+        bar.addWidget(_fld("字重", self.cb_weight))
+        bar.addStretch(1)
+        bar.addWidget(self.count_label, 0, Qt.AlignVCenter)
+        v.addLayout(bar)
 
         self.hint = BodyLabel("先到「字体库管理」添加字体目录")
         v.addWidget(self.hint)
@@ -54,6 +82,12 @@ class BrowsePage(ScrollArea):
             lambda n: self.count_label.setText(f"{n} 款字体"))
         self.list.detail_requested.connect(self._open_detail)
         v.addWidget(self.list)
+        # 空库态（_fill_filters 未跑）下拉不空白：预填「全部」（=不筛，
+        # 与装载后首项一致）；blockSignals 免 ctor 期误触 _apply_filters
+        for cb in (self.cb_cat, self.cb_script, self.cb_weight):
+            cb.blockSignals(True)
+            cb.addItems(["全部"])
+            cb.blockSignals(False)
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)

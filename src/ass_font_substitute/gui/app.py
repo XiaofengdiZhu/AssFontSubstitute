@@ -186,9 +186,10 @@ class AFSWindow(FluentWindow):
         self.setWindowTitle("Ass 字体替补")
         self.resize(*_DEFAULT_SIZE)
         # 最小窗口按布局硬约束定（175% DPI 实测各页 layout 最小宽：库页
-        # 823=统计卡横排+目录行左块定宽、字幕页 767、预览页 417，均含页
-        # 边距；四页纵向皆可滚，高度不算硬约束）——最宽页 + 左侧导航 48
-        # + 窗框余量；高度给标题条 + 统计卡 + 一行目录的可用下限
+        # 823=统计卡横排+目录行左块定宽、字幕页 767、预览页 844=搜索下限
+        # +三组带标签下拉+计数，均含页边距；四页纵向皆可滚，高度不算硬
+        # 约束）——最宽页 + 左侧导航 48 + 窗框余量；高度给标题条 + 统计
+        # 卡 + 一行目录的可用下限
         self.setMinimumSize(900, 620)
         self._pending_maximized = False
         self._restore_geometry()
