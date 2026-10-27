@@ -38,6 +38,11 @@ def test_defaults_match_core_constants():
     assert DEFAULTS["save_suffix"] == ".substituted.ass"
     assert DEFAULTS["overwrite_default"] is False
     assert DEFAULTS["max_threads"] >= 1
+    # 界面滑杆值域：覆盖率下限 80（2026-10 从 90 放开）、大小上限 150
+    from ass_font_substitute.gui.settings_store import COV_BOUNDS
+    from ass_font_substitute.gui.settings_store import SIZE_BOUNDS
+    assert COV_BOUNDS == (0.80, 1.00, 0.01)
+    assert SIZE_BOUNDS == (0.50, 1.50, 0.01)
 
 
 def test_roundtrip_and_missing_file(tmp_path):
@@ -259,21 +264,116 @@ def test_wheel_block_filter(qapp):
     assert f.eventFilter(QComboBox(), QEvent(QEvent.Type.None_)) is False
 
 
-def test_percent_card_init_does_not_commit(qapp):
+def test_slider_spin_card_init_does_not_commit(qapp):
     pytest.importorskip("PySide6")
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from qfluentwidgets import FluentIcon as FIF
 
-    from ass_font_substitute.gui.pages.settings_page import _PercentCard
+    from ass_font_substitute.gui.pages.settings_page import _SliderSpinCard
 
     calls = []
-    _PercentCard(FIF.FILTER, "t", "c", 90, 100, 1, 96, calls.append)
+    _SliderSpinCard(FIF.FILTER, "t", "c", 90, 100, 1, 96, calls.append,
+                    suffix="%")
     assert calls == []                              # 构造不提交，存量值不被改写
 
 
+def test_slider_spin_card_compact_spin_link(qapp):
+    # 滑杆+compact 数值框卡：spin↔slider 双向联动；spin 改值即时提交，
+    # 滑杆拖拽松手才提交，无回环
+    pytest.importorskip("PySide6")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QEvent
+    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtGui import QPointingDevice
+    from qfluentwidgets import FluentIcon as FIF
+
+    from ass_font_substitute.gui.pages.settings_page import _SliderSpinCard
+
+    calls = []
+    card = _SliderSpinCard(FIF.FILTER, "t", "c", 90, 100, 1, 96, calls.append,
+                           suffix="%")
+    assert card.spin.value() == 96
+    assert card.spin.text() == "96%"
+    btn = card.spin.spinButton
+    assert btn is not None and not btn.isHidden()     # 常显
+
+    # 点击按上下半区分流：上半 stepUp、下半 stepDown（鼠标事件直投；
+    # 带 globalPos 的构造才没被 Qt 6.12 标 deprecated）
+    dev = QPointingDevice.primaryPointingDevice()
+
+    def _click(y):
+        pos = QPointF(btn.width() / 2, y)
+        press = QMouseEvent(QEvent.Type.MouseButtonPress, pos, pos,
+                            Qt.MouseButton.LeftButton,
+                            Qt.MouseButton.LeftButton,
+                            Qt.KeyboardModifier.NoModifier, dev)
+        release = QMouseEvent(QEvent.Type.MouseButtonRelease, pos, pos,
+                              Qt.MouseButton.LeftButton,
+                              Qt.MouseButton.LeftButton,
+                              Qt.KeyboardModifier.NoModifier, dev)
+        qapp.sendEvent(btn, press)
+        qapp.sendEvent(btn, release)
+
+    _click(8)
+    assert card.spin.value() == 97 and calls == [97]
+    _click(25)
+    assert card.spin.value() == 96 and calls == [97, 96]
+    # spin 改值 → 滑杆跟随 + 即时提交一次（无回环）
+    card.spin.setValue(98)
+    assert card.slider.value() == 98
+    assert calls == [97, 96, 98]
+    # 键盘/程序化改滑杆（无拖拽）→ 即时提交
+    card.slider.setValue(92)
+    assert card.spin.value() == 92
+    assert card.spin.text() == "92%"
+    assert calls == [97, 96, 98, 92]
+    # 真实拖拽路径（press→改→release）：拖拽中只刷框，松手统一提交
+    card.slider.sliderPressed.emit()
+    card.slider.setValue(90)
+    assert card.spin.value() == 90
+    assert calls == [97, 96, 98, 92]
+    card.slider.sliderReleased.emit()
+    assert calls == [97, 96, 98, 92, 90]
+    # 框宽刚好容下 "100%"：比该文字宽一点，远小于旧固定 90 时代的富余
+    assert card.spin.width() <= card.spin.fontMetrics().horizontalAdvance(
+        "100%") + 38
+    card.spin.deleteLater()
+
+
+def test_slider_spin_card_integer_cards(qapp):
+    # 无后缀整数卡（暂停数/线程数）：初值回读、框改值即时提交、滑杆
+    # 松手提交、框宽容三位数
+    pytest.importorskip("PySide6")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from qfluentwidgets import FluentIcon as FIF
+
+    from ass_font_substitute.gui.pages.settings_page import _SliderSpinCard
+
+    calls = []
+    card = _SliderSpinCard(FIF.PAUSE, "t", "c", 1, 10, 1, 5, calls.append)
+    assert (card.spin.value(), card.spin.text()) == (5, "5")
+    assert (card.slider.minimum(), card.slider.maximum()) == (1, 10)
+    # 框宽按三位数模板：容 "000" 且不被 "100" 顶爆
+    adv = card.spin.fontMetrics().horizontalAdvance("000")
+    assert card.spin.width() == adv + 38
+    # spin 改值即时提交；键盘/程序化改滑杆即时提交；拖拽（press→改）不提交
+    card.spin.setValue(3)
+    assert card.slider.value() == 3 and calls == [3]
+    card.slider.setValue(8)
+    assert calls == [3, 8]
+    card.slider.sliderPressed.emit()
+    card.slider.setValue(2)
+    assert calls == [3, 8]
+    card.slider.sliderReleased.emit()
+    assert calls == [3, 8, 2]
+    card.spin.deleteLater()
+
+
 def test_size_card_range_slider(qapp, tmp_path):
-    # 大小区间卡：双滑块替双 SpinBox——初值回读、拖动落盘+标签同步、
-    # 待生效提示接线
+    # 大小区间卡：双滑块+双 compact 数值框——初值回读、拖动落盘+框同步、
+    # 框改值即时落盘
     pytest.importorskip("PySide6")
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QObject
@@ -294,17 +394,27 @@ def test_size_card_range_slider(qapp, tmp_path):
     s.set("size_max", 1.1)
     page = SettingsPage(s, _FakeWorker())
     assert page.range_slider.values() == (90, 110)
-    assert page.size_value.text() == "90% – 110%"
-    # 值域上限 150：越界钳回，标签取钳后值（存量 size_max 越界不矛盾）
+    assert (page.spin.text(), page.spin_max.text()) == ("90%", "110%")
+    # 值域上限 150：越界钳回，框取钳后值（存量 size_max 越界不矛盾）
     page.range_slider.setValues(80, 999)
     assert page.range_slider.values() == (80, 150)
-    assert page.size_value.text() == "80% – 150%"
-    # 拖拽中只刷标签不落盘（每 move 全量 JSON 写太浪费），松手统一落
+    assert (page.spin.text(), page.spin_max.text()) == ("80%", "150%")
+    # 拖拽中只刷框不落盘（每 move 全量 JSON 写太浪费），松手统一落
     assert (s.get("size_min"), s.get("size_max")) == (0.90, 1.10)
     page.range_slider.sliderReleased.emit()
     assert (s.get("size_min"), s.get("size_max")) == (0.80, 1.50)
-    # 标签定宽：数值位数变化不顶滑块挪位
-    assert page.size_value.minimumWidth() == page.size_value.maximumWidth() > 0
+    # 框改值 → 滑杆钳序 + 即时落盘；交叉输入（下限>上限）被排序
+    page.spin.setValue(180)
+    page.spin_max.setValue(60)
+    assert page.range_slider.values() == (60, 150)
+    assert (s.get("size_min"), s.get("size_max")) == (0.60, 1.50)
+    # 滚轮拦截：框属性补挂到 card 后 _WheelFreeCard 名单才命中
+    from PySide6.QtCore import QEvent
+    wheel = QEvent(QEvent.Type.Wheel)
+    assert page.size_card.eventFilter(page.spin, wheel) is True
+    assert page.size_card.eventFilter(page.spin_max, wheel) is True
+    # 框定宽：数值位数变化不顶滑块挪位
+    assert page.spin.minimumWidth() == page.spin.maximumWidth() > 0
     page.deleteLater()
 
 

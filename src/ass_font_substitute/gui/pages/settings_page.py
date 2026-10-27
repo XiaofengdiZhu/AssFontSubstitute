@@ -40,7 +40,7 @@ from ass_font_substitute.gui.settings_store import COV_BOUNDS
 from ass_font_substitute.gui.settings_store import SIM_BOUNDS
 from ass_font_substitute.gui.settings_store import SIZE_BOUNDS
 from ass_font_substitute.gui.widgets.range_slider import RangeSlider
-from ass_font_substitute.gui.widgets.spin import SpinBox
+from ass_font_substitute.gui.widgets.spin import CompactSpinBox
 
 REPO_URL = "https://github.com/XiaofengdiZhu/AssFontSubstitute"
 
@@ -78,51 +78,63 @@ class _WheelFreeCard(SettingCard):
         return super().eventFilter(watched, event)
 
 
-class _PercentCard(_WheelFreeCard):
-    """百分比门槛卡：滑杆 + 数值标签，值以百分数提交（/100 存回设置）。"""
+class _SliderSpinCard(_WheelFreeCard):
+    """滑杆 + compact 数值框卡：双向联动。拖拽滑杆只刷显示、松手提交
+    （每个 move 事件落盘=每秒百余次全量 JSON 写，浪费）；数值框直接改
+    值即提交。"""
 
-    def __init__(self, icon, title, content, lo_pct, hi_pct, step, value,
-                 on_commit, parent=None):
+    def __init__(self, icon, title, content, lo, hi, step, value, on_commit,
+                 suffix="", parent=None):
         super().__init__(icon, title, content, parent)
         self._on_commit = on_commit
         self.slider = Slider(Qt.Orientation.Horizontal, self)
-        self.slider.setRange(lo_pct, hi_pct)
+        self.slider.setRange(lo, hi)
         self.slider.setSingleStep(step)
         self.slider.setPageStep(step)
         self.slider.setValue(value)
         self.slider.setFixedWidth(180)
-        self.valueLabel = BodyLabel(self)
-        self.hBoxLayout.addWidget(self.slider, 0, Qt.AlignmentFlag.AlignRight)
-        self.hBoxLayout.addSpacing(10)
-        self.hBoxLayout.addWidget(self.valueLabel, 0, Qt.AlignmentFlag.AlignRight)
-        self.hBoxLayout.addSpacing(_SPACING)
-        self.slider.installEventFilter(self)
-        self.slider.valueChanged.connect(self._on_value)
-        # 构造只刷标签不提交：存量值若因精度差与回推值不符，不该被静默改写
-        self.valueLabel.setText(f"{value}%")
-
-    def _on_value(self, v):
-        self.valueLabel.setText(f"{v}%")
-        self._on_commit(v)
-
-
-class _SpinBoxCard(_WheelFreeCard):
-    """整数 SpinBox 卡。"""
-
-    def __init__(self, icon, title, content, lo, hi, value, on_commit,
-                 suffix="", step=1, parent=None):
-        super().__init__(icon, title, content, parent)
-        self.spin = SpinBox(self)
+        self.spin = CompactSpinBox(self)
         self.spin.setRange(lo, hi)
         self.spin.setSingleStep(step)
         self.spin.setValue(value)
         if suffix:
             self.spin.setSuffix(suffix)
-        self.spin.setMinimumWidth(140)
+        # 刚好容下最宽值：三位数模板 + 右缘钮 + 边距余量
+        self.spin.setFixedWidth(
+            self.spin.fontMetrics().horizontalAdvance(f"000{suffix}") + 38)
+        self.hBoxLayout.addWidget(self.slider, 0, Qt.AlignmentFlag.AlignRight)
+        self.hBoxLayout.addSpacing(5)
         self.hBoxLayout.addWidget(self.spin, 0, Qt.AlignmentFlag.AlignRight)
         self.hBoxLayout.addSpacing(_SPACING)
+        self.slider.installEventFilter(self)
         self.spin.installEventFilter(self)
-        self.spin.valueChanged.connect(on_commit)
+        # 双向联动：数值框改值搬滑杆并即时提交；滑杆拖拽只回刷数值框
+        # （blockSignals 防回环），松手统一提交。键盘/程序化改滑杆不发
+        # released，按非拖拽态即时提交
+        self._sliding = False
+        self.spin.valueChanged.connect(self._on_spin_value)
+        self.slider.valueChanged.connect(self._on_value)
+        self.slider.sliderPressed.connect(self._on_slider_pressed)
+        self.slider.sliderReleased.connect(self._on_slider_released)
+
+    def _on_slider_pressed(self):
+        self._sliding = True
+
+    def _on_slider_released(self):
+        self._sliding = False
+        self._on_commit(self.slider.value())
+
+    def _on_spin_value(self, v):
+        # 框改值只搬滑杆：valueChanged → _on_value 按非拖拽态即时提交
+        # （提交单点在 _on_value，这里再提会双写）
+        self.slider.setValue(v)
+
+    def _on_value(self, v):
+        self.spin.blockSignals(True)
+        self.spin.setValue(v)
+        self.spin.blockSignals(False)
+        if not self._sliding:
+            self._on_commit(v)           # 键盘/程序化改滑杆即时提交
 
 
 class _SampleEditBox(MessageBoxBase):
@@ -249,28 +261,33 @@ class SettingsPage(ScrollArea):
 
         # ── 相似候选（处理字幕页初始值）──────────────────────────
         g1 = SettingCardGroup("相似候选", self.view)
-        self.cov_card = _PercentCard(
+        self.cov_card = _SliderSpinCard(
             FIF.FILTER, "覆盖率门槛",
             "在库字形对字幕用字的覆盖达到该值即直接采用，否则进入相似度搜索",
             round(COV_BOUNDS[0] * 100), round(COV_BOUNDS[1] * 100), 1,
             round(settings.get("cov_threshold") * 100),
-            lambda x: self.settings.set("cov_threshold", x / 100))
-        self.sim_card = _PercentCard(
+            lambda x: self.settings.set("cov_threshold", x / 100),
+            suffix="%")
+        self.sim_card = _SliderSpinCard(
             FIF.SPEED_HIGH, "相似率门槛",
             "候选字体与原字体的相似率低于该值将不列出",
             round(SIM_BOUNDS[0] * 100), round(SIM_BOUNDS[1] * 100), 5,
             round(settings.get("min_sim") * 100),
-            lambda x: self.settings.set("min_sim", x / 100))
+            lambda x: self.settings.set("min_sim", x / 100),
+            suffix="%")
         self.size_card = self._make_size_card()
-        self.pause_card = _SpinBoxCard(
+        # 2026-10 滑杆化时上限 50 收到 10：存量 11–50 显示钳 10，存储
+        # 保留旧值（构造不提交约定）
+        self.pause_card = _SliderSpinCard(
             FIF.PAUSE, "相似字体暂停数量",
             "每找到该数量的相似字体就暂停等待确认，之后可继续搜索",
-            1, 50, int(settings.get("n_pause")),
+            1, 10, 1, int(settings.get("n_pause")),
             lambda x: self.settings.set("n_pause", x))
-        self.threads_card = _SpinBoxCard(
+        self.threads_card = _SliderSpinCard(
             FIF.IOT, "最大使用线程数",
             "建索引并行解析的上限（并行解析尚未启用，当前仅存储）",
-            1, max(1, os.cpu_count() or 4), int(settings.get("max_threads")),
+            1, max(1, os.cpu_count() or 4), 1,
+            int(settings.get("max_threads")),
             lambda x: self.settings.set("max_threads", x))
         g1.addSettingCard(self.cov_card)
         g1.addSettingCard(self.sim_card)
@@ -359,36 +376,59 @@ class SettingsPage(ScrollArea):
     def _make_size_card(self):
         card = _WheelFreeCard(FIF.TILES, "相对大小区间",
                               "候选字形相对原字体的大小允许范围", self)
-        lo = round(self.settings.get("size_min") * 100)
-        hi = round(self.settings.get("size_max") * 100)
-        # 双滑块范围条替双 SpinBox：拖拽改值，精确数字看右侧标签
         self.range_slider = RangeSlider(
             round(SIZE_BOUNDS[0] * 100), round(SIZE_BOUNDS[1] * 100),
-            lo, hi, card)
+            round(self.settings.get("size_min") * 100),
+            round(self.settings.get("size_max") * 100), card)
         self.range_slider.setFixedSize(180, 22)
-        # 标签取钳后值（存量 size_max 越界时与滑块一致，构造不落盘）
+        # 数值框取钳后值（存量越界时与滑块一致，构造不落盘）
         lo, hi = self.range_slider.values()
-        self.size_value = BodyLabel(f"{lo}% – {hi}%", card)
-        # 定宽模板封顶 + 余量（同管理页统计行套路）：数值变宽不顶滑块挪位，
-        # 真机字体数字非等宽也放得下
-        self.size_value.setFixedWidth(
-            self.size_value.fontMetrics().horizontalAdvance("000% – 000%") + 4)
+        lo_pct, hi_pct = (round(SIZE_BOUNDS[0] * 100),
+                          round(SIZE_BOUNDS[1] * 100))
+        self.spin = CompactSpinBox(card)          # 下限
+        self.spin_max = CompactSpinBox(card)      # 上限
+        for s, v in ((self.spin, lo), (self.spin_max, hi)):
+            s.setRange(lo_pct, hi_pct)
+            s.setValue(v)
+            s.setSuffix("%")
+            s.setFixedWidth(
+                s.fontMetrics().horizontalAdvance(f"{hi_pct}%") + 38)
+            s.installEventFilter(card)            # _WheelFreeCard 滚轮拦截
+        # _WheelFreeCard 名单按 card 属性匹配；框属性挂在 page（self.spin），
+        # 补挂到 card 拦截才生效
+        card.spin, card.spin_max = self.spin, self.spin_max
 
-        def _on_change(low_, hi_):
-            # 拖拽中只刷标签：每个 move 事件落盘=每秒百余次全量 JSON 写，浪费
-            self.size_value.setText(f"{low_}% – {hi_}%")
-
-        def _on_release():
+        def _commit():
             low_, hi_ = self.range_slider.values()
             self.settings.set("size_min", low_ / 100)
             self.settings.set("size_max", hi_ / 100)
 
-        self.range_slider.valueChanged.connect(_on_change)
-        self.range_slider.sliderReleased.connect(_on_release)
+        def _on_slider_change(low_, hi_):
+            # 拖拽中只刷框：每个 move 事件落盘=每秒百余次全量 JSON 写，浪费
+            for s, v in ((self.spin, low_), (self.spin_max, hi_)):
+                s.blockSignals(True)
+                s.setValue(v)
+                s.blockSignals(False)
+
+        def _on_spin():
+            # 框改值搬滑杆（setValues 统一钳界排序），即时落盘
+            self.range_slider.setValues(self.spin.value(),
+                                        self.spin_max.value())
+            _commit()
+
+        self.range_slider.valueChanged.connect(_on_slider_change)
+        self.range_slider.sliderReleased.connect(_commit)
+        self.spin.valueChanged.connect(_on_spin)
+        self.spin_max.valueChanged.connect(_on_spin)
         card.hBoxLayout.addWidget(self.range_slider, 0,
                                   Qt.AlignmentFlag.AlignRight)
-        card.hBoxLayout.addSpacing(10)
-        card.hBoxLayout.addWidget(self.size_value, 0,
+        card.hBoxLayout.addSpacing(5)
+        card.hBoxLayout.addWidget(self.spin, 0, Qt.AlignmentFlag.AlignRight)
+        dash = BodyLabel("–", card)
+        card.hBoxLayout.addSpacing(4)
+        card.hBoxLayout.addWidget(dash, 0, Qt.AlignmentFlag.AlignRight)
+        card.hBoxLayout.addSpacing(4)
+        card.hBoxLayout.addWidget(self.spin_max, 0,
                                   Qt.AlignmentFlag.AlignRight)
         card.hBoxLayout.addSpacing(_SPACING)
         return card
@@ -408,8 +448,11 @@ class SettingsPage(ScrollArea):
         head.addWidget(self.sim_pending_hint)
         group.vBoxLayout.insertLayout(0, head)
         self._search_active = False
-        for w in (self.cov_card.slider, self.sim_card.slider,
-                  self.range_slider, self.pause_card.spin):
+        # 滑杆与数值框都挂：框是即时落盘路径，搜索进行中改了同样待生效
+        for w in (self.cov_card.slider, self.cov_card.spin,
+                  self.sim_card.slider, self.sim_card.spin,
+                  self.range_slider, self.pause_card.slider,
+                  self.pause_card.spin, self.spin, self.spin_max):
             w.valueChanged.connect(self._mark_sim_pending)
 
     def bind_search_activity(self, subs_page):

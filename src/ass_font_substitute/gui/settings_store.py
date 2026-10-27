@@ -15,10 +15,10 @@ from ass_font_substitute.core.similarity.search import MIN_SIM
 from ass_font_substitute.core.similarity.search import SAMPLE_TEXT
 from ass_font_substitute.core.similarity.search import SIZE_RANGE
 
-# 界面滑杆边界（spec §10）：覆盖率 90–100；相似率 50–100；大小区间
-# 50–150（200% 过宽无实用场景，2026-10 收到 150）。存储一律小数，
-# 页面按百分数换算
-COV_BOUNDS = (0.90, 1.00, 0.01)
+# 界面滑杆边界（spec §10）：覆盖率 80–100（2026-10 下限 90 收到 80）；
+# 相似率 50–100；大小区间 50–150（200% 过宽无实用场景，2026-10 收到
+# 150）。存储一律小数，页面按百分数换算
+COV_BOUNDS = (0.80, 1.00, 0.01)
 SIM_BOUNDS = (0.50, 1.00, 0.05)
 SIZE_BOUNDS = (0.50, 1.50, 0.01)
 
