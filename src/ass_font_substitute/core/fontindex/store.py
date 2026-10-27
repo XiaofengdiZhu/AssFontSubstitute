@@ -38,7 +38,12 @@ from ass_font_substitute.core.models import FontRecord
 # 全语言原始记录）——详情命名卡从「worker 按需读字体文件（异步，首帧
 # 闪全部别名占位）」改为「打开时同步读库（亚毫秒，首屏即结构化命名，
 # 零闪烁）」。load_font_rows 不取此列：全量装进实体是几十 MB 常驻内存。
-SCHEMA_VERSION = 8
+# v9：cmap 覆盖范围改经 Unicode 归一——legacy 编码 cmap 子表（Big5/
+# GB2312/Shift-JIS 等双字节原生码键）按码页转回 Unicode 码点再建区间，
+# 此前键直取是几万伪码点：探针判「未标注」、覆盖率全错（文鼎系老字库
+# 实锤，GDI 认这类表所以 Windows 查看器能正常预览）。渲染侧同步按码页
+# 回退（similarity/render.py 自解析 cmap2），不改库结构、只改区间语义。
+SCHEMA_VERSION = 9
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 

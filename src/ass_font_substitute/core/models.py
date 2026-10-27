@@ -1,10 +1,29 @@
 from __future__ import annotations
 
 import bisect
+import contextlib
 import struct
 from dataclasses import dataclass
 from dataclasses import field
 from itertools import chain
+
+# 键即 Unicode 码点的 cmap 子表：platform 0 全系、(3,0) symbol、
+# (3,1) BMP、(3,10) UCS-4
+CMAP_UNICODE_KEYS = frozenset({
+    (0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (0, 6),
+    (3, 0), (3, 1), (3, 10),
+})
+# 键为双字节原生码的 legacy 子表：码点按高字节在前的整字经对应码页解
+# 出 Unicode。老字库常见（文鼎/华康繁体 Big5、日文 Shift-JIS）——GDI
+# 认这类表所以 Windows 能预览，键直取则是几万个伪码点（探针判「未标
+# 注」+覆盖率全错的根因，实锤 文鼎細黑.ttf）
+CMAP_LEGACY_CODECS = {
+    (3, 2): "cp932",       # Shift-JIS
+    (3, 3): "gbk",         # GB2312
+    (3, 4): "cp950",       # Big5（+MS 扩展）
+    (3, 5): "cp949",       # Wansung
+    (3, 6): "johab",       # Johab
+}
 
 
 @dataclass(frozen=True)
@@ -59,7 +78,21 @@ class CmapRanges:
     def from_cmap_subtables(cls, tables) -> CmapRanges:
         cps: set[int] = set()
         for t in tables:
-            cps.update(t.cmap.keys())
+            key = (t.platformID, t.platEncID)
+            codec = CMAP_LEGACY_CODECS.get(key)
+            if codec is None and key not in CMAP_UNICODE_KEYS:
+                # mac 平台等：键非 Unicode 码点，转不出来，跳过不污染
+                continue
+            for code in t.cmap:
+                if codec is None:
+                    cps.add(code)
+                else:
+                    # 单双字节都经码页解出：cp932 单字节 0xA1-0xDF 是半角
+                    # 片假名（U+FF61 起），直取会错记成 U+00A1-U+00DF 拉丁
+                    # 区；cp950/gbk ≥0x80 单字节解不出 → 丢弃（造字区同）
+                    b = bytes([code]) if code < 0x100 else code.to_bytes(2, "big")
+                    with contextlib.suppress(UnicodeDecodeError):
+                        cps.add(ord(b.decode(codec)))
         return cls.from_chars(cps)
 
 

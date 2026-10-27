@@ -1,14 +1,130 @@
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 
 import freetype
 import numpy as np
 
+from ass_font_substitute.core.models import CMAP_LEGACY_CODECS
+from ass_font_substitute.core.models import CMAP_UNICODE_KEYS
+
 TILE = 48
 TARGET_INK = 36
 BASE_PX = 96
+
+@dataclass
+class _Encoder:
+    """字符 → 字形索引。Unicode 字体走 FreeType charmap；legacy 单表
+    字体（老繁体 Big5 / 日文 Shift-JIS 等）FreeType 查不到 Unicode 码点，
+    先按码页把字符转回原生码，再自解析 cmap 表拿字形索引——文鼎系
+    cmap 还谎报子表长度（2032 vs 实际 ~30KB），FreeType 按声明长度钳制
+    读成空表，GDI/fontTools 无视长度所以 Windows 能预览（文鼎細黑
+    实锤），自解析同样无视声明长度按 rangeOffset 读到真实数据。"""
+
+    codec: str | None            # None = Unicode 模式
+    cmap2: dict[int, int]        # 原生码 → 字形索引（Unicode 模式为空）
+
+    def index(self, face, ch: str) -> int:
+        if self.codec is None:
+            return face.get_char_index(ord(ch))
+        try:
+            b = ch.encode(self.codec)
+        except UnicodeEncodeError:
+            return 0
+        code = b[0] if len(b) == 1 else (b[0] << 8) | b[1]
+        return self.cmap2.get(code, 0)
+
+
+def _encoder_for(face, fh, face_index: int) -> _Encoder:
+    """按 cmap 目录内容判模式（不依赖 FreeType select_charmap：format 2
+    字体上 FreeType 时而合成出查不到字的 unicode charmap、时而因老字库
+    谎报子表长度读成空表，均不可信）。
+
+    取舍备案：目录序第一个 legacy 表生效；Unicode 子表与 legacy 并存时
+    判 Unicode 模式、忽略 legacy 补字（models 侧覆盖区间则是全合并），
+    混合字体现实罕见。解析失败（截断/损坏）退 Unicode 模式，调用方按
+    「渲染失败/缺字」兜底。"""
+    try:
+        subs = _cmap_subtables(fh, face_index)
+        if any(k in CMAP_UNICODE_KEYS for k, _off in subs):
+            return _Encoder(None, {})
+        for (pid, eid), off in subs:
+            codec = CMAP_LEGACY_CODECS.get((pid, eid))
+            if codec is not None:
+                return _Encoder(codec, _parse_cmap2(fh, off))
+    except (struct.error, OSError):
+        pass
+    return _Encoder(None, {})    # 无可识别表：Unicode 模式（查全空，同旧况）
+
+
+def _sfnt_table_dir(fh, face_index: int) -> int | None:
+    """cmap 表在文件内的偏移；TTC 按 face_index 取对应表目录。"""
+    fh.seek(0)
+    head = fh.read(12)
+    if head[:4] == b"ttcf":
+        (n,) = struct.unpack(">I", head[8:12])
+        offs = struct.unpack(f">{n}I", fh.read(4 * n))
+        if not offs:
+            return None
+        fh.seek(offs[max(0, min(face_index, n - 1))])
+        head = fh.read(12)
+    (num_tables,) = struct.unpack(">H", head[4:6])
+    for _ in range(num_tables):
+        tag, _cks, off, _ln = struct.unpack(">4sIII", fh.read(16))
+        if tag == b"cmap":
+            return off
+    return None
+
+
+def _cmap_subtables(fh, face_index: int) -> list[tuple[tuple[int, int], int]]:
+    base = _sfnt_table_dir(fh, face_index)
+    if base is None:
+        return []
+    fh.seek(base)
+    _version, n_sub = struct.unpack(">HH", fh.read(4))
+    # 子表偏移域相对 cmap 表头，转绝对偏移返回
+    return [(struct.unpack(">HH", fh.read(4)),
+             base + struct.unpack(">I", fh.read(4))[0])
+            for _ in range(n_sub)]
+
+
+def _parse_cmap2(fh, sub_base: int) -> dict[int, int]:
+    """自解析 (3,x) legacy cmap 子表：原生码 → 字形索引。
+
+    无视子表声明的 length（老字库常见谎报，文鼎細黑声明 2032 实际
+    ~30KB，FreeType 按声明钳制读成空表），条目按 subHeaderKeys/
+    subHeaders/rangeOffset 推进读到文件尾。截断/损坏由 _encoder_for
+    统一兜成 Unicode 模式。"""
+    fh.seek(sub_base)
+    fmt, _length, _lang = struct.unpack(">HHH", fh.read(6))
+    if fmt != 2:
+        return {}
+    keys = struct.unpack(">256H", fh.read(512))
+    subs: dict[int, tuple] = {}
+    for v in keys:
+        sp = 518 + v
+        if sp not in subs:
+            fh.seek(sub_base + sp)
+            # spec：firstCode/entryCount/idRangeOffset uint16、idDelta int16
+            first, cnt, delta, ro = struct.unpack(">HHhH", fh.read(8))
+            subs[sp] = (first, cnt, delta, ro)
+    out: dict[int, int] = {}
+    for hi, v in enumerate(keys):
+        first, cnt, delta, ro = subs[518 + v]
+        if ro == 0:          # spec：glyphIdArray 缺席 = 该段全映射 .notdef
+            continue
+        gp = sub_base + 518 + v + 6 + ro
+        for k in range(cnt):
+            lo = first + k
+            if lo > 0xFF:        # 损坏 entryCount 越界：| 会污染高位，弃
+                break
+            fh.seek(gp + 2 * k)
+            (g,) = struct.unpack(">H", fh.read(2))
+            if g:
+                out[(hi << 8) | lo] = (g + delta) & 0xFFFF
+    return out
 
 
 @dataclass
@@ -18,10 +134,14 @@ class RenderBundle:
     available: frozenset[str]
 
 
-def _render_char(face, ch: str, px: int) -> np.ndarray | None:
+def _render_char(face, enc: _Encoder, ch: str, px: int) -> np.ndarray | None:
     face.set_pixel_sizes(0, px)
+    idx = enc.index(face, ch)
+    if not idx:
+        return None
     try:
-        face.load_char(ch, freetype.FT_LOAD_RENDER | freetype.FT_LOAD_TARGET_NORMAL)
+        face.load_glyph(idx, freetype.FT_LOAD_RENDER
+                        | freetype.FT_LOAD_TARGET_NORMAL)
     except Exception:
         return None
     bm = face.glyph.bitmap
@@ -75,12 +195,13 @@ def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
     """
     with open(path, "rb") as fh:
         face = freetype.Face(fh, face_index)
-        # 反 tofu：cmap 缺字先剔除（F3），避免 load_char 落到 .notdef 方块
-        wanted = [ch for ch in chars if face.get_char_index(ord(ch)) != 0]
+        enc = _encoder_for(face, fh, face_index)
+        # 反 tofu：cmap 缺字先剔除（F3），避免渲染落到 .notdef 方块
+        wanted = [ch for ch in chars if enc.index(face, ch) != 0]
         # pass 1: 基准尺寸墨迹高度中位数
         heights = {}
         for ch in wanted:
-            arr = _render_char(face, ch, BASE_PX)
+            arr = _render_char(face, enc, ch, BASE_PX)
             if arr is not None:
                 heights[ch] = _ink_height(arr)
         if not heights:
@@ -89,7 +210,7 @@ def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
         tiles: dict[str, np.ndarray] = {}
         for ch in wanted:
             px = max(8, round(BASE_PX * TARGET_INK / median)) if median else BASE_PX
-            arr = _render_char(face, ch, px)
+            arr = _render_char(face, enc, ch, px)
             if arr is None:
                 continue
             tiles[ch] = _fit(arr)
@@ -133,6 +254,7 @@ def render_text_strip(path: Path, face_index: int, text: str,
     """
     with open(path, "rb") as fh:
         face = freetype.Face(fh, face_index)
+        enc = _encoder_for(face, fh, face_index)
         face.set_pixel_sizes(0, px)
         asc, desc = _baseline_metrics(face.size, px)
         pad = 4
@@ -140,14 +262,15 @@ def render_text_strip(path: Path, face_index: int, text: str,
         slots: list[tuple[np.ndarray, int, int]] = []
         x = float(pad)
         for ch in text:
-            if face.get_char_index(ord(ch)) == 0:
+            idx = enc.index(face, ch)
+            if idx == 0:
                 # 缺字跳过不前进；cmap 也没有的空白字符按比例兜底出词距
                 if ch.isspace():
                     x += px * _SPACE_ADV
                 continue
             try:
-                face.load_char(ch, freetype.FT_LOAD_RENDER
-                               | freetype.FT_LOAD_TARGET_NORMAL)
+                face.load_glyph(idx, freetype.FT_LOAD_RENDER
+                                | freetype.FT_LOAD_TARGET_NORMAL)
             except Exception:
                 continue                      # 坏字形：跳过不前进，不毁整条
             g = face.glyph
