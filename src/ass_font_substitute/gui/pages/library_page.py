@@ -31,8 +31,10 @@ from qfluentwidgets import PushSettingCard
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import SubtitleLabel
 from qfluentwidgets import TextEdit
+from qfluentwidgets import TextWrap
 from qfluentwidgets import TransparentToolButton
 from qfluentwidgets import VerticalSeparator
+from qfluentwidgets import isDarkTheme
 from qfluentwidgets import setCustomStyleSheet
 from qfluentwidgets import setFont
 
@@ -155,6 +157,13 @@ PushButton:disabled{
 """
 
 
+def _box_content(text: str) -> str:
+    """确认框文案按 32 汉字宽预折行：qfw MessageBox 按父窗口宽折行
+    （1200px 窗 → 140 字/行），长路径单行不折、确认框被撑满整窗宽。
+    预折好后 _adjustText 只折超宽行，对话框宽封顶在 ~32 字。"""
+    return TextWrap.wrap(text, 64, once=False)[0]
+
+
 class LibraryPage(ScrollArea):
     libraryChanged = Signal()
     """目录增删或索引更新完成：订阅页重拉库数据（browse 清单/ subs 重分类）"""
@@ -217,12 +226,13 @@ class LibraryPage(ScrollArea):
         v.addWidget(stat_card)
         v.addSpacing(16)
 
-        # 按钮初始无布局，_rebuild_dir_rows 时装进分组卡标题栏/失败卡
-        self.btn_add = PushButton(FIF.FOLDER_ADD, "添加目录")
+        # 按钮初始无布局，_rebuild_dir_rows 时装进分组卡标题栏/失败卡。
+        # 添加目录=主色（引导首次使用的正事），更新全部=普通（日常少点）
+        self.btn_add = PrimaryPushButton(FIF.FOLDER_ADD, "添加目录")
         install_tip(self.btn_add, "选择一个字体目录加入列表")
         self.btn_refresh = TransparentToolButton(FIF.SYNC)
         install_tip(self.btn_refresh, "刷新状态")
-        self.btn_update = PrimaryPushButton(FIF.UPDATE, "更新全部")
+        self.btn_update = PushButton(FIF.UPDATE, "更新全部")
         install_tip(self.btn_update, "更新全部目录的索引")
 
         # 更新态：按钮原地变「[旋转环]取消更新」，宽度锁定防文字变短塌缩
@@ -231,6 +241,7 @@ class LibraryPage(ScrollArea):
         self._busy_timer.timeout.connect(self._tick_busy)
         self._busy_i = 0
         self._busy_icons: list[QIcon] | None = None
+        self._busy_dark: bool | None = None   # 弧色按主题缓存，换主题重画
 
         self.dirs_box = QVBoxLayout()
         self.dirs_box.setContentsMargins(0, 0, 0, 0)
@@ -259,13 +270,13 @@ class LibraryPage(ScrollArea):
             if item.widget():
                 item.widget().deleteLater()
         # 一张 GroupHeaderCardWidget 框住全部目录行（行间分隔线由组件管）；
-        # 标题栏当工具条：左=标题+刷新图标，右=添加目录+更新全部
+        # 标题栏当工具条：左=标题+刷新图标，右=更新全部+添加目录
         card = GroupHeaderCardWidget(self)
         card.setTitle("字体目录")
         card.headerLayout.addWidget(self.btn_refresh)
         card.headerLayout.addStretch(1)
-        card.headerLayout.addWidget(self.btn_add)
         card.headerLayout.addWidget(self.btn_update)
+        card.headerLayout.addWidget(self.btn_add)
         for d in self.vm.dirs:
             right = QWidget()
             rh = QHBoxLayout(right)
@@ -291,6 +302,13 @@ class LibraryPage(ScrollArea):
                 install_tip(btn, "点击停止该目录的索引更新")
                 btn.clicked.connect(
                     lambda _=False, p=d.path: self._stop_dir(p))
+            elif d.state == "ok":
+                # 已最新也保留更新入口：增量门只看 size+mtime，索引内容
+                # 坏了它判定不了——点击弹确认后清库强制重建
+                btn.setEnabled(self._index_worker is None)
+                install_tip(btn, "点击删除旧索引并强制重建")
+                btn.clicked.connect(
+                    lambda _=False, p=d.path: self._force_update_dir(p))
             else:
                 btn.setEnabled(False)
             rh.addWidget(btn, 0, Qt.AlignVCenter)
@@ -379,8 +397,9 @@ class LibraryPage(ScrollArea):
         """二次确认后移除：手滑即删太危险（目录行删除按钮紧邻更新按钮）。"""
         box = MessageBox(
             "删除字体目录",
-            f"确定从列表移除以下目录吗？\n\n{path}\n\n"
-            "仅移出列表：字体文件与已建索引不会被删除。",
+            _box_content(
+                f"确定从列表移除以下目录吗？\n\n{path}\n\n"
+                "仅移出列表：字体文件与已建索引不会被删除。"),
             self.window())
         box.yesButton.setText("删除")
         box.cancelButton.setText("取消")
@@ -468,14 +487,33 @@ class LibraryPage(ScrollArea):
         if path in [d.path for d in self.vm.dirs]:
             self._launch_update([path])
 
-    def _launch_update(self, dirs: list[str]):
+    def _force_update_dir(self, path):
+        """「已最新」行的更新入口：增量无活可干，确认后清库强制重建。
+        重建耗时与首建相当，必须让用户显式知情。"""
+        box = MessageBox(
+            "强制更新索引",
+            _box_content(
+                f'是否删除 "{path}" 的已有索引数据库，'
+                "然后强制更新索引？这将花费一些时间。"),
+            self.window())
+        box.yesButton.setText("确定")
+        box.cancelButton.setText("取消")
+        if box.exec():
+            # 旧索引即清：行内派生统计（字体/简繁/失败重复）与总统计卡
+            # 同步减去旧值，不带旧数字跑完全程
+            self.vm.reset_stats(path)
+            self._apply_stats(self.vm.stats)
+            self._launch_update([path], force=True)
+
+    def _launch_update(self, dirs: list[str], force: bool = False):
         if not dirs or self._index_worker is not None:
             return
         for d in dirs:
             self.vm.mark_indexing(d)
         # 先持 worker 再重排行：行内 upd/rm 按钮的在途禁用读该字段
         self._index_worker = IndexWorker(
-            dirs, max_threads=self.settings.get("max_threads"))
+            dirs, max_threads=self.settings.get("max_threads"),
+            force=set(dirs) if force else None)
         self._rebuild_dir_rows()
         self._set_updating(True)
         self._index_worker.progress.connect(self._on_index_progress)
@@ -546,7 +584,7 @@ class LibraryPage(ScrollArea):
             self.btn_update.setToolTip("正在更新索引，点击取消")  # 同上
         else:
             self._busy_timer.stop()
-            self.btn_update.setText("更新全部索引")
+            self.btn_update.setText("更新全部")
             self.btn_update.setIcon(FIF.UPDATE)
             # 16777215 = QWIDGETSIZE_MAX（PySide6 未导出该常量）
             self.btn_update.setMinimumWidth(0)
@@ -554,9 +592,12 @@ class LibraryPage(ScrollArea):
             self.btn_update.setToolTip("")
 
     def _busy_frames(self) -> list[QIcon]:
-        """旋转弧逐帧 QIcon（qfw 无内置忙碌图标；主色按钮底上画白弧，
-        按 DPR 出图防高分屏发虚——PreviewBar 贴图同款教训）。"""
-        if self._busy_icons is None:
+        """旋转弧逐帧 QIcon（qfw 无内置忙碌图标）。更新按钮已是普通灰底
+        （主色让给「添加目录」），弧色随主题取对比色；按 DPR 出图防高分
+        屏发虚——PreviewBar 贴图同款教训。"""
+        dark = isDarkTheme()
+        if self._busy_icons is None or self._busy_dark != dark:
+            self._busy_dark = dark
             dpr = self.btn_update.devicePixelRatioF()
             frames = []
             for i in range(12):
@@ -565,7 +606,8 @@ class LibraryPage(ScrollArea):
                 pm.fill(Qt.transparent)
                 p = QPainter(pm)
                 p.setRenderHint(QPainter.Antialiasing)
-                p.setPen(QPen(Qt.white, 2, Qt.SolidLine, Qt.RoundCap))
+                p.setPen(QPen(Qt.white if dark else Qt.black, 2,
+                              Qt.SolidLine, Qt.RoundCap))
                 p.drawArc(1, 1, 14, 14, -(i * 30) * 16, -100 * 16)
                 p.end()
                 frames.append(QIcon(pm))

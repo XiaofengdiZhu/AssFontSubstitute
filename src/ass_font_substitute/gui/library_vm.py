@@ -80,6 +80,19 @@ class LibraryVM:
         if d:
             d.state = "indexing"
 
+    def reset_stats(self, path: str) -> None:
+        """强制重建起步：旧索引库已清空，行内派生统计先归零、总统计卡
+        同步减去该目录旧值（负数钳 0 防目录间去重后口径差），等收尾探测
+        盖回真值；文件数是盘上实况不属索引，保留。"""
+        d = self._row(path)
+        if not d:
+            return
+        for key, v in (("fonts", d.fonts), ("support_sc", d.sc),
+                       ("support_tc", d.tc)):
+            self.stats[key] = max(0, self.stats.get(key, 0) - v)
+        d.fonts = d.sc = d.tc = 0
+        d.bad = d.skipped = d.fail = 0
+
     def mark_pending(self, path: str) -> None:
         """行脱「更新中」回暂态：取消/单停/失败后真实状态未知，
         挂「检查中」直到收尾探测盖定。"""

@@ -89,6 +89,35 @@ def test_indexing_row_survives_refresh(tmp_path):
     assert vm.dirs[0].state == "ok"
 
 
+def test_reset_stats_zeroes_derived_keeps_files(tmp_path):
+    # 强制重建起步：派生统计（字体/简繁/失败重复）归零、总统计卡同步
+    # 减去该目录旧值；文件数是盘上实况不属索引保留；未知路径静默
+    vm = _vm(tmp_path)
+    vm.add_dir("J:/a")
+    vm.refresh(
+        [DirStatus("J:/a", "ok", total=7, bad=2)],
+        {"dirs": 1, "files": 7, "fonts": 4, "support_sc": 3, "support_tc": 1},
+        [], [],
+        dir_stats={"J:/a": {"fonts": 4, "sc": 3, "tc": 1, "skipped": 2}})
+    vm.reset_stats("J:/a")
+    d = vm.dirs[0]
+    assert (d.fonts, d.sc, d.tc, d.bad, d.skipped, d.fail) == (0, 0, 0, 0, 0, 0)
+    assert d.files == 7
+    assert vm.stats == {"dirs": 1, "files": 7, "fonts": 0,
+                        "support_sc": 0, "support_tc": 0}
+    vm.reset_stats("J:/nowhere")               # 不抛即过
+
+
+def test_reset_stats_clamps_negative_totals(tmp_path):
+    # 总统计减出负数（跨目录版本去重后 per-dir 之和可能大于总卡口径）钳 0
+    vm = _vm(tmp_path)
+    vm.add_dir("J:/a")
+    vm.refresh([DirStatus("J:/a", "ok", total=3)], {"fonts": 1}, [], [],
+               dir_stats={"J:/a": {"fonts": 4, "sc": 2, "tc": 2, "skipped": 0}})
+    vm.reset_stats("J:/a")
+    assert vm.stats["fonts"] == 0 and vm.stats["support_sc"] == 0
+
+
 def test_boots_from_settings(tmp_path):
     s = Settings(tmp_path / "s.json")
     s.set("font_dirs", ["J:/x", "J:/y"])

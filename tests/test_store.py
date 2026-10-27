@@ -46,6 +46,35 @@ def test_incremental(tmp_path):
     assert stats(conn)["files"] == 2
 
 
+def test_force_rebuild_clears_and_reparses(tmp_path):
+    # force=True：清空全部数据表再走增量 → 盘上文件全部按新增重解析。
+    # 「已最新」目录强制重建的入口：增量门只看 size+mtime，索引内容
+    # 坏了它判定不了
+    d = tmp_path / "fonts"
+    d.mkdir()
+    _mklib(d)
+    conn = open_db(d / "fontindex.db")
+    assert update_index(d, conn).fonts == 2
+    (d / "bad.ttf").write_bytes(b"junk")
+    r2 = update_index(d, conn)
+    assert r2.bad == 1 and r2.added == 1
+
+    # 无变化：增量门放行，不清表
+    r3 = update_index(d, conn)
+    assert (r3.added, r3.changed, r3.removed) == (0, 0, 0)
+    assert stats(conn)["fonts"] == 2
+
+    # 强制：旧库清空重来，好文件重入、坏文件重判
+    r4 = update_index(d, conn, force=True)
+    assert r4.added == 3 and r4.fonts == 2 and r4.bad == 1
+    assert stats(conn)["fonts"] == 2
+    assert conn.execute("SELECT COUNT(*) FROM bad").fetchone()[0] == 1
+    # cmap_data 同步清空重灌（fonts 行的 cmap_id 引用自洽）
+    assert conn.execute(
+        "SELECT COUNT(*) FROM cmap_data WHERE id NOT IN "
+        "(SELECT cmap_id FROM fonts)").fetchone()[0] == 0
+
+
 def test_bad_file_retry(tmp_path):
     d = tmp_path / "fonts"
     d.mkdir()

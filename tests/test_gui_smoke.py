@@ -175,7 +175,7 @@ def test_index_worker_cancel_dir(qapp, tmp_path, monkeypatch):
 
     calls, seen = [], {}
 
-    def fake_update_dir(d, progress=None, max_threads=1):
+    def fake_update_dir(d, progress=None, max_threads=1, force=False):
         calls.append(d)
         assert max_threads >= 1               # 设置页 max_threads 透传通路
         if progress is not None:
@@ -416,7 +416,7 @@ def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
     assert page._busy_timer.isActive()
     assert not page.btn_update.icon().isNull()
     page._set_updating(False)
-    assert page.btn_update.text() == "更新全部索引"
+    assert page.btn_update.text() == "更新全部"
     assert not page._busy_timer.isActive()
     assert page.btn_update.maximumWidth() == 16777215  # QWIDGETSIZE_MAX
     assert page.vm.add_dir(str(d)) is True
@@ -486,6 +486,19 @@ def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
     btns = {b.text(): b for b in card.findChildren(PushButton)}
     assert btns["需更新"].isEnabled() and btns["删除"].isEnabled()
 
+    # 已最新行保留更新入口（强制重建）：在途禁用、空闲可点
+    page.vm.dirs[0].state = "ok"
+    page._index_worker = object()
+    page._rebuild_dir_rows()
+    card = page.dirs_box.itemAt(0).widget()
+    btns = {b.text(): b for b in card.findChildren(PushButton)}
+    assert not btns["已最新"].isEnabled()
+    page._index_worker = None
+    page._rebuild_dir_rows()
+    card = page.dirs_box.itemAt(0).widget()
+    btns = {b.text(): b for b in card.findChildren(PushButton)}
+    assert btns["已最新"].isEnabled()
+
     gen0 = w.subs_page._gen
     page._remove_dir_confirmed(str(d))          # → libraryChanged 广播（确认弹窗路径 offscreen 不测，直接走确认后段）
     assert w.browse_page.pvm.entities == []
@@ -493,6 +506,53 @@ def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
     assert w.browse_page.count_label.text() == "0 款字体"
     assert w.subs_page._gen == gen0 + 1
     w.close()
+
+
+def test_index_worker_force_rebuilds(qapp, tmp_path):
+    # force 通路：IndexWorker(force=…) → update_dir(force=True) → 清库
+    # 全量重解析（行内「已最新」强制更新的后台半边）
+    from tests.fonts import build_font
+    d = tmp_path / "fonts"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永", family="甲")
+    from ass_font_substitute.gui.jobs import update_dir
+    assert update_dir(str(d)).fonts == 1
+    assert update_dir(str(d)).added == 0          # 增量门放行
+
+    from ass_font_substitute.gui.workers import IndexWorker
+    assert IndexWorker([str(d)])._force == set()  # 默认不强制
+    w = IndexWorker([str(d)], force={str(d)})
+    assert w._force == {str(d)}
+    results = []
+    w.finished_dir.connect(lambda dd, r: results.append((dd, r)))
+    w.start()
+    # finished_dir 是跨线程队列连接，主线程须转事件循环才有回执
+    import time
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline and not results:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert w.wait(2000)
+    assert results and results[0][0] == str(d)
+    assert results[0][1].added == 1 and results[0][1].fonts == 1
+
+
+def test_box_content_wraps_long_path(qapp):
+    # 确认框文案预折行封宽：qfw 按父窗口宽折行，长路径单行不折会把
+    # 对话框撑满整窗宽；_box_content 按 32 汉字（64 宽单位）预折
+    from qfluentwidgets import TextWrap
+
+    from ass_font_substitute.gui.pages.library_page import _box_content
+    out = _box_content(
+        '是否删除 "Q:/Others/超级字体整合包 XZ 的很长很长的路径目录名" '
+        '的已有索引数据库，然后强制更新索引？这将花费一些时间。')
+    assert "\n" in out
+    assert max(TextWrap.get_text_width(ln)
+               for ln in out.splitlines()) <= 64
+
+    # 删除目录框的分段空行保留（TextWrap 逐行处理不吞空行）
+    out2 = _box_content("确定从列表移除以下目录吗？\n\nX:\\字体\n\n仅移出列表。")
+    assert out2.splitlines()[1] == ""
 
 
 def test_dir_library_stats_maps_normalized_paths(qapp, tmp_path, monkeypatch):
@@ -559,13 +619,14 @@ def test_theme_color_custom_follow_and_fallback(qapp, tmp_path, monkeypatch):
         s.set("theme_color", "#f5c1cb")
         w = AFSWindow(s)
         assert QColor(qconfig.themeColor.value) == QColor("#f5c1cb")
-        assert "rgba(0, 0, 0" in w.library_page.btn_update.property(
+        # 主色按钮现是「添加目录」（更新全部已换普通灰底）
+        assert "rgba(0, 0, 0" in w.library_page.btn_add.property(
             "lightCustomQss")
 
         # 切自定义深色：覆盖撤销 + 色值生效
         s.set("theme_color", "#0065d5")
         assert QColor(qconfig.themeColor.value) == QColor("#0065d5")
-        assert not w.library_page.btn_update.property("lightCustomQss")
+        assert not w.library_page.btn_add.property("lightCustomQss")
 
         # 切跟随系统：取 monkeypatch 的系统强调色（经 store 信号驱动）
         monkeypatch.setattr(app_mod, "_system_accent",

@@ -281,14 +281,23 @@ def _update_parallel(dir_path: Path, conn: sqlite3.Connection,
 
 def update_index(dir_path: Path, conn: sqlite3.Connection,
                  progress: Callable[[int, int, UpdateResult], bool] | None = None,
-                 executor=None, max_threads: int = 1) -> UpdateResult:
+                 executor=None, max_threads: int = 1,
+                 force: bool = False) -> UpdateResult:
     """progress(done, total, res) -> bool 在每解析完一个文件后回调（并行
     时按完成序，done=已完成数）；返回 False 停止剩余文件并置
     res.cancelled=True。逐文件事务提交，取消/中断保留已入库前缀，重跑按
     增量续（GUI 进度/取消依赖此语义）。max_threads>1 且待解析多于一个
     文件时解析走进程池（jobs.update_dir 传 settings.max_threads），
-    executor 参数供测试注入线程池替代。"""
+    executor 参数供测试注入线程池替代。force=True 先清空全部数据表再
+    走增量（known/bad 全空 → 盘上文件全部按新增重解析）：「已最新」
+    目录强制重建的入口——增量门只看 size+mtime，索引内容坏了它判定
+    不了。原地清表不删库文件：聚合库（CoreWorker 线程）还开着只读
+    连接，Windows 上开着句柄的文件删不掉。"""
     res = UpdateResult()
+    if force:
+        with conn:
+            for t in ("fonts", "fingerprints", "bad", "files", "cmap_data"):
+                conn.execute(f"DELETE FROM {t}")
     known = {r[0]: (r[1], r[2]) for r in
              conn.execute("SELECT rel_path, size, mtime_ns FROM files")}
     bad = {r[0]: (r[1], r[2]) for r in
