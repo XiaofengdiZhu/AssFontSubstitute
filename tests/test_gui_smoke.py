@@ -32,6 +32,22 @@ def test_main_window_boots(qapp, tmp_path, monkeypatch):
     w.close()
 
 
+def test_resize_border_band_widened(qapp, tmp_path, monkeypatch):
+    # qframelesswindow WM_NCHITTEST 命中带出厂 5 物理px，高 DPI 难抓住；
+    # 主窗口实例覆写成原生同级 ≥8 逻辑px（offscreen DPR=1）
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    s = Settings(tmp_path / "settings.json")
+    w = AFSWindow(s)
+    assert w.BORDER_WIDTH >= 8
+    # 库属性未被污染：只覆写实例
+    from qframelesswindow.windows import WindowsFramelessWindowBase
+    assert WindowsFramelessWindowBase.BORDER_WIDTH == 5
+    w.close()
+
+
 def test_load_completed_signal_fires_once(qapp, tmp_path):
     # 启动画面收幕信号：无目录同步就绪；有目录首个 lib 结果/失败收幕；
     # 后续刷新不再发（_lib_reported 一次性）

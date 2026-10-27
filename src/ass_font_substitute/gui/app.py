@@ -133,6 +133,11 @@ class _Splash(SplashScreen):
 class AFSWindow(FluentWindow):
     def __init__(self, settings: Settings | None = None):
         super().__init__()
+        # 边缘 resize 命中带：qframelesswindow 出厂 BORDER_WIDTH=5 物理px
+        # （WM_NCHITTEST 按物理坐标判定），高 DPI 下更窄难抓住；提到原生
+        # 同级 8 逻辑px。原生窗口的 resize 边在客户区外由 DWM 接管，无边
+        # 框窗只能换算后在客户区内画等宽带——官方 Gallery 等同栈应用均窄
+        self.BORDER_WIDTH = max(8, round(8 * self.devicePixelRatioF()))
         self.settings = settings or Settings()
         # 先定主题再建页：页面里有按当前主题取色的自绘控件（统计分隔线/药丸）
         setTheme(_THEME_OF[self.settings.get("theme")])
