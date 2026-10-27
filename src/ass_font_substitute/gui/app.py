@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from importlib.resources import files
 
 import darkdetect
 from PySide6.QtCore import QEvent
@@ -83,12 +84,25 @@ def _system_accent() -> QColor | None:
         return None
 
 
+_ICON: QIcon | None = None
+
+
+def app_icon() -> QIcon:
+    """应用图标（assets/icon.ico 内含 16~256 七帧）。标题栏左上角、
+    任务栏、启动画面共用；单实例缓存避免重复解码。"""
+    global _ICON
+    if _ICON is None:
+        _ICON = QIcon(str(files("ass_font_substitute.gui")
+                           .joinpath("assets/icon.ico")))
+    return _ICON
+
+
 class _Splash(SplashScreen):
-    """启动画面：空图标（图标待设计）+ 加载环 + 文案，盖住首帧到库就绪。
+    """启动画面：应用图标 + 加载环 + 文案，盖住首帧到库就绪。
     qfw SplashScreen 无布局（icon 手动定位），环与文案在 resizeEvent 跟随。"""
 
     def __init__(self, parent):
-        super().__init__(QIcon(), parent)
+        super().__init__(parent.windowIcon(), parent)
         # qfw TitleBar 只靠 window 的 WindowStateChange 事件切换最大化/
         # 还原图标，初值恒「最大化」——本画面创建晚于 ctor 期最大化，
         # 错过事件，须手动同步初值（最大化重启时按钮才不显错图标）
@@ -138,6 +152,9 @@ class AFSWindow(FluentWindow):
         # 同级 8 逻辑px。原生窗口的 resize 边在客户区外由 DWM 接管，无边
         # 框窗只能换算后在客户区内画等宽带——官方 Gallery 等同栈应用均窄
         self.BORDER_WIDTH = max(8, round(8 * self.devicePixelRatioF()))
+        # 图标：标题栏左上角（qframelesswindow TitleBar 自挂
+        # windowIconChanged 画 20px）+ 任务栏（配合 main() 的 AUMID）
+        self.setWindowIcon(app_icon())
         self.settings = settings or Settings()
         # 先定主题再建页：页面里有按当前主题取色的自绘控件（统计分隔线/药丸）
         setTheme(_THEME_OF[self.settings.get("theme")])

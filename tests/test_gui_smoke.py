@@ -29,6 +29,9 @@ def test_main_window_boots(qapp, tmp_path, monkeypatch):
     # 最小窗口盖住最宽页硬约束（库页 823 + 导航 48 + 余量）
     assert w.minimumWidth() == 900
     assert w.minimumHeight() == 620
+    # 应用图标：assets/icon.ico 随包分发，真实解码非空帧
+    assert not w.windowIcon().isNull()
+    assert not w.windowIcon().pixmap(32, 32).isNull()
     w.close()
 
 
