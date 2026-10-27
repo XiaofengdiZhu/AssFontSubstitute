@@ -39,6 +39,7 @@ from ass_font_substitute.gui.paths import default_cache_path
 from ass_font_substitute.gui.settings_store import COV_BOUNDS
 from ass_font_substitute.gui.settings_store import SIM_BOUNDS
 from ass_font_substitute.gui.settings_store import SIZE_BOUNDS
+from ass_font_substitute.gui.widgets.range_slider import RangeSlider
 from ass_font_substitute.gui.widgets.spin import SpinBox
 
 REPO_URL = "https://github.com/XiaofengdiZhu/AssFontSubstitute"
@@ -360,32 +361,35 @@ class SettingsPage(ScrollArea):
                               "候选字形相对原字体的大小允许范围", self)
         lo = round(self.settings.get("size_min") * 100)
         hi = round(self.settings.get("size_max") * 100)
-        self.spin_smin = SpinBox(card)
-        self.spin_smax = SpinBox(card)
-        for s in (self.spin_smin, self.spin_smax):
-            s.setRange(round(SIZE_BOUNDS[0] * 100), round(SIZE_BOUNDS[1] * 100))
-            s.setSingleStep(1)
-            s.setSuffix("%")
-            s.setFixedWidth(132)
-            s.installEventFilter(card)
-        self.spin_smin.setValue(lo)
-        self.spin_smax.setValue(hi)
-        self.spin_smin.setMaximum(hi)
-        self.spin_smax.setMinimum(lo)
-        # 滚轮拦截按属性名认控件：大小区间的双 SpinBox 必须挂上
-        card.spin, card.spin_max = self.spin_smin, self.spin_smax
-        self.spin_smin.valueChanged.connect(
-            lambda x: (self.settings.set("size_min", x / 100),
-                       self.spin_smax.setMinimum(x)))
-        self.spin_smax.valueChanged.connect(
-            lambda x: (self.settings.set("size_max", x / 100),
-                       self.spin_smin.setMaximum(x)))
-        card.hBoxLayout.addWidget(self.spin_smin, 0, Qt.AlignmentFlag.AlignRight)
-        card.hBoxLayout.addSpacing(6)
-        card.hBoxLayout.addWidget(BodyLabel("–", card), 0,
+        # 双滑块范围条替双 SpinBox：拖拽改值，精确数字看右侧标签
+        self.range_slider = RangeSlider(
+            round(SIZE_BOUNDS[0] * 100), round(SIZE_BOUNDS[1] * 100),
+            lo, hi, card)
+        self.range_slider.setFixedSize(180, 22)
+        # 标签取钳后值（存量 size_max 越界时与滑块一致，构造不落盘）
+        lo, hi = self.range_slider.values()
+        self.size_value = BodyLabel(f"{lo}% – {hi}%", card)
+        # 定宽模板封顶 + 余量（同管理页统计行套路）：数值变宽不顶滑块挪位，
+        # 真机字体数字非等宽也放得下
+        self.size_value.setFixedWidth(
+            self.size_value.fontMetrics().horizontalAdvance("000% – 000%") + 4)
+
+        def _on_change(low_, hi_):
+            # 拖拽中只刷标签：每个 move 事件落盘=每秒百余次全量 JSON 写，浪费
+            self.size_value.setText(f"{low_}% – {hi_}%")
+
+        def _on_release():
+            low_, hi_ = self.range_slider.values()
+            self.settings.set("size_min", low_ / 100)
+            self.settings.set("size_max", hi_ / 100)
+
+        self.range_slider.valueChanged.connect(_on_change)
+        self.range_slider.sliderReleased.connect(_on_release)
+        card.hBoxLayout.addWidget(self.range_slider, 0,
                                   Qt.AlignmentFlag.AlignRight)
-        card.hBoxLayout.addSpacing(6)
-        card.hBoxLayout.addWidget(self.spin_smax, 0, Qt.AlignmentFlag.AlignRight)
+        card.hBoxLayout.addSpacing(10)
+        card.hBoxLayout.addWidget(self.size_value, 0,
+                                  Qt.AlignmentFlag.AlignRight)
         card.hBoxLayout.addSpacing(_SPACING)
         return card
 
@@ -405,7 +409,7 @@ class SettingsPage(ScrollArea):
         group.vBoxLayout.insertLayout(0, head)
         self._search_active = False
         for w in (self.cov_card.slider, self.sim_card.slider,
-                  self.spin_smin, self.spin_smax, self.pause_card.spin):
+                  self.range_slider, self.pause_card.spin):
             w.valueChanged.connect(self._mark_sim_pending)
 
     def bind_search_activity(self, subs_page):

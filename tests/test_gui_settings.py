@@ -271,6 +271,43 @@ def test_percent_card_init_does_not_commit(qapp):
     assert calls == []                              # 构造不提交，存量值不被改写
 
 
+def test_size_card_range_slider(qapp, tmp_path):
+    # 大小区间卡：双滑块替双 SpinBox——初值回读、拖动落盘+标签同步、
+    # 待生效提示接线
+    pytest.importorskip("PySide6")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Signal
+
+    from ass_font_substitute.gui.pages.settings_page import SettingsPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def submit(self, *a):
+            pass
+
+    s = Settings(tmp_path / "settings.json")
+    s.set("size_min", 0.9)
+    s.set("size_max", 1.1)
+    page = SettingsPage(s, _FakeWorker())
+    assert page.range_slider.values() == (90, 110)
+    assert page.size_value.text() == "90% – 110%"
+    # 值域上限 150：越界钳回，标签取钳后值（存量 size_max 越界不矛盾）
+    page.range_slider.setValues(80, 999)
+    assert page.range_slider.values() == (80, 150)
+    assert page.size_value.text() == "80% – 150%"
+    # 拖拽中只刷标签不落盘（每 move 全量 JSON 写太浪费），松手统一落
+    assert (s.get("size_min"), s.get("size_max")) == (0.90, 1.10)
+    page.range_slider.sliderReleased.emit()
+    assert (s.get("size_min"), s.get("size_max")) == (0.80, 1.50)
+    # 标签定宽：数值位数变化不顶滑块挪位
+    assert page.size_value.minimumWidth() == page.size_value.maximumWidth() > 0
+    page.deleteLater()
+
+
 def test_general_group_language_theme_bg(qapp, tmp_path, monkeypatch):
     # 常规组三卡：初值、改动落盘并发信号、繁体模式选项名换正體中文
     monkeypatch.setenv("APPDATA", str(tmp_path))
