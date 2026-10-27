@@ -149,6 +149,8 @@ class AFSWindow(FluentWindow):
         self.addSubInterface(self.subs_page, FIF.DOCUMENT, "处理字幕")
         self.addSubInterface(self.settings_page, FIF.SETTING, "设置",
                              NavigationItemPosition.BOTTOM)
+        # qfw 侧栏出厂展开宽 322 太宽，砍掉三分之一
+        self.navigationInterface.setExpandWidth(215)
         self.settings_page.bind_search_activity(self.subs_page)
         # 启动强调色应用在建页前（主题先行约束），页面按钮当时还不存在——
         # 建页后补一轮 primary 文字色调优，否则重启后存量浅强调色下白字
