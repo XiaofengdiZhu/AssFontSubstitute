@@ -567,5 +567,11 @@ class FontDetailDialog(MessageBoxBase):
 
     def _open_nested(self, item: QListWidgetItem):
         e: FontEntity = item.data(Qt.ItemDataRole.UserRole)
-        FontDetailDialog(e, self._entities, self._worker, self._pvm,
-                         settings=self._settings, parent=self).exec()
+        # 嵌套详情与当前弹窗同源挂载（parent=弹窗时关闭动画层收尾会让页
+        # 面区闪一帧空窗，真机+开关二分实锤）。同 parent 让 MaskDialogBase
+        # 算出与弹窗相同的铺满矩形，天然对齐不错位；无父对象退回自身兜底。
+        dlg = FontDetailDialog(e, self._entities, self._worker, self._pvm,
+                               settings=self._settings,
+                               parent=self.parentWidget())
+        dlg.setGeometry(self.geometry())
+        dlg.exec()

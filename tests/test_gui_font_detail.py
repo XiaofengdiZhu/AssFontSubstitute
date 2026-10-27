@@ -192,7 +192,11 @@ def test_dialog_nested_double_click(qapp, monkeypatch):
     dlg._open_nested(dlg._sections[1].item(0))      # 家族节首条 = a2
     assert len(opened) == 1
     assert opened[0].titleLabel.text() == "合并体"
-    assert opened[0].parent() is dlg                # 嵌套：parent=self
+    # 嵌套与弹窗同源挂载（parentWidget=host）：parent=弹窗时关闭动画层
+    # 收尾页面区闪一帧空窗（真机+开关二分实锤）；同 parent 铺满矩形
+    # 天然对齐。setWindowFlags 清 Dialog 类型后 window() 不含弹窗自身
+    assert opened[0].parent() is host
+    assert opened[0].geometry() == dlg.geometry()   # 几何对齐弹窗防错位
 
 
 def test_dialog_sync_names_fill_and_fallback(qapp, monkeypatch):
