@@ -148,6 +148,56 @@ def test_primary_icon_follows_accent(qapp):
         b.deleteLater()
 
 
+def test_toggle_borrowed_checked_icon_reversed(qapp):
+    # 借道链回归：透明 toggle checked 走 PrimaryToolButton._drawIcon（patch
+    # 后=_draw_icon），回退分支须复刻原生反色——曾 drawIcon(state) 直传丢
+    # 反色（qfw drawIcon 的 state 只作用于裸 QIcon，FluentIconBase 走
+    # render 不看 state），深强调色底上黑图标（真机实锤）
+    from PySide6.QtCore import QRect
+    from qfluentwidgets import FluentIcon as FIF
+    from qfluentwidgets import TransparentToggleToolButton
+    from qfluentwidgets import setThemeColor
+
+    from ass_font_substitute.gui.widgets.primary_text import _native_primary_draw_icon
+    from ass_font_substitute.gui.widgets.primary_text import patch_primary_icon
+
+    patch_primary_icon()
+    assert _native_primary_draw_icon is not None   # 回退反色实现已就位
+    native = _native_primary_draw_icon
+    patch_primary_icon()                           # 幂等：_native 不被覆写成
+    assert _native_primary_draw_icon is native     # patched 版自身
+
+    def icon_stats(img):
+        darks = lights = 0
+        for y in range(icon_rect.top(), icon_rect.bottom()):
+            for x in range(icon_rect.left(), icon_rect.right()):
+                c = img.pixelColor(x, y)
+                m = min(c.red(), c.green(), c.blue())
+                darks += m < 100
+                lights += m > 180
+        return darks, lights
+
+    b = TransparentToggleToolButton(FIF.FILTER)
+    b.setChecked(True)
+    b.resize(36, 36)
+    icon_rect = QRect(8, 8, 20, 20)
+    try:
+        setThemeColor("#003f87", save=False)      # 深强调色：checked 反白图标
+        b.show()
+        qapp.processEvents()
+        _, lights = icon_stats(b.grab().toImage())
+        assert lights > 0                          # 白图标真实渲染（修复前黑）
+
+        setThemeColor("#f5c1cb", save=False)      # 浅强调色：图标换深色
+        b.repaint()
+        qapp.processEvents()
+        darks, _ = icon_stats(b.grab().toImage())
+        assert darks > 0
+    finally:
+        setThemeColor("#009faa", save=False)
+        b.deleteLater()
+
+
 def test_dialog_buttons_tuned_on_show(qapp, tmp_path):
     # 弹窗按钮懒创建：showEvent 钩子在显示前补调 tune。直接调钩子内的
     # _tune_dialog_buttons 验证（真 show 会进动画层，offscreen 无

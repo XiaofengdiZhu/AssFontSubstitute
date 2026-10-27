@@ -22,13 +22,14 @@ from qfluentwidgets import SmoothScrollDelegate
 from qfluentwidgets import StrongBodyLabel
 from qfluentwidgets import TransparentToggleToolButton
 from qfluentwidgets import isDarkTheme
-from qfluentwidgets import themeColor
 
 from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.gui.preview_vm import FamilyRow
 from ass_font_substitute.gui.preview_vm import weight_tag
 from ass_font_substitute.gui.widgets.pill import PillRow
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
+from ass_font_substitute.gui.widgets.primary_text import _LUMA_DARK_TEXT
+from ass_font_substitute.gui.widgets.primary_text import accent_luma
 
 ROW_H = 82                 # 行高初值：控制行 + 32px 预览条；物化首行后
 ROW_SPACING = 0            # 按内容实测校准（见 _calibrate_row_height）。
@@ -67,10 +68,10 @@ def _draw_italic_pixmap(color: QColor) -> QPixmap:
 
 
 def _on_ink() -> QColor:
-    """checked 底为强调色块：浅强调色上白 I 隐形，按亮度反相。"""
-    tc = themeColor()
-    luma = 0.299 * tc.red() + 0.587 * tc.green() + 0.114 * tc.blue()
-    return QColor(0, 0, 0) if luma > 150 else QColor(255, 255, 255)
+    """checked 底为强调色块：浅强调色上白 I 隐形，按亮度反相。
+    阈值统一走 primary_text（历史值 150 与 0.62 曾分叉）。"""
+    return (QColor(0, 0, 0) if accent_luma() >= _LUMA_DARK_TEXT
+            else QColor(255, 255, 255))
 
 
 _ITALIC_ICONS: dict[tuple[bool, int], QIcon] = {}   # (主题, On态墨色) → 图标

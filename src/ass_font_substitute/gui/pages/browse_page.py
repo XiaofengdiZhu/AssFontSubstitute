@@ -7,8 +7,10 @@ from PySide6.QtWidgets import QVBoxLayout
 from qfluentwidgets import BodyLabel
 from qfluentwidgets import CaptionLabel
 from qfluentwidgets import ComboBox
+from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import SearchLineEdit
+from qfluentwidgets import TransparentToggleToolButton
 from qfluentwidgets import setFont
 
 from ass_font_substitute.gui import script_filter
@@ -16,6 +18,7 @@ from ass_font_substitute.gui.jobs import ensure_library
 from ass_font_substitute.gui.jobs import lib_key
 from ass_font_substitute.gui.pages.subs_page import _fld
 from ass_font_substitute.gui.preview_vm import PreviewVM
+from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.widgets.font_detail import FontDetailDialog
 from ass_font_substitute.gui.widgets.font_list import FontListWidget
 from ass_font_substitute.gui.widgets.preview_input import PreviewInput
@@ -39,6 +42,7 @@ class BrowsePage(ScrollArea):
         # 页头：标题 + 预览文字输入（页级工具，宽度封顶；与下方筛选行
         # 分开——预览只改渲染不改清单，搜索/筛选才收窄列表）
         head = QHBoxLayout()
+        head.setSpacing(8)
         self.page_title = BodyLabel("字体库预览")
         setFont(self.page_title, 20)   # qfw setFont：20px Normal 字重不变
         head.addWidget(self.page_title)
@@ -47,6 +51,12 @@ class BrowsePage(ScrollArea):
         self.preview_edit = PreviewInput(settings)
         self.preview_edit.setFixedWidth(340)
         head.addWidget(self.preview_edit, 0, Qt.AlignVCenter)
+        # 框外右侧覆盖筛选开关：亮起（qfw toggle 亮起态自动强调色）=
+        # 只留 cmap 覆盖全部预览文字的字体；空文字无可筛字符=不筛
+        self.btn_cov = TransparentToggleToolButton(FIF.FILTER, self)
+        install_tip(self.btn_cov, "只显示包含全部预览文字的字体")
+        self.btn_cov.toggled.connect(self._on_cov_toggled)
+        head.addWidget(self.btn_cov, 0, Qt.AlignVCenter)
         v.addLayout(head)
 
         # 筛选行：搜索撑满剩余（封顶），下拉带标签（裸「全部」看不出维度），
@@ -147,7 +157,13 @@ class BrowsePage(ScrollArea):
 
     def _on_preview_text(self, _):
         # 预览文字变化：整页 tile 缓存键含文字，无需失效，行内异步重渲
+        if self.btn_cov.isChecked():
+            self.pvm.require_text = self.preview_edit.text()
         self._debounce.start()
+
+    def _on_cov_toggled(self, on: bool):
+        self.pvm.require_text = self.preview_edit.text() if on else None
+        self._reload_list()
 
     def reload_names(self):
         """界面语言变更：行展示名按语言链重挑（行模型即建即显，重建

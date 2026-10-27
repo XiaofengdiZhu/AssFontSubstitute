@@ -28,8 +28,11 @@ from qfluentwidgets.common.style_sheet import isDarkTheme
 from qfluentwidgets.common.style_sheet import setCustomStyleSheet
 from qfluentwidgets.common.style_sheet import themeColor
 
-# 强调色 luma（Rec.601）高于此值换深色文字；qfw 出厂青 #009faa luma≈0.44
-_LUMA_DARK_TEXT = 0.62
+# 强调色 luma（Rec.601）高于此值换深色文字/图标；qfw 出厂青 #009faa
+# luma≈0.44。与斜体钮 _on_ink 的 150/255≈0.588 对齐——阈值曾分叉
+# （0.62 vs 150），强调色 luma 落在两值之间时斜体钮已反相而 primary
+# 系白字/白图标仍隐形
+_LUMA_DARK_TEXT = 150 / 255
 
 
 def _qss(sel: str, text: str, pressed: str) -> str:
@@ -97,17 +100,28 @@ def accent_luma() -> float:
     return 0.299 * c.redF() + 0.587 * c.greenF() + 0.114 * c.blueF()
 
 
+# patch 前的原生 PrimaryToolButton._drawIcon：checked 反色（icon.icon(反
+# 色 Theme)）与禁用态分支都在这层——借道调用的 toggle 钮靠它兜底
+_native_primary_draw_icon = None
+
+
 def _draw_icon(self, icon, painter, rect, state=QIcon.Off):
     if not isinstance(icon, FluentIconBase) or accent_luma() < _LUMA_DARK_TEXT:
         # 优先类属性上补丁前的原实现：FluentIconBase 的 checked 反色等
         # qfw 原生语义全保留（self 是 primary 系时走绑定；ToggleToolButton
         # checked 时未绑定调用 PrimaryToolButton._drawIcon(self, ...)，
-        # self 不是 primary 系，类属性显式传入 self 仍正确）。补丁环境
-        # 外类上无原实现，退 qfw 原生 drawIcon（带 state，双态 QIcon 的
-        # On 态 pixmap 照常生效）
+        # self 不是 primary 系，类属性显式传入 self 仍正确）。
         orig = getattr(type(self), "_draw_icon_original", None)
         if orig is not None:
             return orig(self, icon, painter, rect, state)
+        # 借道调用（透明 toggle checked：type(self) 类上无 original）——
+        # 退回 patch 前的原生反色实现。不能直接 drawIcon(icon, ...,
+        # state)：qfw drawIcon 的 state 只作用于裸 QIcon，FluentIconBase
+        # 走 render() 根本不看 state，直传会丢反色画成正色（checked 深
+        # 色强调底上黑图标，真机实锤）
+        if _native_primary_draw_icon is not None:
+            return _native_primary_draw_icon(self, icon, painter, rect,
+                                             state)
         return drawIcon(icon, painter, rect, state)
     # 浅强调色：图标换深色（禁用态沿用 qfw 的降不透明度处理）
     if not self.isEnabled():
@@ -118,10 +132,13 @@ def _draw_icon(self, icon, painter, rect, state=QIcon.Off):
 def patch_primary_icon() -> None:
     """全局替换 PrimaryPushButton/PrimaryToolButton 的图标绘制。
     QApplication 创建后调用一次；幂等。"""
-    global _patched
+    global _patched, _native_primary_draw_icon
     if _patched:
         return
     _patched = True
     for cls in (PrimaryPushButton, PrimaryToolButton):
-        cls._draw_icon_original = cls._drawIcon
+        # 手改 _patched 重打时 original 若被覆写成 patched 版会无限递归
+        if not hasattr(cls, "_draw_icon_original"):
+            cls._draw_icon_original = cls._drawIcon
         cls._drawIcon = _draw_icon
+    _native_primary_draw_icon = PrimaryToolButton._draw_icon_original

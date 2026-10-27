@@ -46,6 +46,10 @@ class PreviewVM:
         self.category: str | None = None
         self.script: str | None = None
         self.weight: int | None = None
+        self.require_text: str | None = None
+        """非空非空白=face 须覆盖其全部字符才通过筛选（预览框尾端开关）；
+        空串/空白串一律视同不筛（空文字无可筛字符）；与 name_query 等
+        同属筛选状态，仅浏览页开关会置值"""
         self._tiles: OrderedDict = OrderedDict()
 
     def set_entities(self, entities) -> None:
@@ -75,9 +79,13 @@ class PreviewVM:
         行 = legacy display_name：二者口径不同，同 legacy 组各行行名可
         偶发不同名、不同 legacy 组可偶发撞出同名行（纯外观边角）。"""
         q = self.name_query.strip().casefold()
+        t = (self.require_text or "").strip()
+        req = {ord(c) for c in t} if t else None
 
         def ok(e: FontEntity) -> bool:
             if q and not any(q in a.casefold() for a in e.aliases):
+                return False
+            if req and not all(e.cmap.contains(cp) for cp in req):
                 return False
             if self.category and e.category != self.category:
                 return False

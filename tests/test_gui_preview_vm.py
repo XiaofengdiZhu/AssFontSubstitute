@@ -250,3 +250,62 @@ def test_script_filter_no_script_option_strikethrough_and_pick(qapp):
     vm2 = PreviewVM()
     vm2.set_entities([_ent("1", "A")])
     assert script_filter.options(vm2) == ["简"]   # 无未标注不出选项
+
+
+def test_require_text_filters_by_cmap_coverage():
+    # 覆盖筛选：face cmap 须含预览文字全部字符，缺任一即排除；
+    # 空文字无字符可筛=不筛（开关与空输入叠加的兜底）
+    def ent(fp, name, cps):
+        return FontEntity(fingerprint=fp, display_name=name,
+                          aliases=(name,), psname=fp, version=(1,),
+                          weight=400, width=5, italic=False, script="简",
+                          category="黑", cmap=CmapRanges.from_chars(cps),
+                          dir_path="d", rel_path="r.ttf", face_index=0)
+
+    vm = PreviewVM()
+    vm.set_entities([ent("1", "仅永", [0x6c38]),       # 永
+                     ent("2", "仅水", [0x6c34]),       # 水
+                     ent("3", "永水", [0x6c38, 0x6c34])])
+    vm.require_text = "永"
+    assert [r.display_name for r in vm.filtered()] == ["仅永", "永水"]
+    vm.require_text = "永水"
+    assert [r.display_name for r in vm.filtered()] == ["永水"]
+    vm.require_text = ""                      # 关开关后残留空串同理不筛
+    assert len(vm.filtered()) == 3
+    vm.require_text = "   "                   # 纯空白同空：页侧门控失效时 VM 兜底
+    assert len(vm.filtered()) == 3
+    vm.require_text = None
+    assert len(vm.filtered()) == 3
+
+
+def test_require_text_row_keeps_faces_selects_matching():
+    # 行全量保留（chips 仍可切看其他字重），selected/匹配子集从通过
+    # 筛选的 face 里挑
+    e1 = FontEntity(fingerprint="1", display_name="YaHei", aliases=("YaHei",),
+                    psname="1", version=(1,), weight=400, width=5,
+                    italic=False, script="简", category="黑",
+                    cmap=CmapRanges.from_chars([0x6c38]),
+                    dir_path="d", rel_path="r.ttf", face_index=0)
+    e2 = FontEntity(fingerprint="2", display_name="YaHei", aliases=("YaHei",),
+                    psname="2", version=(1,), weight=700, width=5,
+                    italic=False, script="简", category="黑",
+                    cmap=CmapRanges.from_chars([0x6c38, 0x6c34]),
+                    dir_path="d", rel_path="r2.ttf", face_index=0)
+    vm = PreviewVM()
+    vm.set_entities([e1, e2])
+    vm.require_text = "永水"
+    rows = vm.filtered()
+    assert len(rows) == 1
+    row = rows[0]
+    assert [f.fingerprint for f in row.faces] == ["1", "2"]
+    assert [f.fingerprint for f in row.matching] == ["2"]
+    assert row.selected.fingerprint == "2"
+
+
+def test_require_text_composes_with_name_query():
+    # 覆盖筛选与名称搜索是 AND：两条独立 ok() 项同时生效
+    vm = PreviewVM()
+    vm.set_entities([_ent("1", "YongA"), _ent("2", "YongB"), _ent("3", "WaterB")])
+    vm.name_query = "yong"
+    vm.require_text = "永"
+    assert [r.display_name for r in vm.filtered()] == ["YongA", "YongB"]
