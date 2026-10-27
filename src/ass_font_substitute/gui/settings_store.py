@@ -35,6 +35,7 @@ DEFAULTS: dict = {
     "sample_text": SAMPLE_TEXT,
     "cache_path": "",                              # 空 = paths.default_cache_path()
     "last_dirs": {},                               # 各对话框上次目录 {scope: 路径}
+    "preview_history": [],                         # 预览文字历史（新→旧，最多 10 条；预览页/字幕页共享）
     "language": "zh-Hans",                         # 界面语言（国际化待接入，暂存储值）
     "theme": "auto",                               # auto/light/dark
     "theme_color": "",                             # 强调色 #rrggbb；空=跟随系统
@@ -46,6 +47,8 @@ _BOOL_KEYS = {"overwrite_default"}
 _LIST_KEYS = {"font_dirs"}
 _INT_KEYS = {"n_pause", "max_threads"}
 _FLOAT_KEYS = {"cov_threshold", "min_sim", "size_min", "size_max"}
+# 预览文字历史上限（预览页/字幕页共享组件与载入裁剪共用）
+MAX_PREVIEW_HISTORY = 10
 # 枚举键：取值必须落在集合内，存量越界值按默认处理
 _ENUM_KEYS = {
     "language": {"zh-Hans", "zh-Hant"},
@@ -130,6 +133,9 @@ class Settings(QObject):
                         and all(isinstance(kk, str) and isinstance(vv, str)
                                 for kk, vv in v.items()):
                     self._data[k] = dict(v)        # 深一层不做路径校验，种子时兜底
+                elif k == "preview_history" and isinstance(v, list) \
+                        and all(isinstance(x, str) and x.strip() for x in v):
+                    self._data[k] = v[:MAX_PREVIEW_HISTORY]   # 新→旧，最多 10 条
                 elif k == "win_geometry" and _is_win_geometry(v):
                     self._data[k] = v
                 else:

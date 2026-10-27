@@ -38,6 +38,7 @@ from ass_font_substitute.gui.subs_vm import SubsVM
 from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.widgets.font_card import FontCard
 from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+from ass_font_substitute.gui.widgets.preview_input import PreviewInput
 from ass_font_substitute.gui.widgets.wheel_block import WheelBlock
 
 
@@ -118,10 +119,8 @@ class SubsPage(ScrollArea):
         self.seg_dir.addItem("s2t", "简 → 繁", lambda: self._set_direction("s2t"))
         self.seg_dir.setCurrentItem("t2s")
         pl.addWidget(_fld("孪生检测方向", self.seg_dir))
-        self.preview_edit = LineEdit()
-        self.preview_edit.setPlaceholderText("预览文字（留空显示字体名）")
-        self.preview_edit.setClearButtonEnabled(True)
-        self.preview_edit.setFixedWidth(260)
+        # 可键入 + 下拉最近 10 条历史（与字体库预览页共享，回车记一条）
+        self.preview_edit = PreviewInput(self.settings)
         pl.addWidget(self.preview_edit)
         v.addWidget(params)
 

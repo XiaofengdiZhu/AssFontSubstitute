@@ -15,6 +15,7 @@ from ass_font_substitute.gui.jobs import lib_key
 from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.widgets.font_detail import FontDetailDialog
 from ass_font_substitute.gui.widgets.font_list import FontListWidget
+from ass_font_substitute.gui.widgets.preview_input import PreviewInput
 
 
 class BrowsePage(ScrollArea):
@@ -26,9 +27,8 @@ class BrowsePage(ScrollArea):
 
         self.view = _inner_view(self)
         v = self.view.vbox
-        self.preview_edit = SearchLineEdit()
-        self.preview_edit.setPlaceholderText("预览文字（留空显示字体名）")
-        self.preview_edit.setMaxLength(60)   # 条带缓存按条数计，长文内存线性涨
+        # 可键入 + 下拉最近 10 条历史（与字幕编辑页共享，回车记一条）
+        self.preview_edit = PreviewInput(settings)
         v.addWidget(self.preview_edit)
 
         filters = QHBoxLayout()
