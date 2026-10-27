@@ -370,3 +370,97 @@ def test_on_library_changed_reclassifies_and_defers_in_batch(qapp, tmp_path, mon
     assert page._gen == gen1                    # 批次中不立即重算
     page._parse_arrived("q.ass")
     assert page._gen == gen1 + 1
+
+
+def test_option_row_retheme_tracks_accent_and_theme(qapp, tmp_path, monkeypatch):
+    # 选中行描边/底色烤着 themeColor() 派生值，须跟两路刷新：换强调色
+    # （themeColorChanged，且信号发出时 themeColor() 尚是旧值——实测慢
+    # 一拍，靠 singleShot(0) 重取）与亮暗主题切换（qfw 只发
+    # themeChanged/themeChangedFinished）
+    from PySide6.QtWidgets import QFrame
+    from qfluentwidgets import Theme
+    from qfluentwidgets import setTheme
+    from qfluentwidgets import setThemeColor
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, _card, norm = _feed_replace_card(page, ent_a, ent_b)
+    fc = page._cards_ui[norm]
+    rows = fc.findChildren(QFrame, "optRow")
+    assert len(rows) == 2
+
+    def seg_color(w):
+        # 行 sheet 里 sel 段的描边色
+        for line in w.styleSheet().splitlines():
+            if '[sel="true"]' in line and "solid" in line:
+                return line.split("solid ")[1].split(";")[0]
+        return None
+
+    for col in ("#f5c1cb", "#009faa", "#e09042"):
+        setThemeColor(col, save=False)
+        qapp.processEvents()                    # singleShot(0) 落地
+        assert all(seg_color(r) == col for r in rows), seg_color(rows[0])
+
+    setTheme(Theme.DARK, save=False)
+    qapp.processEvents()
+    dark_c = seg_color(rows[0])
+    assert dark_c is not None
+    setTheme(Theme.LIGHT, save=False)
+    qapp.processEvents()
+    assert seg_color(rows[0]) != dark_c         # 亮暗派生色不同且已互刷
+    setThemeColor("#009faa", save=False)
+    qapp.processEvents()
+
+
+def test_tofu_frame_dashes_survive_corners(qapp):
+    # 缺字框虚线沿圆角路径均匀（QSS dashed+radius 圆角段实线的缺陷已改
+    # 自绘 CustomDashLine）：白底宿主 grab 后沿顶边采样，虚段（透出白底）
+    # 必须存在
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.widgets.font_card import _TofuFrame
+
+    host = QWidget()
+    host.setAttribute(Qt.WA_StyledBackground, True)
+    host.setStyleSheet("background: white;")
+    box = _TofuFrame(host)
+    box.setGeometry(0, 0, 160, 40)
+    host.resize(160, 40)
+    host.show()
+    qapp.processEvents()
+    img = host.grab().toImage()
+    # 顶边扫描（笔画中心在 y≈0.5，AA 摊在 0/1 两行）：dash 段红调、
+    # gap 段白底，两类都要有
+    reds = gaps = 0
+    for x in range(12, 148):
+        c0 = img.pixelColor(x, 0)
+        c1 = img.pixelColor(x, 1)
+        if (c0.red() > c0.green() + 30 and c0.red() > c0.blue() + 30) or \
+           (c1.red() > c1.green() + 30 and c1.red() > c1.blue() + 30):
+            reds += 1
+        elif c0.red() > 200 and c0.green() > 200 and c0.blue() > 200 and \
+                c1.red() > 200 and c1.green() > 200 and c1.blue() > 200:
+            gaps += 1
+    assert reds > 8 and gaps > 8, (reds, gaps)
+    host.deleteLater()
+
+
+def test_file_row_checkbox_fixed_width(qapp, tmp_path, monkeypatch):
+    # qfw CheckBox QSS min-width:28px（空文本拖 ~36px 空白）——选项行经
+    # setCustomStyleSheet 覆写后定宽 24 生效且 polish 稳定
+    from qfluentwidgets import CheckBox
+
+    from ass_font_substitute.gui.subs_vm import Card
+    from ass_font_substitute.gui.subs_vm import OptionItem
+    from ass_font_substitute.gui.widgets.font_card import FontCard
+
+    c = Card(norm_name="a", raw_name="a", kind="replace",
+             options=[OptionItem(key="keep", display_name="a"),
+                      OptionItem(key="orig", display_name="o")],
+             checked_key="orig")
+    fc = FontCard(c, None, None, lambda: "")
+    fc.show()
+    qapp.processEvents()
+    boxes = fc.findChildren(CheckBox)
+    assert boxes and all(b.width() == 24 for b in boxes)

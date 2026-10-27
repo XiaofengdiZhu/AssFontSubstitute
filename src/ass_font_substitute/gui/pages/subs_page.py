@@ -23,6 +23,7 @@ from qfluentwidgets import PushButton
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import SegmentedWidget
 from qfluentwidgets import StrongBodyLabel
+from qfluentwidgets import setCustomStyleSheet
 from qfluentwidgets import setFont
 
 from ass_font_substitute.gui.jobs import apply_to_file
@@ -99,10 +100,10 @@ class SubsPage(ScrollArea):
         self.files_summary = CaptionLabel("0 / 0 个文件 · 0 种字体")
         fhead.addWidget(self.files_summary)
         fhead.addStretch(1)
-        self.btn_add = PushButton(FIF.ADD, "添加文件")
         self.btn_reload = PushButton(FIF.SYNC, "重新载入")
-        fhead.addWidget(self.btn_add)
+        self.btn_add = PrimaryPushButton(FIF.ADD, "添加文件")
         fhead.addWidget(self.btn_reload)
+        fhead.addWidget(self.btn_add)
         fl.addLayout(fhead)
         self.files_box = QVBoxLayout()
         self.files_box.setSpacing(6)
@@ -203,6 +204,13 @@ class SubsPage(ScrollArea):
             row = CardWidget()
             h = QHBoxLayout(row)
             cb = CheckBox()
+            # qfw QSS min-width:28px 把空文本框撑到 57px（indicator 右侧
+            # 拖 ~36px 空白），文件名离勾选框过远；且 polish 会把 QSS
+            # min-width 写回 minimumWidth（setFixedWidth 前置必被顶回）——
+            # 走 qfw setCustomStyleSheet 覆写 min-width 再定宽
+            setCustomStyleSheet(cb, "CheckBox{min-width:0px;}",
+                                "CheckBox{min-width:0px;}")
+            cb.setFixedWidth(24)
             cb.setChecked(f.checked)
             cb.toggled.connect(lambda on, p=f.path: self._on_file_checked(p, on))
             h.addWidget(cb)
@@ -214,8 +222,6 @@ class SubsPage(ScrollArea):
                 install_tip(row, f.error)
             else:
                 h.addWidget(CaptionLabel(f"{f.font_count} 种字体"))
-                if f.unknown_styles:
-                    h.addWidget(InfoBadge.warning("未知样式"))
             self.files_box.addWidget(row)
         self._update_files_summary()
 

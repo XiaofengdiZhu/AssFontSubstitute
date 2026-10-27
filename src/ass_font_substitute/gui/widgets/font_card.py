@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import shiboken6
+from PySide6.QtCore import QRectF
 from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor
+from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainterPath
+from PySide6.QtGui import QPen
 from PySide6.QtWidgets import QFrame
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QVBoxLayout
@@ -17,6 +23,9 @@ from qfluentwidgets import IndeterminateProgressRing
 from qfluentwidgets import InfoBadge
 from qfluentwidgets import StrongBodyLabel
 from qfluentwidgets import TransparentPushButton
+from qfluentwidgets import qconfig
+from qfluentwidgets import setCustomStyleSheet
+from qfluentwidgets import themeColor
 
 from ass_font_substitute.gui.subs_vm import KEEP
 from ass_font_substitute.gui.subs_vm import SIM_FLOOR
@@ -48,10 +57,41 @@ _ROW_QSS = """
 QFrame#optRow{ background: transparent; border: 1px solid rgba(128,128,128,0.35);
     border-radius: 6px; }
 QFrame#optRow:hover{ background: rgba(128,128,128,0.08); }
-QFrame#optRow[sel="true"]{ border: 1px solid #005fb8;
-    background: rgba(0,95,184,0.06); }
-QFrame#tofu{ border: 1px dashed rgba(198,43,28,0.55); border-radius: 6px; }
 """
+
+
+def _row_qss() -> str:
+    """行样式（含选中描边/底色跟强调色）：QSS 无法引用运行时主题色，
+    选中段动态拼。拼在 hover 之后——同特异性后者胜，选中行悬停无
+    hover 反馈（改动前语义一致）。行自身 sheet 与卡级 sheet 同名规则
+    内容一致，行自身距离更近必胜，卡级只铺 base/hover。"""
+    c = themeColor()
+    return _ROW_QSS + (
+        f'QFrame#optRow[sel="true"]{{ border: 1px solid {c.name()};\n'
+        f'    background: rgba({c.red()}, {c.green()}, {c.blue()}, 0.06); }}\n')
+
+
+class _TofuFrame(QFrame):
+    """缺字预览框：虚线边自绘。QSS dashed+border-radius 的圆角段 Qt 画成
+    实线（QSS 边框引擎按边分段 dash，弧长不够一个 dash 周期直接实线），
+    改 paintEvent 用 CustomDashLine 沿圆角路径 stroke——QPen dash 按弧长
+    均匀铺，圆角处照样虚。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("tofu")
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # 内缩 0.5px：1px pen 中心贴边界会被裁半，虚线显粗细不均
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+                            6, 6)
+        pen = QPen(QColor(198, 43, 28, 140), 1)
+        pen.setDashPattern([4, 3])
+        p.setPen(pen)
+        p.drawPath(path)
 
 
 def _pct(v: float | None) -> str:
@@ -76,6 +116,12 @@ class FontCard(CardWidget):
         self._worker, self._pvm = worker, pvm
         self._preview_text_fn = preview_text_fn
         self.setStyleSheet(_ROW_QSS)
+        # 选中行描边/底色烤着 themeColor() 派生值，两路刷新：换强调色走
+        # themeColorChanged；亮暗主题切换 qfw 只发 themeChanged（随后
+        # themeChangedFinished），themeColor() 按 isDarkTheme 派生结果
+        # 不同——都要重拼。receiver 是本卡，销毁时 Qt 自动断连
+        qconfig.themeColorChanged.connect(self._retheme)
+        qconfig.themeChangedFinished.connect(self._retheme)
         v = QVBoxLayout(self)
         v.setSpacing(8)
         v.addWidget(self._build_head())
@@ -120,8 +166,7 @@ class FontCard(CardWidget):
         return head
 
     def _build_missing_strip(self) -> QFrame:
-        box = QFrame(self)
-        box.setObjectName("tofu")
+        box = _TofuFrame(self)
         h = QHBoxLayout(box)
         h.setContentsMargins(10, 6, 10, 6)
         lab = CaptionLabel(
@@ -150,12 +195,19 @@ class FontCard(CardWidget):
         row = QFrame(self)
         row.setObjectName("optRow")
         row.setProperty("sel", o.key == self.card.checked_key)
-        row.setStyleSheet(_ROW_QSS)          # property 变化后需重 Applying
+        row.setStyleSheet(_row_qss())        # property 变化后需重 Applying
         g = QHBoxLayout(row)
         g.setContentsMargins(10, 7, 10, 7)
         g.setSpacing(10)
 
         cb = CheckBox()
+        # qfw QSS min-width:28px 把空文本框撑到 57px（indicator 右侧拖
+        # 空白，选项名离勾选框过远）；polish 会把 min-width 写回
+        # minimumWidth，setFixedWidth 前置必被顶回——走 qfw
+        # setCustomStyleSheet 覆写再定宽（同 subs_page 文件行）
+        setCustomStyleSheet(cb, "CheckBox{min-width:0px;}",
+                            "CheckBox{min-width:0px;}")
+        cb.setFixedWidth(24)
         cb.setChecked(o.key == self.card.checked_key)
         cb.setEnabled(o.key != self.card.checked_key)   # 至少勾一项：点已选项无效
         cb.toggled.connect(lambda on, k=o.key:
@@ -200,7 +252,7 @@ class FontCard(CardWidget):
     def _build_picker_row(self) -> QFrame:
         row = QFrame(self)
         row.setObjectName("optRow")
-        row.setStyleSheet(_ROW_QSS)
+        row.setStyleSheet(_row_qss())
         g = QHBoxLayout(row)
         g.setContentsMargins(10, 7, 10, 7)
         g.setSpacing(10)
@@ -288,6 +340,22 @@ class FontCard(CardWidget):
             cb.setEnabled(k != key)      # 已选项禁点，保证至少勾一项
             cb.blockSignals(False)
         self._resel_rows()
+
+    def _retheme(self):
+        """强调色变化：重设卡与行样式（选中描边/底色动态段随新色）。
+        qfw themeColorChanged 发出时 themeColor() 尚是旧值（实测慢一拍），
+        排到事件循环下一拍重取。"""
+        QTimer.singleShot(0, self._reapply_qss)
+
+    def _reapply_qss(self):
+        if not shiboken6.isValid(self):
+            return
+        # 卡级只铺 base/hover（选中段行自带，行自身规则距离更近必胜，
+        # 卡级铺选中段是冗余——P2-3）
+        self.setStyleSheet(_ROW_QSS)
+        # 行包在 _build_options 的 wrap 容器里，非卡直子——全深度查
+        for row in self.findChildren(QFrame, "optRow"):
+            row.setStyleSheet(_row_qss())
 
     def _resel_rows(self):
         """整卡重建之外的轻量重选：仅同步行描边（勾选切换不重建整卡）。"""
