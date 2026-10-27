@@ -52,7 +52,12 @@ def test_primary_text_adapts_to_accent_luma(qapp):
     try:
         setThemeColor("#009faa", save=False)      # 出厂青：luma≈0.44 白字合适
         tune(b)
-        assert _custom_qss(b) == ""               # 无覆盖
+        # 正常深度：亮主题亮变体无覆盖（qfw 出厂白字）；暗变体常备白字
+        # 规则（qfw dark qss 写死黑字，深饱和强调色提亮后仍不可读）
+        from qfluentwidgets.common.style_sheet import CustomStyleSheet
+        cs = CustomStyleSheet(b)
+        assert (cs.lightStyleSheet() or "") == ""
+        assert "color: white" in (cs.darkStyleSheet() or "")
         assert glyph_pixels(light_bg=False) > 0   # 白字在
 
         setThemeColor("#f2f2f2", save=False)      # 极浅强调色
@@ -63,7 +68,8 @@ def test_primary_text_adapts_to_accent_luma(qapp):
 
         setThemeColor("#009faa", save=False)      # 切回：覆盖必须撤销
         tune(b)
-        assert _custom_qss(b) == ""
+        cs = CustomStyleSheet(b)
+        assert (cs.lightStyleSheet() or "") == ""
         assert glyph_pixels(light_bg=False) > 0   # 白字回来
     finally:
         setThemeColor("#009faa", save=False)
@@ -221,3 +227,45 @@ def test_dialog_buttons_tuned_on_show(qapp, tmp_path):
         setThemeColor("#009faa", save=False)
         if host is not None:
             host.deleteLater()
+
+
+def test_dark_theme_deep_accent_white_text_and_icon(qapp):
+    # qfw 暗主题把 primary 文字/图标写死黑（赌主题色提亮到 v=1 够亮）：
+    # #2e1773 提亮成 #7e54ff luma 仍 0.455，黑字黑图标不可读——tune/patch
+    # 须在暗主题+深饱和强调色下换白。像素哨兵锁死
+    from qfluentwidgets import FluentIcon as FIF
+    from qfluentwidgets import PrimaryPushButton
+    from qfluentwidgets import PrimaryToolButton
+    from qfluentwidgets import Theme
+    from qfluentwidgets import setTheme
+    from qfluentwidgets import setThemeColor
+
+    from ass_font_substitute.gui.widgets.primary_text import patch_primary_icon
+    from ass_font_substitute.gui.widgets.primary_text import tune_all
+
+    patch_primary_icon()
+    setTheme(Theme.DARK, save=False)
+    setThemeColor("#2e1773", save=False)
+    qapp.processEvents()
+
+    def lights(w):
+        w.show()
+        qapp.processEvents()
+        img = w.grab().toImage()
+        return sum(1 for y in range(w.height()) for x in range(w.width())
+                   if min(img.pixelColor(x, y).red(),
+                          img.pixelColor(x, y).green(),
+                          img.pixelColor(x, y).blue()) > 200)
+
+    try:
+        b = PrimaryPushButton(FIF.ADD, "A")
+        b.resize(100, 34)
+        t = PrimaryToolButton(FIF.FOLDER_ADD)
+        t.resize(40, 34)
+        tune_all()
+        qapp.processEvents()
+        assert lights(b) > 10                     # 白字真实渲染
+        assert lights(t) > 10                     # 白图标真实渲染
+    finally:
+        setTheme(Theme.LIGHT, save=False)
+        setThemeColor("#009faa", save=False)

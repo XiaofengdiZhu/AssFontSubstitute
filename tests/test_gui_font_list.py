@@ -634,3 +634,52 @@ def test_pill_fixed_policy_and_pill_row(qapp):
     row.set_items(["W400", "黑"])          # 重建：旧药丸清空
     assert row.texts() == ["W400", "黑"]
     row.deleteLater()
+
+
+def test_italic_icon_ink_refreshes_on_accent_change(qapp):
+    # 斜体钮图标是冻结 pixmap（裸 QIcon 双态预置，_ITALIC_ICONS 缓存）：
+    # live 切强调色后 QSS 系控件自动跟色，已物化行的钮却攥旧墨色——
+    # 浅强调色下旧白 I 在强调色块上隐形。accent/theme 变化必须清缓存
+    # 并给活钮换新图标（出厂青 On 态白 I → 浅粉 On 态黑 I）
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QIcon
+    from qfluentwidgets import setThemeColor
+
+    from ass_font_substitute.gui.preview_vm import FamilyRow
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    def ink_count(img, dark):
+        n = 0
+        for y in range(img.height()):
+            for x in range(img.width()):
+                c = img.pixelColor(x, y)
+                if c.alpha() < 100:
+                    continue
+                if (dark and c.value() < 100) or (not dark and c.value() > 200):      # On 态墨=黑
+                    n += 1
+        return n
+
+    flw = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永")
+    flw.resize(400, 600)
+    flw.show()
+    try:
+        setThemeColor("#009faa", save=False)      # 出厂青 luma 0.44：白 I
+        faces = [_ent("400", "A"), _ent("400i", "A", italic=True)]
+        flw.set_rows([FamilyRow("A", faces, faces[0])])
+        qapp.processEvents()
+        btn = flw.itemWidget(flw.item(0))._it_btn
+        btn.setChecked(True)
+        qapp.processEvents()
+        img = btn.icon().pixmap(QSize(32, 32), QIcon.Mode.Normal,
+                                QIcon.State.On).toImage()
+        assert ink_count(img, dark=False) > 5, "出厂青 On 态应为白 I"
+
+        setThemeColor("#f5a6ff", save=False)      # 浅粉 luma 0.78：翻黑
+        qapp.processEvents()                      # singleShot(0) 刷新落地
+        img = btn.icon().pixmap(QSize(32, 32), QIcon.Mode.Normal,
+                                QIcon.State.On).toImage()
+        assert ink_count(img, dark=True) > 5, "浅粉 On 态应为黑 I"
+    finally:
+        setThemeColor("#009faa", save=False)
+        qapp.processEvents()

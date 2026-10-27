@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import weakref
+
 from PySide6.QtCore import QPropertyAnimation
 from PySide6.QtCore import QRect
 from PySide6.QtCore import QSize
@@ -22,6 +24,7 @@ from qfluentwidgets import SmoothScrollDelegate
 from qfluentwidgets import StrongBodyLabel
 from qfluentwidgets import TransparentToggleToolButton
 from qfluentwidgets import isDarkTheme
+from qfluentwidgets import qconfig
 
 from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.gui.preview_vm import FamilyRow
@@ -75,6 +78,29 @@ def _on_ink() -> QColor:
 
 
 _ITALIC_ICONS: dict[tuple[bool, int], QIcon] = {}   # (主题, On态墨色) → 图标
+_ITALIC_BTNS: weakref.WeakSet[TransparentToggleToolButton] = weakref.WeakSet()
+_ITALIC_HOOKED = False
+
+
+def _refresh_italic_icons():
+    # 缓存 pixmap 是冻结位图：强调色/主题 live 切换后 QSS 系控件自动跟
+    # 色，已物化行的斜体钮却攥着旧墨色 pixmap（浅强调色下白 I 隐形）。
+    # 清缓存后给活钮换新图标；死钮 WeakSet 自动剔除。
+    _ITALIC_ICONS.clear()
+    for btn in list(_ITALIC_BTNS):
+        btn.setIcon(_italic_icon())
+
+
+def _hook_italic_retheme():
+    global _ITALIC_HOOKED
+    if _ITALIC_HOOKED:
+        return
+    _ITALIC_HOOKED = True
+    # singleShot(0) 顺延到 setThemeColor 的 updateStyleSheet 之后落地
+    # （纯时序卫生，themeColor() 在信号发出时已是新值）；亮暗切换
+    # qfw 只发 themeChangedFinished
+    for sig in (qconfig.themeColorChanged, qconfig.themeChangedFinished):
+        sig.connect(lambda: QTimer.singleShot(0, _refresh_italic_icons))
 
 
 def _italic_icon() -> QIcon:
@@ -83,6 +109,7 @@ def _italic_icon() -> QIcon:
     unchecked = 透明底主题墨色；checked 底为强调色块（浅强调色需深 I）。
     ToggleToolButton checked 走 PrimaryToolButton._drawIcon 只对
     FluentIconBase 反色，裸 QIcon 不会，必须预置 On 态 pixmap。"""
+    _hook_italic_retheme()
     dark = isDarkTheme()
     on_ink = _on_ink()
     key = (dark, on_ink.rgb())
@@ -360,6 +387,7 @@ class _RowWidget(QWidget):
                 lambda _c: self._pick_italic(self._it_btn.isChecked()))
             top.addWidget(btn)
             self._it_btn = btn
+            _ITALIC_BTNS.add(btn)
 
     def _pick_weight(self, weight: int):
         cur = self._row.selected
