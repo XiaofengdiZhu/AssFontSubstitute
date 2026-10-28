@@ -324,8 +324,9 @@ def test_attach_pick_dedupes_and_checks(lib_env):
     vm, lib, _ctx = lib_env
     card = _card_for(vm, lib, "TGT圆")
     e = next(e for e in lib.entities() if e.display_name == "NEAR圆")
-    o = vm.attach_pick(card, e)
+    o = vm.attach_pick(card, e, similarity=0.92, size_ratio=1.03)
     assert card.checked_key == e.fingerprint and o.source == "pick"
+    assert o.similarity == 0.92 and o.size_ratio == 1.03   # 评分回填
     vm.attach_pick(card, e)
     assert len([x for x in card.options if x.key == e.fingerprint]) == 1
 

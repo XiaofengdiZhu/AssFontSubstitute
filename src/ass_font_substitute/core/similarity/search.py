@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from ass_font_substitute.core.similarity.render import render_bundle
 
 MIN_SIM = 0.85              # 最低相似率（默认设置，GUI 可调）
 SIZE_RANGE = (0.90, 1.10)   # 相对大小区间（默认设置，GUI 可调）
+EVAL_SLICE = 24             # next_slice 单片对比数上限（缓存命中时对比极快，
+SLICE_SECONDS = 0.5         # 另按时长切：两上限先到为准，回执节奏 ≤0.5s
 # 内置 v1：简繁同形字（spec §9 词表）+ 数字字母标点
 SAMPLE_TEXT = ("永 中 木 水 火 山 田 石 目 心 手 白 的 我 你 他 它 好 行 生 "
                "同 尖 思 明 上 下 左 右 外 大 小 不 了 在 是 有 和 也 8 A a 0 ?")
@@ -76,11 +79,15 @@ class FontSearcher:
         self.exhausted = False
         self.hit_count = 0
         self.target_error = False
+        self.pool_size = 0            # 对比池总数（GUI 进度分母）
+        self.compared = 0             # 已对比字体数（GUI 进度分子）
         self._tver = text_version(sample_text)
         self._tcache: dict[str, object] = {}
         pool = [e for e in lib.entities()
                 if target is None or e.fingerprint != target.fingerprint]
-        self._iter: Iterator[FontEntity] = iter(rank_pool(target, pool, direction))
+        ranked = rank_pool(target, pool, direction)
+        self.pool_size = len(ranked)
+        self._iter: Iterator[FontEntity] = iter(ranked)
         self._tgt = None
         self._tgt_resolved = False
 
@@ -102,6 +109,13 @@ class FontSearcher:
             self.target_error = True
         return self._tgt
 
+    def resume(self) -> None:
+        """续搜：清暂停**并重置 hit 计数**。暂停语义是「每批 n_pause 个
+        命中」——只清 paused 的话残留计数 ≥ n_pause，续搜首个命中立刻
+        再停，表现为每点一次「继续寻找」只多 1 个候选。"""
+        self.paused = False
+        self.hit_count = 0
+
     def next(self) -> Candidate | None:
         """推进到下一个「过全部门槛」的候选；None = 已暂停或耗尽（看 exhausted）。"""
         if self.paused:
@@ -111,9 +125,34 @@ class FontSearcher:
             if e is None:
                 self.exhausted = True
                 return None
+            self.compared += 1
             cand = self._evaluate(e)
             if cand is not None:
                 return cand
+
+    def next_slice(self, max_evals: int = EVAL_SLICE,
+                   max_seconds: float = SLICE_SECONDS) -> list[Candidate]:
+        """推进至多 max_evals 次对比或 max_seconds 秒（两上限先到为准），
+        返回期间全部命中；暂停/耗尽即停。GUI 分片拉取用：单次 next() 会
+        一路吞到命中为止（稀疏命中时一次吞掉整池），按时长分片才能让进度
+        计数（compared/pool_size）稳定跳动、暂停近即时生效——按对比数分片
+        在缓存命中时一片瞬间扫完，回执照样成洪。"""
+        out: list[Candidate] = []
+        deadline = time.perf_counter() + max_seconds
+        evals = 0
+        while evals < max_evals and not self.paused:
+            if time.perf_counter() >= deadline:
+                break
+            e = next(self._iter, None)
+            if e is None:
+                self.exhausted = True
+                break
+            self.compared += 1
+            evals += 1
+            cand = self._evaluate(e)
+            if cand is not None:
+                out.append(cand)
+        return out
 
     def _evaluate(self, e: FontEntity) -> Candidate | None:
         # 门槛按成本升序（实测：pair 缓存读取 ~5µs、coverage ~15µs、渲染+评分 ~57ms）：

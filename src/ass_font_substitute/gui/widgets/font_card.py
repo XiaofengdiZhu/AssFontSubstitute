@@ -21,7 +21,6 @@ from qfluentwidgets import CheckBox
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import FluentStyleSheet
 from qfluentwidgets import IconWidget
-from qfluentwidgets import IndeterminateProgressRing
 from qfluentwidgets import InfoBadge
 from qfluentwidgets import StrongBodyLabel
 from qfluentwidgets import TransparentPushButton
@@ -131,8 +130,9 @@ def _pct(v: float | None) -> str:
 class FontCard(CardWidget):
     """单张字体卡（线框重排）：状态图标+名称+用量+右侧状态徽章；缺字虚线框；
     选项逐行成带边框行（勾选框|名称+标签+指标|预览条），选中行主题色描边；
-    库中没有卡的「从字体库选择」为行式入口；底部随搜索状态变化。
-    纯展示：勾选与搜索动作经信号上抛页面，由页面驱动 vm（不触碰 vm）。"""
+    底部单一动作列不随状态搬动——搜索钮自身变身承载全部搜索态（见
+    _cont_btn）。纯展示：勾选与搜索动作经信号上抛页面，由页面驱动 vm
+    （不触碰 vm）。"""
 
     option_checked = Signal(str, str)      # (norm_name, key)
     continue_clicked = Signal(str)
@@ -220,8 +220,6 @@ class FontCard(CardWidget):
         self._boxes: dict[str, CheckBox] = {}
         for o in self.card.options:
             ol.addWidget(self._build_option_row(o))
-        if self.card.kind == "missing":
-            ol.addWidget(self._build_picker_row())
         return wrap
 
     def _build_option_row(self, o) -> QFrame:
@@ -287,29 +285,6 @@ class FontCard(CardWidget):
         row.mousePressEvent = _row_press
         return row
 
-    def _build_picker_row(self) -> QFrame:
-        row = QFrame(self)
-        row.setObjectName("optRow")
-        row.setStyleSheet(_row_qss())
-        g = QHBoxLayout(row)
-        g.setContentsMargins(10, 7, 10, 7)
-        g.setSpacing(10)
-        text = QVBoxLayout()
-        text.setSpacing(2)
-        text.addWidget(BodyLabel("从字体库选择"))
-        text.addWidget(CaptionLabel("点击从字体库挑选任意字体"))
-        g.addLayout(text, 1)
-        chev = IconWidget(FIF.CHEVRON_RIGHT.colored(QColor("#8a8a8a"),
-                                                    QColor("#9a9a9a")))
-        g.addWidget(chev, 0, Qt.AlignVCenter)
-        def _pick_press(e):
-            if e.button() == Qt.MouseButton.LeftButton:
-                self.pick_clicked.emit(self.card.norm_name)
-
-        row.mousePressEvent = _pick_press
-        row.setCursor(Qt.PointingHandCursor)
-        return row
-
     def _metrics_text(self, o) -> str:
         if o.key == KEEP:
             return ("播放时由播放器自行回退处理" if self.card.kind == "missing"
@@ -324,45 +299,85 @@ class FontCard(CardWidget):
             f"覆盖 {_pct(o.coverage)}" if o.coverage is not None else None,
             f"相对大小 {_pct(o.size_ratio)}" if o.size_ratio is not None else None,
         ) if p]
+        text = " · ".join(parts) if parts else "已选"
+        # 覆盖不足的候选/手选行同原字体行补未覆盖字数；孪生注脚垫尾
+        if o.coverage is not None:
+            n_missing = round(self.card.n_chars * (1 - o.coverage))
+            if n_missing > 0:
+                text += f" · 未覆盖 {n_missing} 字"
         if "孪生对应" in o.badges:
-            parts.append("与原字体同款设计")
-        return " · ".join(parts) if parts else "已选"
+            text += " · 与原字体同款设计"
+        return text
 
     # ---- 底部随状态 ----
-    def _build_foot(self) -> QHBoxLayout | None:
+    def _pick_btn(self) -> TransparentPushButton:
+        btn = TransparentPushButton(FIF.SEARCH_MIRROR, "从字体库手动选择")
+        # 搜索中禁用：评分任务会排在搜索片后迟迟不回，选择结果也易被
+        # 回填的候选行冲掉
+        btn.setEnabled(not self.card.searching)
+        btn.clicked.connect(
+            lambda: self.pick_clicked.emit(self.card.norm_name))
+        return btn
+
+    def _cont_btn(self) -> TransparentPushButton:
+        """搜索钮一钮三态（用户拍板 2026-10-28）：搜索中变「寻找中…
+        已对比/总数」+Pause 图标（再点=暂停，删独立的环+文字行）；攒够
+        暂停即还原；整池搜完变禁用「无更多符合要求的相似字体」+Info。
+        位置恒由 foot 的动作列钉住，不随状态搬动。target_error 同禁用，
+        文案说明缘由（替代原独立标签行）。"""
         card = self.card
+        btn = TransparentPushButton()
+        if card.searching:
+            s = card.searcher
+            text = (f"寻找中… {s.compared}/{s.pool_size}"
+                    if s is not None and s.pool_size else "寻找中…")
+            btn.setIcon(FIF.PAUSE.icon())
+            btn.setText(text)
+        elif card.search_state == "exhausted":
+            btn.setIcon(FIF.INFO.icon())
+            btn.setText("无更多符合要求的相似字体")
+            btn.setEnabled(False)
+        elif card.search_state == "target_error":
+            btn.setIcon(FIF.INFO.icon())
+            btn.setText("原字体无法渲染，无法比较相似度")
+            btn.setEnabled(False)
+        else:
+            btn.setIcon(FIF.MORE.icon())
+            btn.setText("继续寻找更多")
+        btn.clicked.connect(
+            lambda: self.continue_clicked.emit(self.card.norm_name))
+        return btn
+
+    def _action_col(self, *btns) -> QVBoxLayout:
+        """foot 动作钮竖排：内容默认居中，长短不一的钮左缘参差——qfw 图标
+        x=12+(width−minimumSizeHint)//2、文本走 text-align。各钮钉自身
+        hint 宽（width==hint → 图标 x=12）+ 左对齐文本，左缘即齐。"""
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(2)
+        for b in btns:
+            b.setFixedWidth(b.minimumSizeHint().width())
+            setCustomStyleSheet(b, "TransparentPushButton{text-align:left;}",
+                                "TransparentPushButton{text-align:left;}")
+            col.addWidget(b)
+        return col
+
+    def _build_foot(self) -> QHBoxLayout | None:
+        """foot 恒为单一动作列：搜索态全部由搜索钮自身表达（_cont_btn），
+        按钮位置各态一致。"""
         ekind = self._ekind()
+        if ekind == "zero":
+            return None            # 无对白用字：无需任何动作
+        if ekind == "missing":
+            # 库中没有：无相似度可搜（target=None），只有手动挑选入口
+            btns = (self._pick_btn(),)
+        elif self.card.n_chars > 0:
+            btns = (self._cont_btn(), self._pick_btn())
+        else:
+            return None            # 0 字卡无可比字型：不给搜索入口
         foot = QHBoxLayout()
         foot.setSpacing(6)
-        if card.searching:
-            ring = IndeterminateProgressRing()
-            ring.setFixedSize(18, 18)
-            ring.setStrokeWidth(3)      # 出厂 6 在 18px 里显粗，减半
-            foot.addWidget(ring)
-            foot.addWidget(CaptionLabel("正在寻找相似字体…"))
-        elif card.search_state == "paused":
-            n = sum(1 for o in card.options if o.source == "search")
-            foot.addWidget(CaptionLabel(f"已找到 {n} 个相似字体，暂停搜索。"))
-            more = TransparentPushButton(FIF.SEARCH, "继续寻找更多")
-            more.clicked.connect(
-                lambda: self.continue_clicked.emit(self.card.norm_name))
-            foot.addWidget(more)
-        elif card.search_state == "exhausted" and ekind not in ("zero",
-                                                               "missing"):
-            # 文本缩进与搜索中行对齐：环 18 + 间距 6（css margin-left 等价物
-            # 是布局占位）
-            foot.addSpacing(18 + 6)
-            foot.addWidget(CaptionLabel("无更多符合要求的相似字体"))
-        elif card.search_state == "target_error":
-            foot.addWidget(CaptionLabel("原字体无法渲染，无法比较相似度"))
-        elif (ekind in ("replace", "twin", "keep") and card.n_chars > 0):
-            # 0 字卡无可比字型：不给搜索入口（空池/全池放行都无意义）
-            cont = TransparentPushButton(FIF.SEARCH, "继续寻找更多")
-            cont.clicked.connect(
-                lambda: self.continue_clicked.emit(self.card.norm_name))
-            foot.addWidget(cont)
-        else:
-            return None
+        foot.addLayout(self._action_col(*btns))
         foot.addStretch(1)
         return foot
 

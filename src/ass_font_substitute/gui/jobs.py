@@ -16,8 +16,6 @@ from ass_font_substitute.core.models import FontUsage
 from ass_font_substitute.core.similarity.render import render_text_strip
 from ass_font_substitute.core.similarity.search import FontSearcher
 
-SEARCH_CHUNK = 8          # pull_chunk 每批候选数（UI 渐进填充节奏）
-
 
 @dataclass
 class DirStatus:
@@ -195,25 +193,53 @@ def make_searcher(ctx, target, chars, threshold: float, n_pause: int,
         size_range=size_range, direction=direction)
 
 
-def pull_chunk(searcher: FontSearcher, cancel: dict | None = None,
-               chunk: int = SEARCH_CHUNK):
-    """推进搜索器至 批满/暂停/耗尽/目标渲染失败/取消。
-    返回 (candidates, state)；state ∈ running/paused/exhausted/
-    target_error/cancelled。命中语义（暂停累计 hit_count、target_error
-    懒解析一次）全部由 searcher 承担，此层不解读。"""
-    cands = []
-    state = "running"
-    while len(cands) < chunk:
-        if cancel is not None and cancel.get("cancelled"):
-            state = "cancelled"
-            break
-        c = searcher.next()
-        if c is None:
-            state = ("target_error" if searcher.target_error
-                     else "paused" if searcher.paused else "exhausted")
-            break
-        cands.append(c)
-    return cands, state
+def pull_chunk(searcher: FontSearcher, cancel: dict | None = None):
+    """推进**一片**（至多 EVAL_SLICE 次对比 / SLICE_SECONDS 秒，先到为
+    准）即回执：state ∈ running/paused/exhausted/target_error/cancelled。
+    切忌在此攒批（凑满 N 个命中才回）——稀疏命中时一个任务吞掉整池，
+    UI 进度计数冻结整个任务期，手动暂停也得等任务尾才生效，且攒下的
+    命中在暂停瞬间一次性上屏。命中语义（暂停累计 hit_count、
+    target_error 懒解析一次）全部由 searcher 承担，此层不解读。"""
+    if cancel is not None and cancel.get("cancelled"):
+        return [], "cancelled"
+    cands = searcher.next_slice()
+    if searcher.target_error or searcher.paused or searcher.exhausted:
+        return cands, ("target_error" if searcher.target_error
+                       else "paused" if searcher.paused else "exhausted")
+    return cands, "running"
+
+
+def score_pick(ctx, target, entity):
+    """手动选择字体评分：相似率+相对大小（vs target，走 pair 缓存同
+    搜索器口径；compare 与方向无关）。target=None（库中没有卡）或渲染
+    失败/交集空 → None。覆盖率由 UI 侧现算。返回 (entity, sim, size)。"""
+    from ass_font_substitute.core.similarity.metrics import compare
+    from ass_font_substitute.core.similarity.render import render_bundle
+    from ass_font_substitute.core.similarity.search import text_version
+
+    if target is None:
+        return entity, None, None
+    cache = ctx.cache
+    sample = ctx.settings.get("sample_text")
+    ver = text_version(sample)
+
+    def bundle(e):
+        return cache.get_render(e.fingerprint, ver, lambda: render_bundle(
+            Path(e.dir_path) / e.rel_path, e.face_index, sample))
+
+    try:
+        tb = bundle(target)
+        r = cache.get_pair(target.fingerprint, entity.fingerprint, ver)
+        if r is None:
+            r = compare(tb, bundle(entity))
+            if r is not None:
+                cache.put_pair(target.fingerprint, entity.fingerprint,
+                               ver, r)
+    except Exception:
+        return entity, None, None
+    if r is None:
+        return entity, None, None
+    return entity, r.score, r.size_ratio
 
 
 def render_preview(entity, text: str):

@@ -102,6 +102,20 @@ def test_parse_subtitle(tmp_path, sub_file):
     assert bad.error is not None and bad.font_count == 0
 
 
+def test_score_pick_smoke(ctx_stub, font_dir):
+    from ass_font_substitute.gui.jobs import ensure_library
+    from ass_font_substitute.gui.jobs import score_pick
+    update_dir(str(font_dir))       # 建索引归「更新全部索引」流程，此处显式建
+    snap = ensure_library(ctx_stub, [str(font_dir)])
+    ents = snap.lib.entities()
+    e0, e1 = ents[0], ents[-1]
+    assert score_pick(ctx_stub, None, e0) == (e0, None, None)   # 库中没有卡
+    r1 = score_pick(ctx_stub, e0, e1)                           # 评分入 pair 缓存
+    assert r1[0] is e1
+    if r1[1] is not None:                                       # 缓存复算一致
+        assert score_pick(ctx_stub, e0, e1)[1:] == r1[1:]
+
+
 def test_pull_chunk_states(ctx_stub, font_dir):
     from ass_font_substitute.gui.jobs import make_searcher
     update_dir(str(font_dir))       # 建索引归「更新全部索引」流程，此处显式建
@@ -113,6 +127,7 @@ def test_pull_chunk_states(ctx_stub, font_dir):
                       size_range=(0.90, 1.10), direction="t2s")
     cands, state = pull_chunk(s)
     assert cands == [] and state == "exhausted"    # 单字体库无其他候选
+    assert pull_chunk(s, {"cancelled": True}) == ([], "cancelled")
 
 
 def test_render_preview_skips_missing(font_dir):

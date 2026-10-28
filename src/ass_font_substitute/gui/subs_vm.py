@@ -301,14 +301,17 @@ class SubsVM:
             card.options = head + rest
         return added
 
-    def finish_search(self, card: Card, searcher: FontSearcher) -> None:
-        """终态：target_error（原字体无法渲染）> paused（可继续）>
-        exhausted（无更多相似字体）。"""
+    def finish_search(self, card: Card, searcher: FontSearcher,
+                      cancelled: bool = False) -> None:
+        """终态：cancelled=搜索中手动暂停（searcher 未自然暂停，归 paused
+        态——续搜复用同一 searcher，累计 hit_count/compared 语义不丢）>
+        target_error（原字体无法渲染）> paused（可继续）> exhausted（无
+        更多相似字体）。"""
         card.searching = False
-        if searcher.target_error:
-            card.search_state = "target_error"
-        elif searcher.paused:
+        if cancelled or searcher.paused:
             card.search_state = "paused"
+        elif searcher.target_error:
+            card.search_state = "target_error"
         else:
             card.search_state = "exhausted"
 
@@ -339,15 +342,18 @@ class SubsVM:
             return orig
         return max(ents, key=lambda e: e.cmap.hit_ratio(chars)) if chars else ents[0]
 
-    def attach_pick(self, card: Card, entity: FontEntity) -> OptionItem:
+    def attach_pick(self, card: Card, entity: FontEntity,
+                    similarity: float | None = None,
+                    size_ratio: float | None = None) -> OptionItem:
         """选择对话框回填：去重后勾选该实体（并入综合分行序，同
-        add_candidates）。"""
+        add_candidates）。相似率/相对大小由 worker 评分任务回填。"""
         chars = self.chars_by_norm.get(card.norm_name, set())
         cov, _ = coverage_detail(entity.cmap, chars)
         o = card.option(entity.fingerprint)
         if o is None:
             o = OptionItem(entity.fingerprint, self._dname(entity),
-                           coverage=cov,
+                           coverage=cov, similarity=similarity,
+                           size_ratio=size_ratio,
                            meta=self._meta(entity), source="pick", entity=entity)
             card.options.append(o)
             head = [x for x in card.options if x.source == "original"]

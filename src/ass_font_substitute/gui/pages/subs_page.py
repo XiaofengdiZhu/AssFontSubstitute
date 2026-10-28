@@ -33,6 +33,7 @@ from ass_font_substitute.gui.jobs import ensure_library
 from ass_font_substitute.gui.jobs import make_searcher
 from ass_font_substitute.gui.jobs import parse_subtitle
 from ass_font_substitute.gui.jobs import pull_chunk
+from ass_font_substitute.gui.jobs import score_pick
 from ass_font_substitute.gui.lastdir import pick_open_files
 from ass_font_substitute.gui.paths import decisions_path
 from ass_font_substitute.gui.preview_vm import PreviewVM
@@ -172,6 +173,13 @@ class SubsPage(ScrollArea):
         self._preview_debounce.setSingleShot(True)
         self._preview_debounce.setInterval(300)
         self._preview_debounce.timeout.connect(self._refresh_all_cards)
+        # 渐进回执刷新节流：回执只记账，突发合并成一次整卡重建（见
+        # _schedule_refresh）
+        self._refresh_pending: set[str] = set()
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(300)
+        self._refresh_timer.timeout.connect(self._flush_refresh)
         self._rebuild_file_rows()   # 启动空态也建卡：添加文件钮在卡标题栏
         self._reclassify()
 
@@ -326,9 +334,8 @@ class SubsPage(ScrollArea):
             self._append_card(card, idx)
         elif tag == "slib":
             self.vm.set_entities(payload.lib.entities())
-        elif isinstance(tag, str) and (tag.startswith("searcher:")
-                                       or tag.startswith("newsearcher:")):
-            # worker 回发提交时的原 tag：建新搜索器是 newsearcher:，续搜无回执
+        elif isinstance(tag, str) and tag.startswith("newsearcher:"):
+            # worker 回发提交时的原 tag：建新搜索器回执，挂接后立即拉第一批
             norm = tag.split(":", 1)[1]
             card = self._card(norm)
             if card is not None:
@@ -345,13 +352,24 @@ class SubsPage(ScrollArea):
             cands, state = payload
             self.vm.add_candidates(card, cands)
             if state == "running":
-                self._refresh_card(card)               # 渐进填充
+                self._schedule_refresh(card)           # 记账即回，重建走节流
                 self.worker.submit(f"pull:{norm}", _pull_job, card.searcher,
                                    self._cancel_for(norm))
             else:
-                self.vm.finish_search(card, card.searcher)
+                self._refresh_pending.discard(norm)
+                self.vm.finish_search(card, card.searcher,
+                                      cancelled=(state == "cancelled"))
                 self._refresh_card(card)
                 self._update_summary()
+        elif isinstance(tag, str) and tag.startswith("pickscore:"):
+            norm = tag.split(":", 1)[1]
+            card = self._card(norm)
+            if card is None:               # 评分期间整页重算：弃置
+                return
+            entity, sim, size = payload
+            self.vm.attach_pick(card, entity, sim, size)
+            self._refresh_card(card)
+            self._update_summary()
         elif tag == "apply":
             self._on_apply_done(payload)
 
@@ -364,9 +382,11 @@ class SubsPage(ScrollArea):
         # 搜索链任务失败：解卡片的 searching 状态，避免转圈挂死
         if isinstance(tag, str) and (tag.startswith("newsearcher:")
                                      or tag.startswith("pull:")):
-            card = self._card(tag.split(":", 1)[1])
+            norm = tag.split(":", 1)[1]
+            card = self._card(norm)
             if card is not None and card.searching:
                 card.searching = False
+                self._refresh_pending.discard(norm)
                 self._refresh_card(card)
         if tag == "apply":                 # 派工链中断：复位防重入状态
             self._apply_results = []
@@ -378,7 +398,7 @@ class SubsPage(ScrollArea):
         if isinstance(tag, str) and (
                 tag in ("slib", "apply")
                 or tag.startswith(("parse:", "classify:", "pull:",
-                                   "searcher:", "newsearcher:"))):
+                                   "newsearcher:", "pickscore:"))):
             InfoBar.error("任务失败", f"{tag}: {err}", parent=self)
 
     # ---- 分类 ----
@@ -390,6 +410,7 @@ class SubsPage(ScrollArea):
         usages = self.vm.merged_usages()
         self.vm.cards.clear()
         for w in self._cards_ui.values():
+            w.hide()        # deleteLater 迟到：不 hide 旧卡照旧叠画
             w.deleteLater()
         self._cards_ui.clear()
         self._update_summary()
@@ -435,12 +456,29 @@ class SubsPage(ScrollArea):
             self.cards_box.insertWidget(idx, fc)
         self._update_summary()
 
+    def _schedule_refresh(self, card):
+        """渐进回执合并重建：大片池按时长切片后回执最密 ~2/s，但缓存全
+        命中时一片 24 对比瞬完、回执成洪——每次回执整卡拆除重建会把
+        布局挤崩（旧卡 deleteLater 未及处理即叠画成幽灵）。回执只记账
+        vm，300ms 单发定时器把突发合并成一次重建；终态回执仍即时刷。"""
+        self._refresh_pending.add(card.norm_name)
+        if not self._refresh_timer.isActive():
+            self._refresh_timer.start()
+
+    def _flush_refresh(self):
+        pending, self._refresh_pending = self._refresh_pending, set()
+        for norm in pending:
+            card = self._card(norm)
+            if card is not None:
+                self._refresh_card(card)
+
     def _refresh_card(self, card):
         """卡片数据变化（搜索批次回填/勾选回填/状态翻转）后整卡重建，保持位置。"""
         old = self._cards_ui.get(card.norm_name)
         idx = self.cards_box.indexOf(old) if old is not None else -1
         if old is not None:
             self.cards_box.removeWidget(old)
+            old.hide()      # deleteLater 迟到：不 hide 幽灵卡照旧叠画
             old.deleteLater()
         fc = self._make_card_ui(card)
         self._cards_ui[card.norm_name] = fc
@@ -478,20 +516,28 @@ class SubsPage(ScrollArea):
 
     def _continue_search(self, norm):
         card = self._card(norm)
-        if card is None or card.searching:
+        if card is None:
+            return
+        if card.searching:            # 搜索中再点（钮已变 Pause 图标）= 暂停
+            self._cancel_for(norm)["cancelled"] = True
             return
         if not card.n_chars:          # 0 字卡无可比字型：不给搜索（UI 已藏入口）
             return
         if card.searcher is not None and card.search_state == "paused":
             card.searching = True
+            card.searcher.resume()    # 清暂停+重置批计数：否则空片回执原地打转
+            cancel = {"cancelled": False}   # 上轮手动暂停标志不带入本轮
+            self._cancels[norm] = cancel
             self._refresh_card(card)
             self.worker.submit(f"pull:{norm}", _pull_job, card.searcher,
-                               self._cancel_for(norm))   # 续用：累计 hit_count 语义
+                               cancel)     # 续用：累计 hit_count 语义
             return
         # 新搜索器：相似度基准由 UI 线程算好传入（worker 线程无 vm 引用）；
         # 门槛取 card.min_sim（vm 与在用搜索器保持同步），非设置页原值；
         # 覆盖率/大小区间此刻从设置页现读（改设置不影响在跑的搜索器）
         card.searching = True
+        cancel = {"cancelled": False}       # 先立取消标志：newsearcher 在途
+        self._cancels[norm] = cancel        # 时点 Pause 也能生效（回执沿用）
         self._refresh_card(card)
         self.worker.submit(f"newsearcher:{norm}", _new_searcher_job,
                            vm_target(self.vm, card),
@@ -519,9 +565,10 @@ class SubsPage(ScrollArea):
                 InfoBar.warning("字体已重算",
                                 "该字体卡片已被重新分类，请重新选择", parent=self)
                 return
-            self.vm.attach_pick(card, dlg.selected)
-            self._refresh_card(card)     # pick 可能新增选项行，整卡重建回填
-            self._update_summary()
+            # 相似率/相对大小经 worker 评分（渲染+比较 ~57ms，UI 线程不做）；
+            # 行先不入列，评分回执一并 attach（免两帧重建）
+            self.worker.submit(f"pickscore:{norm}", _pick_score_job,
+                               vm_target(self.vm, card), dlg.selected)
 
     # ---- 应用 ----
     def _apply(self):
@@ -719,6 +766,10 @@ def _new_searcher_job(ctx, target, chars, cov, n_pause, min_sim, size_range,
 
 def _pull_job(ctx, searcher, cancel):
     return pull_chunk(searcher, cancel)
+
+
+def _pick_score_job(ctx, target, entity):
+    return score_pick(ctx, target, entity)
 
 
 def _apply_job(ctx, path, mapping, suffix, overwrite):

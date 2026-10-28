@@ -127,7 +127,8 @@ def test_search_chain_pause_resume_exhaust_and_relax(qapp, tmp_path, monkeypatch
     assert (cov, n_pause, min_sim) == (0.95, 5, 0.85)
     assert size_range == (0.9, 1.1) and direction == "t2s"
 
-    searcher = SimpleNamespace(min_sim=0.85, paused=True, target_error=False)
+    searcher = SimpleNamespace(min_sim=0.85, paused=True, target_error=False,
+                               pool_size=10, compared=0, resume=lambda: None)
     page._on_result(f"newsearcher:{norm}", searcher)   # 挂接后立即拉第一批
     assert card.searcher is searcher and card.min_sim == 0.85
     assert page.worker.submits[-1][0] == f"pull:{norm}"
@@ -151,9 +152,10 @@ def test_search_chain_pause_resume_exhaust_and_relax(qapp, tmp_path, monkeypatch
     page._continue_search(norm)
     sub = [s for s in page.worker.submits if s[0] == f"newsearcher:{norm}"][-1]
     assert sub[2][4] == 0.75                         # 新门槛建新搜索器
-    page._on_result(f"searcher:{norm}",
+    page._on_result(f"newsearcher:{norm}",
                     SimpleNamespace(min_sim=0.75, paused=False,
-                                    target_error=False))
+                                    target_error=False, pool_size=10,
+                                    compared=5, resume=lambda: None))
     page._on_result(f"pull:{norm}", ([], "cancelled"))   # 重算弃旧拉取不挂死
     assert not card.searching
 
@@ -426,6 +428,39 @@ def test_cards_inserted_by_kind_rank(qapp, tmp_path, monkeypatch):
     assert idxs == sorted(idxs) and -1 not in idxs
 
 
+def test_pick_score_receipt_and_metrics_text(qapp, tmp_path, monkeypatch):
+    # 手选流程：picker 回执走 pickscore 分支 attach（相似/大小/覆盖齐）；
+    # 覆盖不足的手选行第二行补「未覆盖 N 字」（原只显覆盖的 bug）
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    from PySide6.QtWidgets import QLabel
+
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体", chars="永宇好")
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=1, chars=set("永宇好我在"), variants={"甲字体"})
+    page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0",
+                    (usage, UsageClass(kind="replace", entities=[ent_a])))
+    assert page.vm.cards
+
+    page._on_result("pickscore:甲字体", (ent_b, 0.88, 1.04))
+    card = page.vm.cards[0]
+    o = card.option("fp2")
+    assert o is not None and o.source == "pick" and card.checked_key == "fp2"
+    assert o.similarity == 0.88 and o.size_ratio == 1.04
+    assert o.coverage == 0.6                       # 区段覆盖率口径（3 字子集）
+    fc = page._cards_ui["甲字体"]
+    row = fc._boxes["fp2"].parentWidget()
+    texts = [lab.text() for lab in row.findChildren(QLabel)]
+    assert any("相似 88.0%" in t and "未覆盖 2 字" in t for t in texts), texts
+
+    # 卡被重算后迟到的评分回执：弃置不炸
+    page.on_library_changed()
+    page._on_result("pickscore:甲字体", (ent_b, 0.5, 1.0))
+
+
 def test_option_row_retheme_tracks_accent_and_theme(qapp, tmp_path, monkeypatch):
     # 选中行描边/底色烤着 themeColor() 派生值，须跟两路刷新：换强调色
     # （themeColorChanged，且信号发出时 themeColor() 尚是旧值——实测慢
@@ -518,3 +553,149 @@ def test_file_row_checkbox_fixed_width(qapp, tmp_path, monkeypatch):
     qapp.processEvents()
     boxes = fc.findChildren(CheckBox)
     assert boxes and all(b.width() == 24 for b in boxes)
+
+
+def _cont_btn(fc):
+    """foot 搜索钮（按态文案前缀识别，避开手选钮）。"""
+    from qfluentwidgets import TransparentPushButton
+    hits = [b for b in fc.findChildren(TransparentPushButton) if b.text()[
+        :4] in ("继续寻找", "寻找中…", "无更多符", "原字体无")]
+    assert len(hits) == 1
+    return hits[0]
+
+
+
+def _pick_btn(fc):
+    """foot 手选钮（文案全等识别）。"""
+    from qfluentwidgets import TransparentPushButton
+    hits = [b for b in fc.findChildren(TransparentPushButton)
+            if b.text() == "从字体库手动选择"]
+    assert len(hits) == 1
+    return hits[0]
+
+
+def test_cont_button_states_and_manual_pause(qapp, tmp_path, monkeypatch):
+    """搜索钮一钮三态（用户拍板 2026-10-28）：idle=继续寻找/Pause=寻找中
+    计数/耗尽=禁用 Info 文案；搜索中再点=置取消标志，cancelled 回执归
+    paused 态（续搜复用同一 searcher）。"""
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
+    btn = _cont_btn(page._cards_ui[norm])
+    assert btn.text() == "继续寻找更多" and btn.isEnabled()
+
+    page._continue_search(norm)                 # 搜索器未挂：无计数的寻找中
+    btn = _cont_btn(page._cards_ui[norm])
+    assert btn.text() == "寻找中…" and btn.isEnabled()
+
+    s = SimpleNamespace(min_sim=0.85, paused=False, target_error=False,
+                        pool_size=10, compared=3)
+    page._on_result(f"newsearcher:{norm}", s)   # 挂接后计数上车
+    fc = page._cards_ui[norm]
+    assert _cont_btn(fc).text() == "寻找中… 3/10"
+    assert not _pick_btn(fc).isEnabled()        # 搜索中禁用手选
+
+    n = len(page.worker.submits)
+    _cont_btn(page._cards_ui[norm]).click()     # 搜索中再点 = 暂停
+    assert page._cancels[norm]["cancelled"]
+    assert len(page.worker.submits) == n        # 暂停不派新任务
+
+    page._on_result(f"pull:{norm}", ([], "cancelled"))
+    assert card.search_state == "paused" and not card.searching
+    fc = page._cards_ui[norm]
+    btn = _cont_btn(fc)
+    assert btn.text() == "继续寻找更多" and btn.isEnabled()
+    assert _pick_btn(fc).isEnabled()            # 暂停即恢复手选
+
+    s.paused = False                            # 搜索器走完剩余池 → 耗尽
+    page._on_result(f"pull:{norm}", ([], "exhausted"))
+    btn = _cont_btn(page._cards_ui[norm])
+    assert not btn.isEnabled()
+    assert btn.text() == "无更多符合要求的相似字体"
+
+
+def test_running_receipts_coalesce_refresh(qapp, tmp_path, monkeypatch):
+    """渐进回执节流：running 回执只记账 vm，重建由 300ms 单发定时器
+    合并——大片池缓存全命中时回执成洪，逐回执整卡拆除重建会把布局
+    挤崩（旧卡 deleteLater 迟到叠画成幽灵）。终态回执仍即时刷。"""
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
+    s = SimpleNamespace(min_sim=0.85, paused=False, target_error=False,
+                        pool_size=100, compared=0)
+    page._on_result(f"newsearcher:{norm}", s)
+    fc0 = page._cards_ui[norm]
+    for i in range(10):                         # 回执洪：记账不重建
+        s.compared = 24 * (i + 1)
+        page._on_result(f"pull:{norm}", ([], "running"))
+        assert card.searcher.compared == s.compared
+    assert page._cards_ui[norm] is fc0          # 未触发任何整卡重建
+    assert norm in page._refresh_pending
+    page._flush_refresh()
+    assert page._cards_ui[norm] is not fc0      # 突发合并成一次重建
+    assert not page._refresh_pending
+    page._on_result(f"pull:{norm}", ([], "exhausted"))
+    assert card.search_state == "exhausted"     # 终态不受节流影响
+
+
+
+class _StubSearcher:
+    """最小搜索器桩：页面续搜路径会调 resume()。"""
+
+    def __init__(self, paused=False, target_error=False):
+        self.min_sim = 0.85
+        self.paused = paused
+        self.target_error = target_error
+        self.pool_size = 10
+        self.compared = 0
+        self.hit_count = 99
+
+    def resume(self):
+        self.paused = False
+        self.hit_count = 0
+
+
+def test_natural_pause_resume_and_inflight_pause(qapp, tmp_path, monkeypatch):
+    """自然暂停后续搜必须经 resume() 清暂停+重置批计数（P0：否则续搜
+    空片回执原地打转）；newsearcher 在途点暂停，取消标志沿用到 pull
+    提交，回执归 paused。"""
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
+    s = _StubSearcher(paused=True)
+    page._on_result(f"newsearcher:{norm}", s)
+    page._on_result(f"pull:{norm}", ([], "paused"))    # 自然暂停
+    assert card.search_state == "paused"
+    page._continue_search(norm)                         # 续搜同一搜索器
+    assert s.paused is False and s.hit_count == 0      # resume 生效
+    page._on_result(f"pull:{norm}", ([], "cancelled"))  # 手动暂停收尾
+    assert card.search_state == "paused" and not card.searching
+
+    s.paused = False
+    page._on_result(f"pull:{norm}", ([], "exhausted"))  # 走到耗尽
+    page._continue_search(norm)                         # 新搜索器在途
+    d = page._cancels[norm]
+    _cont_btn(page._cards_ui[norm]).click()             # 在途暂停
+    assert d["cancelled"]
+    s2 = _StubSearcher()
+    page._on_result(f"newsearcher:{norm}", s2)
+    sub = page.worker.submits[-1]
+    assert sub[0] == f"pull:{norm}" and sub[2][1] is d  # 回执沿用已取消 dict
+    page._on_result(f"pull:{norm}", ([], "cancelled"))
+    assert card.search_state == "paused" and not card.searching
+
+
+def test_target_error_button_disabled(qapp, tmp_path, monkeypatch):
+    """target_error 归禁用说明钮（原独立标签行），手选钮保持可用。"""
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
+    s = _StubSearcher(target_error=True)
+    page._on_result(f"newsearcher:{norm}", s)
+    page._on_result(f"pull:{norm}", ([], "target_error"))
+    assert card.search_state == "target_error"
+    fc = page._cards_ui[norm]
+    btn = _cont_btn(fc)
+    assert not btn.isEnabled()
+    assert btn.text() == "原字体无法渲染，无法比较相似度"
+    assert _pick_btn(fc).isEnabled()

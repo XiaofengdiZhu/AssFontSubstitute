@@ -233,6 +233,59 @@ def test_resume_then_exhausted(tmp_path):
     assert s.exhausted                          # 远字体被覆盖率门槛跳过，无更多候选
 
 
+def test_slice_stops_on_pause(tmp_path):
+    lib = _lib(tmp_path, {"name": "c0", "chars": CHARS, "family": "圓體0"})
+    target = next(e for e in lib.entities() if e.psname == "TGT")
+    s = _searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=1)
+    batch = s.next_slice(8)
+    assert len(batch) == 1 and s.paused and s.compared == 1
+
+
+def test_slice_progress_counters(tmp_path):
+    """next_slice 分片推进：pool_size/compared 供 GUI 进度计数；单片至多
+    max_evals 次对比，跨片累计；耗尽即停。"""
+    lib = _lib(tmp_path,
+               {"name": "c0", "chars": CHARS, "family": "圓體0"},
+               {"name": "c1", "chars": CHARS, "family": "圓體1"},
+               {"name": "c2", "chars": CHARS, "family": "圓體2"})
+    target = next(e for e in lib.entities() if e.psname == "TGT")
+    s = _searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=10)
+    assert s.pool_size == 4                     # 池不含 target 自身
+    seen: list = []
+    while not (s.paused or s.exhausted):
+        seen += s.next_slice(2)
+    assert s.compared == 4 and s.exhausted      # 片间累计、池尽即停
+    assert len(seen) == 3
+
+
+def test_slice_time_bound(tmp_path, monkeypatch):
+    """一片两上限（对比数/时长）先到为准：慢评分时按时长切，池未尽即
+    回执、计数已累加——GUI 进度计数逐片跳动，不攒到批满才回头。"""
+    import time as _time
+    lib = _lib(tmp_path, *[{"name": f"c{i}", "chars": CHARS,
+                            "family": f"圓體{i}"} for i in range(8)])
+    target = next(e for e in lib.entities() if e.psname == "TGT")
+    real_compare = search_mod.compare
+
+    def slow_compare(a, b):
+        _time.sleep(0.12)               # 模拟渲染+评分 ~57ms 的慢路径
+        return real_compare(a, b)
+
+    monkeypatch.setattr(search_mod, "compare", slow_compare)
+    s = _searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=99,
+                  min_sim=0.5, size_range=(0.5, 2.0))
+    t0 = _time.perf_counter()
+    first = s.next_slice()
+    dt = _time.perf_counter() - t0
+    assert 4 <= s.compared <= 6         # ~0.5s 一片：4~5 次慢评分即切
+    assert not s.exhausted and dt < 1.5
+    rest: list = []
+    while not s.exhausted:              # 剩池继续按片抽干（片间计数累加）
+        rest += s.next_slice()
+    assert s.compared == 9 and s.exhausted   # 池 = 8 候选 + 远字体
+    assert len(first) + len(rest) == 8
+
+
 def test_defaults_pinned():
     # 设置默认值钉死：覆盖率 95%、最低相似率 85%、相对大小 90%–110%
     import inspect
@@ -240,3 +293,21 @@ def test_defaults_pinned():
     assert sig.parameters["cov_threshold"].default == 0.95
     assert sig.parameters["min_sim"].default == 0.85
     assert sig.parameters["size_range"].default == (0.90, 1.10)
+
+
+
+def test_resume_resets_batch_counter(tmp_path):
+    """resume() 清暂停并重置批计数：只清 paused 的话残留 hit_count ≥
+    n_pause，续搜首个命中立刻再停（每点一次只多 1 个候选）。"""
+    lib = _lib(tmp_path,
+               {"name": "c0", "chars": CHARS, "family": "圓體0"},
+               {"name": "c1", "chars": CHARS, "family": "圓體1"},
+               {"name": "c2", "chars": CHARS, "family": "圓體2"})
+    target = next(e for e in lib.entities() if e.psname == "TGT")
+    s = _searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=2)
+    first = _drain(s)
+    assert len(first) == 2 and s.paused
+    s.resume()
+    second = _drain(s)
+    assert [c.fingerprint for c in second] == [_by(lib, "C2").fingerprint]
+    assert s.exhausted                          # 批计数已重置：不一命中就停
