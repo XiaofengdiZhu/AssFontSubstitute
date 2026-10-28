@@ -104,8 +104,13 @@ class SubsPage(ScrollArea):
         self.files_box.setContentsMargins(0, 0, 0, 0)
         v.addLayout(self.files_box)
 
+        # 参数行：字段组在左（FlowLayout 窄窗换行），预览框钉右端
         params = QWidget(self.view)
-        pl = FlowLayout(params, needAni=False, isTight=False)
+        ph = QHBoxLayout(params)
+        ph.setContentsMargins(0, 0, 0, 0)
+        ph.setSpacing(18)
+        flow_wrap = QWidget(params)
+        pl = FlowLayout(flow_wrap, needAni=False, isTight=False)
         pl.setContentsMargins(0, 0, 0, 0)
         pl.setHorizontalSpacing(18)
         pl.setVerticalSpacing(8)
@@ -114,9 +119,10 @@ class SubsPage(ScrollArea):
         self.seg_dir.addItem("s2t", "简 → 繁", lambda: self._set_direction("s2t"))
         self.seg_dir.setCurrentItem("t2s")
         pl.addWidget(_fld("孪生检测方向", self.seg_dir))
+        ph.addWidget(flow_wrap, 1)
         # 可键入 + 下拉最近 10 条历史（与字体库预览页共享，回车记一条）
         self.preview_edit = PreviewInput(self.settings)
-        pl.addWidget(self.preview_edit)
+        ph.addWidget(self.preview_edit, 0, Qt.AlignVCenter)
         v.addWidget(params)
 
         self.cards_box = QVBoxLayout()
@@ -407,10 +413,9 @@ class SubsPage(ScrollArea):
     # ---- 卡片 UI ----
     def _make_card_ui(self, card) -> FontCard:
         fc = FontCard(card, self.worker, self._pvm,
-                      lambda: self.preview_edit.text())
+                      lambda: self.preview_edit.text(), self._direction)
         fc.option_checked.connect(self._on_option_checked)
         fc.continue_clicked.connect(self._continue_search)
-        fc.relax_clicked.connect(self._relax_search)
         fc.pick_clicked.connect(self._open_picker)
         return fc
 
@@ -487,12 +492,6 @@ class SubsPage(ScrollArea):
                            (float(self.settings.get("size_min")),
                             float(self.settings.get("size_max"))),
                            self._direction)
-
-    def _relax_search(self, norm):
-        card = self._card(norm)
-        if card is None or self.vm.relax_min_sim(card) is None:
-            return
-        self._continue_search(norm)      # 新门槛建新搜索器（hit 计数清零）
 
     def _open_picker(self, norm):
         card = self._card(norm)
@@ -662,8 +661,8 @@ class _BadgeRow(QWidget):
 
     def text(self) -> str:
         c = self._counts
-        return (f"保留 {c['keep']} / 孪生对应 {c['twin']} / "
-                f"需替换 {c['replace']} / 库中没有 {c['missing']}")
+        return (f"孪生对应 {c['twin']} / 需替换 {c['replace']} / "
+                f"库中没有 {c['missing']} / 保留 {c['keep']}")
 
     def _rebuild(self):
         while self._h.count():
@@ -671,10 +670,12 @@ class _BadgeRow(QWidget):
             if it.widget():
                 it.widget().deleteLater()
         c = self._counts
-        for text, mk in ((f"保留 {c['keep']}", InfoBadge.success),
-                         (f"孪生对应 {c['twin']}", InfoBadge.info),
+        # 顺序=用户关注度（孪生最好 → 保留垫底）；孪生/保留互换底色：
+        # 绿色给「孪生对应」（同样是无需处理的好结果），保留退中性蓝
+        for text, mk in ((f"孪生对应 {c['twin']}", InfoBadge.success),
                          (f"需替换 {c['replace']}", InfoBadge.warning),
-                         (f"库中没有 {c['missing']}", InfoBadge.error)):
+                         (f"库中没有 {c['missing']}", InfoBadge.error),
+                         (f"保留 {c['keep']}", InfoBadge.info)):
             self._h.addWidget(mk(text))
         self._h.addStretch(1)
 

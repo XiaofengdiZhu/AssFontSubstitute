@@ -28,7 +28,6 @@ from qfluentwidgets import setCustomStyleSheet
 from qfluentwidgets import themeColor
 
 from ass_font_substitute.gui.subs_vm import KEEP
-from ass_font_substitute.gui.subs_vm import SIM_FLOOR
 from ass_font_substitute.gui.subs_vm import Card
 from ass_font_substitute.gui.widgets.pill import PillLabel
 from ass_font_substitute.gui.widgets.pill import pill
@@ -47,10 +46,10 @@ _KIND_STYLE = {
     "missing": ("CANCEL", "#c42b1c", "#ff99a4"),
     "zero":    (None,     "#757575", "#9a9a9a"),
 }
-_STATUS_TEXT = {"keep": "库中有 · 覆盖足够", "twin": "找到孪生对应的简体字体",
+_STATUS_TEXT = {"keep": "库中有 · 覆盖足够",
                 "replace": "需替换", "missing": "库中没有",
-                "zero": "保留（无对白用字）"}
-_BADGE_MAKER = {"keep": InfoBadge.success, "twin": InfoBadge.info,
+                "zero": "保留（无对白用字）"}   # twin 随方向，_build_head 现拼
+_BADGE_MAKER = {"keep": InfoBadge.success,
                 "replace": InfoBadge.warning, "missing": InfoBadge.error}
 
 _ROW_QSS = """
@@ -107,14 +106,15 @@ class FontCard(CardWidget):
 
     option_checked = Signal(str, str)      # (norm_name, key)
     continue_clicked = Signal(str)
-    relax_clicked = Signal(str)
     pick_clicked = Signal(str)
 
-    def __init__(self, card: Card, worker, pvm, preview_text_fn, parent=None):
+    def __init__(self, card: Card, worker, pvm, preview_text_fn,
+                 direction: str = "t2s", parent=None):
         super().__init__(parent)
         self.card = card
         self._worker, self._pvm = worker, pvm
         self._preview_text_fn = preview_text_fn
+        self._direction = direction   # 孪生徽章文案随检测方向变（简/繁）
         self.setStyleSheet(_ROW_QSS)
         # 选中行描边/底色烤着 themeColor() 派生值，两路刷新：换强调色走
         # themeColorChanged；亮暗主题切换 qfw 只发 themeChanged（随后
@@ -161,6 +161,9 @@ class FontCard(CardWidget):
         h.addStretch(1)
         if kind == "zero":
             h.addWidget(_pill(_STATUS_TEXT["zero"]))
+        elif kind == "twin":
+            twin = "找到孪生简体" if self._direction == "t2s" else "找到孪生繁体"
+            h.addWidget(InfoBadge.success(twin))   # 好结果给绿（同页头徽章）
         else:
             h.addWidget(_BADGE_MAKER[kind](_STATUS_TEXT[kind]))
         return head
@@ -299,8 +302,9 @@ class FontCard(CardWidget):
         if card.searching:
             ring = IndeterminateProgressRing()
             ring.setFixedSize(18, 18)
+            ring.setStrokeWidth(3)      # 出厂 6 在 18px 里显粗，减半
             foot.addWidget(ring)
-            foot.addWidget(CaptionLabel("正在搜索相似字体…"))
+            foot.addWidget(CaptionLabel("正在寻找相似字体…"))
         elif card.search_state == "paused":
             n = sum(1 for o in card.options if o.source == "search")
             foot.addWidget(CaptionLabel(f"已找到 {n} 个相似字体，暂停搜索。"))
@@ -310,14 +314,10 @@ class FontCard(CardWidget):
             foot.addWidget(more)
         elif card.search_state == "exhausted" and ekind not in ("zero",
                                                                "missing"):
-            foot.addWidget(CaptionLabel(
-                "无更多相似字体"
-                + (f"（当前最低相似率 {_pct(card.min_sim)}）" if card.min_sim else "")))
-            relax = TransparentPushButton("放宽门槛重算")
-            relax.setEnabled(card.min_sim is None or card.min_sim > SIM_FLOOR)
-            relax.clicked.connect(
-                lambda: self.relax_clicked.emit(self.card.norm_name))
-            foot.addWidget(relax)
+            # 文本缩进与搜索中行对齐：环 18 + 间距 6（css margin-left 等价物
+            # 是布局占位）
+            foot.addSpacing(18 + 6)
+            foot.addWidget(CaptionLabel("无更多符合要求的相似字体"))
         elif card.search_state == "target_error":
             foot.addWidget(CaptionLabel("原字体无法渲染，无法比较相似度"))
         elif (ekind in ("replace", "twin", "keep") and card.n_chars > 0):

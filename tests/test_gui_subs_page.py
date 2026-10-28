@@ -146,8 +146,9 @@ def test_search_chain_pause_resume_exhaust_and_relax(qapp, tmp_path, monkeypatch
     assert card.search_state == "exhausted" and len(card.options) == 4
     assert page.worker.submits[-1][0] != f"pull:{norm}"      # 不再续拉
 
-    page._cards_ui[norm].relax_clicked.emit(norm)    # 放宽 0.85 → 0.75 重算
-    assert card.min_sim == 0.75
+    # 耗尽后调低门槛再搜：新门槛建新搜索器（relax 钮已删，直设等价）
+    card.min_sim = 0.75
+    page._continue_search(norm)
     sub = [s for s in page.worker.submits if s[0] == f"newsearcher:{norm}"][-1]
     assert sub[2][4] == 0.75                         # 新门槛建新搜索器
     page._on_result(f"searcher:{norm}",
