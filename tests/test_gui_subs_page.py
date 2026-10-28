@@ -372,6 +372,32 @@ def test_on_library_changed_reclassifies_and_defers_in_batch(qapp, tmp_path, mon
     assert page._gen == gen1 + 1
 
 
+def test_remove_file_guards_late_parse_receipts(qapp, tmp_path, monkeypatch):
+    # 移除=整个文件剔出列表：迟到 parse 成功回执不得复活（_removed 弃置）、
+    # 迟到失败回执不触发重算；空态仍有卡壳（添加钮在卡标题栏，曾出回归）
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+
+    def parse_payload(path):
+        return FileParse(path, None, [FontUsage(
+            raw_name="甲字体", norm_name="甲字体", style_count=1,
+            inline_count=1, chars=set("永宇"), variants={"甲字体"})], [], [])
+
+    page._on_result("parse:a.ass", parse_payload("a.ass"))
+    page._remove_file("a.ass")
+    assert not page.vm.files and page.files_box.count() == 1   # 空态卡壳在
+    page._on_result("parse:a.ass", parse_payload("a.ass"))     # 迟到成功
+    assert not page.vm.files
+    gen1 = page._gen
+    page._on_failed("parse:a.ass", "boom")                     # 迟到失败
+    assert page._gen == gen1                                   # 不重算
+    page._removed.discard("a.ass")                             # 重加解除弃置
+    page._on_result("parse:a.ass", parse_payload("a.ass"))
+    assert [f.path for f in page.vm.files] == ["a.ass"]
+    assert page._gen == gen1 + 1                               # 重加照常重算
+
+
 def test_option_row_retheme_tracks_accent_and_theme(qapp, tmp_path, monkeypatch):
     # 选中行描边/底色烤着 themeColor() 派生值，须跟两路刷新：换强调色
     # （themeColorChanged，且信号发出时 themeColor() 尚是旧值——实测慢

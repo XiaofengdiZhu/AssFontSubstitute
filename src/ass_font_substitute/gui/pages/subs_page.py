@@ -5,16 +5,17 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import BodyLabel
 from qfluentwidgets import CaptionLabel
-from qfluentwidgets import CardWidget
 from qfluentwidgets import CheckBox
 from qfluentwidgets import ComboBox
 from qfluentwidgets import FlowLayout
 from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import GroupHeaderCardWidget
 from qfluentwidgets import InfoBadge
 from qfluentwidgets import InfoBar
 from qfluentwidgets import LineEdit
@@ -22,7 +23,7 @@ from qfluentwidgets import PrimaryPushButton
 from qfluentwidgets import PushButton
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import SegmentedWidget
-from qfluentwidgets import StrongBodyLabel
+from qfluentwidgets import TransparentToolButton
 from qfluentwidgets import setCustomStyleSheet
 from qfluentwidgets import setFont
 
@@ -41,6 +42,8 @@ from ass_font_substitute.gui.widgets.font_card import FontCard
 from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
 from ass_font_substitute.gui.widgets.preview_input import PreviewInput
 from ass_font_substitute.gui.widgets.wheel_block import WheelBlock
+
+_REMOVE_RED = QColor("#e04343")   # 移除钮图标：亮暗主题下都醒目的危险红
 
 
 class SubsPage(ScrollArea):
@@ -70,6 +73,7 @@ class SubsPage(ScrollArea):
         self._apply_dispatching = False     # 派工在途标志（防重入）
         self._confirmed_once = False
         self._search_active = False
+        self._removed: set[str] = set()    # 已移除文件：迟到解析回执弃置
 
         self.view = QWidget(self)
         v = QVBoxLayout(self.view)
@@ -91,24 +95,14 @@ class SubsPage(ScrollArea):
         head.addWidget(self.summary)
         v.addLayout(head)
 
-        files_card = CardWidget()
-        fl = QVBoxLayout(files_card)
-        fl.setSpacing(6)
-        fhead = QHBoxLayout()
-        fhead.setSpacing(8)
-        fhead.addWidget(StrongBodyLabel("字幕文件"))
+        # 字幕文件卡在 _rebuild_file_rows 里整卡重建（GroupHeaderCardWidget）：
+        # 汇总/两钮是常驻控件，重建时重挂进新卡标题栏
         self.files_summary = CaptionLabel("0 / 0 个文件 · 0 种字体")
-        fhead.addWidget(self.files_summary)
-        fhead.addStretch(1)
         self.btn_reload = PushButton(FIF.SYNC, "重新载入")
         self.btn_add = PrimaryPushButton(FIF.ADD, "添加文件")
-        fhead.addWidget(self.btn_reload)
-        fhead.addWidget(self.btn_add)
-        fl.addLayout(fhead)
         self.files_box = QVBoxLayout()
-        self.files_box.setSpacing(6)
-        fl.addLayout(self.files_box)
-        v.addWidget(files_card)
+        self.files_box.setContentsMargins(0, 0, 0, 0)
+        v.addLayout(self.files_box)
 
         params = QWidget(self.view)
         pl = FlowLayout(params, needAni=False, isTight=False)
@@ -171,6 +165,7 @@ class SubsPage(ScrollArea):
         self._preview_debounce.setSingleShot(True)
         self._preview_debounce.setInterval(300)
         self._preview_debounce.timeout.connect(self._refresh_all_cards)
+        self._rebuild_file_rows()   # 启动空态也建卡：添加文件钮在卡标题栏
         self._reclassify()
 
     # ---- 文件层 ----
@@ -179,6 +174,7 @@ class SubsPage(ScrollArea):
                                 "ASS 字幕 (*.ass *.ssa)", "subs")
         if not paths:
             return
+        self._removed.difference_update(paths)   # 重加同一文件：解除弃置
         self._parsing.update(paths)
         for p in paths:
             self.worker.submit(f"parse:{p}", _parse_job, p)
@@ -200,30 +196,90 @@ class SubsPage(ScrollArea):
             item = self.files_box.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        # 一张 GroupHeaderCardWidget 框住全部文件行（行间分隔线由组件管）；
+        # 标题栏当工具条：左=标题+汇总，右=重新载入+添加文件
+        card = GroupHeaderCardWidget(self)
+        card.setTitle("字幕文件")
+        # 标题栏左块两行：标题下挂汇总（标题栏 48px 容得下）
+        left = QWidget()
+        lv = QVBoxLayout(left)
+        lv.setContentsMargins(0, 0, 0, 0)
+        lv.setSpacing(0)
+        lv.setAlignment(Qt.AlignVCenter)
+        lv.addWidget(card.headerLabel)
+        lv.addWidget(self.files_summary)
+        card.headerLayout.addWidget(left)
+        card.headerLayout.addStretch(1)
+        card.headerLayout.addWidget(self.btn_reload)
+        card.headerLayout.addWidget(self.btn_add)
         for f in self.vm.files:
-            row = CardWidget()
-            h = QHBoxLayout(row)
-            cb = CheckBox()
             # qfw QSS min-width:28px 把空文本框撑到 57px（indicator 右侧
             # 拖 ~36px 空白），文件名离勾选框过远；且 polish 会把 QSS
             # min-width 写回 minimumWidth（setFixedWidth 前置必被顶回）——
             # 走 qfw setCustomStyleSheet 覆写 min-width 再定宽
+            cb = CheckBox()
             setCustomStyleSheet(cb, "CheckBox{min-width:0px;}",
                                 "CheckBox{min-width:0px;}")
             cb.setFixedWidth(24)
             cb.setChecked(f.checked)
             cb.toggled.connect(lambda on, p=f.path: self._on_file_checked(p, on))
-            h.addWidget(cb)
             name = _ElidedLabel(Path(f.path).name)
             install_tip(name, f.path)
-            h.addWidget(name, 1)
+
+            right = QWidget()
+            rh = QHBoxLayout(right)
+            rh.setContentsMargins(0, 0, 0, 0)
+            rh.setSpacing(8)
+            content = ""
             if f.error:
-                h.addWidget(InfoBadge.error("解析失败"))
-                install_tip(row, f.error)
+                badge = InfoBadge.error("解析失败")
+                rh.addWidget(badge, 0, Qt.AlignVCenter)
+                # tip 挂徽章本体：容器只吃自身窄缝 Enter，悬徽章不冒泡
+                install_tip(badge, f.error)
             else:
-                h.addWidget(CaptionLabel(f"{f.font_count} 种字体"))
-            self.files_box.addWidget(row)
+                content = f"{f.font_count} 种字体"
+            rm = TransparentToolButton(FIF.REMOVE_FROM)
+            # 危险动作：红色示警（icon() 第二参才是颜色，须关键字传）
+            rm.setIcon(FIF.REMOVE_FROM.icon(color=_REMOVE_RED))
+            install_tip(rm, "从列表移除")
+            rm.clicked.connect(lambda _=False, p=f.path: self._remove_file(p))
+            rh.addWidget(rm, 0, Qt.AlignVCenter)
+
+            group = card.addGroup(FIF.DOCUMENT, "", content, right)
+            # 勾选框占原文件图标位：行首、跨两行垂直居中（出布局并隐藏
+            # 原图标，免拖 15px 间距）
+            group.hBoxLayout.removeWidget(group.iconWidget)
+            group.iconWidget.hide()
+            group.hBoxLayout.insertWidget(0, cb, 0, Qt.AlignVCenter)
+            # 清组件给 textLayout 预置的 AlignCenter：否则两行 items 被
+            # 关进居中窄条（各按 hint 宽居中，短行不贴左）。清掉后 items
+            # 填满列宽——文件名/统计同列左对齐，窄窗时文件名省略得动；
+            # 文本列吃满余宽需压掉组件预置 stretch（itemAt(2)）
+            group.textLayout.setAlignment(Qt.Alignment())
+            group.hBoxLayout.setStretch(1, 1)
+            group.hBoxLayout.setStretch(2, 0)
+            group.titleLabel.hide()
+            group.textLayout.insertWidget(0, name)
+        if not self.vm.files:
+            ph = CaptionLabel("（尚未添加字幕文件）")
+            ph.setAlignment(Qt.AlignCenter)
+            wrap = QWidget()
+            wh = QHBoxLayout(wrap)
+            wh.setContentsMargins(24, 10, 24, 14)
+            wh.addWidget(ph)
+            card.viewLayout.addWidget(wrap)
+        self.files_box.addWidget(card)
         self._update_files_summary()
+
+    def _remove_file(self, path: str):
+        """从列表移除文件：vm 记账 + 整卡重建 + 重分类（同取消勾选路径）；
+        在途解析回执按 _removed 弃置，免得删掉的文件又冒回来。"""
+        self._removed.add(path)
+        self._parsing.discard(path)     # 移除即视为该份已到达：不卡批次
+        self.vm.remove_file(path)
+        self._rebuild_file_rows()
+        if not self._parsing:
+            self._reclassify()
 
     def _update_files_summary(self):
         checked = len(self.vm.checked_parses())
@@ -242,6 +298,8 @@ class SubsPage(ScrollArea):
     # ---- 结果分发（UI 线程；vm 一切变更都在此）----
     def _on_result(self, tag, payload):
         if isinstance(tag, str) and tag.startswith("parse:"):
+            if payload.path in self._removed:   # 移除后迟到的回执：弃置
+                return
             self.vm.add_files([payload])
             self._rebuild_file_rows()
             self._parse_arrived(payload.path)
@@ -286,7 +344,10 @@ class SubsPage(ScrollArea):
 
     def _on_failed(self, tag, err):
         if isinstance(tag, str) and tag.startswith("parse:"):
-            self._parse_arrived(tag.split(":", 1)[1])   # 批次对齐：失败也算到达
+            path = tag.split(":", 1)[1]
+            if path in self._removed:   # 已移除文件的迟到失败：不重算不弹泡
+                return
+            self._parse_arrived(path)   # 批次对齐：失败也算到达
         # 搜索链任务失败：解卡片的 searching 状态，避免转圈挂死
         if isinstance(tag, str) and (tag.startswith("newsearcher:")
                                      or tag.startswith("pull:")):

@@ -119,6 +119,10 @@ class SubsVM:
                 return
         raise KeyError(path)
 
+    def remove_file(self, path: str) -> None:
+        """从列表剔除文件（UI 移除钮）；文件从未在列则不动。"""
+        self.files = [f for f in self.files if f.path != path]
+
     def checked_parses(self) -> list[FileParse]:
         return [f for f in self.files if f.checked and f.error is None]
 
