@@ -172,8 +172,8 @@ class SubsPage(ScrollArea):
         self._preview_debounce = QTimer(self)
         self._preview_debounce.setSingleShot(True)
         self._preview_debounce.setInterval(300)
-        self._preview_debounce.timeout.connect(self._refresh_all_cards)
-        # 渐进回执刷新节流：回执只记账，突发合并成一次整卡重建（见
+        self._preview_debounce.timeout.connect(self._apply_all_cards)
+        # 渐进回执刷新节流：回执只记账，突发合并成一次增量刷新（见
         # _schedule_refresh）
         self._refresh_pending: set[str] = set()
         self._refresh_timer = QTimer(self)
@@ -340,7 +340,7 @@ class SubsPage(ScrollArea):
             card = self._card(norm)
             if card is not None:
                 self.vm.attach_searcher(card, payload)
-                self._refresh_card(card)
+                self._apply_card(card)
                 self.worker.submit(f"pull:{norm}", _pull_job, payload,
                                    self._cancel_for(norm))
         elif isinstance(tag, str) and tag.startswith("pull:"):
@@ -359,7 +359,7 @@ class SubsPage(ScrollArea):
                 self._refresh_pending.discard(norm)
                 self.vm.finish_search(card, card.searcher,
                                       cancelled=(state == "cancelled"))
-                self._refresh_card(card)
+                self._apply_card(card)
                 self._update_summary()
         elif isinstance(tag, str) and tag.startswith("pickscore:"):
             norm = tag.split(":", 1)[1]
@@ -368,7 +368,7 @@ class SubsPage(ScrollArea):
                 return
             entity, sim, size = payload
             self.vm.attach_pick(card, entity, sim, size)
-            self._refresh_card(card)
+            self._apply_card(card)
             self._update_summary()
         elif tag == "apply":
             self._on_apply_done(payload)
@@ -387,7 +387,7 @@ class SubsPage(ScrollArea):
             if card is not None and card.searching:
                 card.searching = False
                 self._refresh_pending.discard(norm)
-                self._refresh_card(card)
+                self._apply_card(card)
         if tag == "apply":                 # 派工链中断：复位防重入状态
             self._apply_results = []
             self._apply_total = 0
@@ -458,10 +458,10 @@ class SubsPage(ScrollArea):
         self._update_summary()
 
     def _schedule_refresh(self, card):
-        """渐进回执合并重建：大片池按时长切片后回执最密 ~2/s，但缓存全
-        命中时一片 24 对比瞬完、回执成洪——每次回执整卡拆除重建会把
-        布局挤崩（旧卡 deleteLater 未及处理即叠画成幽灵）。回执只记账
-        vm，300ms 单发定时器把突发合并成一次重建；终态回执仍即时刷。"""
+        """渐进回执合并刷新：大片池按时长切片后回执最密 ~2/s，缓存全
+        命中时一片 24 对比瞬完、回执成洪——每回执即时 apply 仍会把
+        refresh 洪水直接灌进 reconcile。回执只记账 vm，300ms 单发定时
+        器把突发合并成一次增量刷新；终态回执仍即时刷。"""
         self._refresh_pending.add(card.norm_name)
         if not self._refresh_timer.isActive():
             self._refresh_timer.start()
@@ -471,29 +471,26 @@ class SubsPage(ScrollArea):
         for norm in pending:
             card = self._card(norm)
             if card is not None:
-                self._refresh_card(card)
+                self._apply_card(card)
 
-    def _refresh_card(self, card):
-        """卡片数据变化（搜索批次回填/勾选回填/状态翻转）后整卡重建，保持位置。"""
-        old = self._cards_ui.get(card.norm_name)
-        idx = self.cards_box.indexOf(old) if old is not None else -1
-        if old is not None:
-            old.teardown()   # 撤预览渲染单：重建频繁，不撤则废任务塞死队列
-            self.cards_box.removeWidget(old)
-            old.hide()      # deleteLater 迟到：不 hide 幽灵卡照旧叠画
-            old.deleteLater()
-        fc = self._make_card_ui(card)
-        self._cards_ui[card.norm_name] = fc
-        if idx >= 0:
-            self.cards_box.insertWidget(idx, fc)
+    def _apply_card(self, card):
+        """卡数据变化（搜索批次回填/勾选回填/状态翻转）后就地刷新：FontCard
+        按 vm 卡数据 reconcile——新候选行位次插入、按钮/勾选/预览文字
+        原地刷。整卡不拆不重建（旧「拆除重建」路线每 300ms 闪一次、点击
+        搜索钮滚动瞬移、焦点丢失，2026-10-29 重做废弃）。
+        尾随 _update_summary：searching 翻转（起搜/终态）在此发生，设置页
+        的「搜索中改门槛待生效」提示依赖该信号。"""
+        fc = self._cards_ui.get(card.norm_name)
+        if fc is None:                     # 无 UI 的卡（理论不可达）：兜底建
+            self._append_card(card)        # （内含 _update_summary）
         else:
-            self.cards_box.addWidget(fc)
-        self._update_summary()
+            fc.apply()
+            self._update_summary()
 
-    def _refresh_all_cards(self):
+    def _apply_all_cards(self):
         for card in list(self.vm.cards):
             if card.norm_name in self._cards_ui:
-                self._refresh_card(card)
+                self._apply_card(card)
 
     def _on_option_checked(self, norm, key):
         card = self._card(norm)
@@ -506,7 +503,8 @@ class SubsPage(ScrollArea):
             self._update_summary()
 
     def _on_preview_text(self, _):
-        # 预览文字变化：整卡重建（tile 缓存键含文字，重渲走 LRU 命中）
+        # 预览文字变化：各卡预览条就地换文字重渲（tile 缓存键含文字，
+        # 重渲走 LRU 命中）
         self._preview_debounce.start()
 
     def _card(self, norm):
@@ -530,7 +528,7 @@ class SubsPage(ScrollArea):
             card.searcher.resume()    # 清暂停+重置批计数：否则空片回执原地打转
             cancel = {"cancelled": False}   # 上轮手动暂停标志不带入本轮
             self._cancels[norm] = cancel
-            self._refresh_card(card)
+            self._apply_card(card)
             self.worker.submit(f"pull:{norm}", _pull_job, card.searcher,
                                cancel)     # 续用：累计 hit_count 语义
             return
@@ -540,7 +538,7 @@ class SubsPage(ScrollArea):
         card.searching = True
         cancel = {"cancelled": False}       # 先立取消标志：newsearcher 在途
         self._cancels[norm] = cancel        # 时点 Pause 也能生效（回执沿用）
-        self._refresh_card(card)
+        self._apply_card(card)
         self.worker.submit(f"newsearcher:{norm}", _new_searcher_job,
                            vm_target(self.vm, card),
                            self.vm.chars_by_norm.get(norm, set()),

@@ -126,13 +126,14 @@ def _pct(v: float | None) -> str:
     return f"{v * 100:.1f}%" if v is not None else ""
 
 
-
 class FontCard(CardWidget):
     """单张字体卡（线框重排）：状态图标+名称+用量+右侧状态徽章；缺字虚线框；
     选项逐行成带边框行（勾选框|名称+标签+指标|预览条），选中行主题色描边；
     底部单一动作列不随状态搬动——搜索钮自身变身承载全部搜索态（见
-    _cont_btn）。纯展示：勾选与搜索动作经信号上抛页面，由页面驱动 vm
-    （不触碰 vm）。"""
+    _apply_cont_state）。有状态视图：构建一次，此后 vm 卡数据变化经
+    apply() 就地刷新（新候选行插入、按钮/勾选/预览文字原地刷），整卡
+    不拆不闪；只有 _reclassify 整页重算才 teardown 重建。纯展示：
+    勾选与搜索动作经信号上抛页面，由页面驱动 vm（不触碰 vm）。"""
 
     option_checked = Signal(str, str)      # (norm_name, key)
     continue_clicked = Signal(str)
@@ -153,6 +154,8 @@ class FontCard(CardWidget):
         qconfig.themeColorChanged.connect(self._retheme)
         qconfig.themeChangedFinished.connect(self._retheme)
         self._bars: list[PreviewBar] = []   # 选项行预览条：teardown 撤单用
+        self._cont = None                   # foot 动作钮（apply 原地刷用）
+        self._pick = None
         v = QVBoxLayout(self)
         v.setSpacing(8)
         v.addWidget(self._build_head())
@@ -166,10 +169,58 @@ class FontCard(CardWidget):
         if foot is not None:
             v.addLayout(foot)
 
+    def apply(self):
+        """vm 卡数据就地刷新（搜索回执/手选回填/状态翻转后由页面调用）：
+        新增选项行按综合分位次插入，搜索钮/手选钮/勾选态/预览文字原地刷。
+        既有行相对次序恒稳——add_candidates/attach_pick 稳定排序，新项
+        只插队不换位，已建行无需搬移。零整卡重建：300ms 节流把回执洪收
+        束成一次本调用，不闪不跳不丢焦点。"""
+        self._sync_rows()
+        self._sync_foot()
+        self.set_checked(self.card.checked_key)
+        self._sync_previews()
+
+    def _sync_rows(self):
+        """行集 reconcile：新 key 建行插到 card.options 位次（其后第一个
+        已建行之前，其后全为新行则尾插），指标文案变了就地改。"""
+        old_rows = dict(self._rows)
+        for i, o in enumerate(self.card.options):
+            if o.key in old_rows:
+                lab = self._metrics.get(o.key)
+                t = self._metrics_text(o)
+                if lab is not None and lab.text() != t:
+                    lab.setText(t)
+                continue
+            row = self._build_option_row(o)
+            anchor = next((self._rows[x.key] for x in self.card.options[i + 1:]
+                           if x.key in old_rows), None)
+            idx = self._opt_layout.indexOf(anchor) if anchor is not None else -1
+            if idx < 0:
+                self._opt_layout.addWidget(row)
+            else:
+                self._opt_layout.insertWidget(idx, row)
+
+    def _sync_foot(self):
+        # pick 先启停：cont 禁用交焦点的落点条件依赖 pick 已可用
+        if self._pick is not None:
+            self._pick.setEnabled(not self.card.searching)
+        if self._cont is not None:
+            self._apply_cont_state(self._cont)
+
+    def _sync_previews(self):
+        """预览文字变化（预览框输入防抖后整页 apply）：各条原地换文字
+        重渲（tile LRU 命中零渲染）。文字没变时 set_text 内部直接返回。"""
+        pt = self._preview_text_fn()
+        for key, bar in self._bar_by_key.items():
+            o = self.card.option(key)
+            if o is not None:
+                bar.set_text(pt or o.display_name)
+
     def teardown(self):
-        """整卡重建前由页面调用：撤销所有预览条的在途渲染任务。回执
-        节流下重建频繁，不撤单则每轮重建都重复派任务，worker 串行队列
-        被废任务塞死，预览永远轮不到上屏（真机实锤）。"""
+        """整卡销毁前由页面调用（仅 _reclassify 整页重算/页面关闭）：
+        撤销所有预览条的在途渲染任务。不撤单则废任务塞死 worker 串行
+        队列，预览永远轮不到上屏（真机实锤）。apply 增量刷新不撤单——
+        行都还活着，各自的在途任务仍有效。"""
         for b in self._bars:
             b.cancel()
 
@@ -222,12 +273,15 @@ class FontCard(CardWidget):
     # ---- 选项行 ----
     def _build_options(self) -> QWidget:
         wrap = QWidget(self)
-        ol = QVBoxLayout(wrap)
-        ol.setContentsMargins(0, 0, 0, 0)
-        ol.setSpacing(6)
-        self._boxes: dict[str, CheckBox] = {}
+        self._opt_layout = QVBoxLayout(wrap)
+        self._opt_layout.setContentsMargins(0, 0, 0, 0)
+        self._opt_layout.setSpacing(6)
+        self._rows: dict[str, QFrame] = {}        # key → 行（reconcile 用）
+        self._boxes: dict[str, CheckBox] = {}     # key → 勾选框
+        self._metrics: dict[str, CaptionLabel] = {}   # key → 指标文案
+        self._bar_by_key: dict[str, PreviewBar] = {}
         for o in self.card.options:
-            ol.addWidget(self._build_option_row(o))
+            self._opt_layout.addWidget(self._build_option_row(o))
         return wrap
 
     def _build_option_row(self, o) -> QFrame:
@@ -240,6 +294,8 @@ class FontCard(CardWidget):
         g.setSpacing(10)
 
         cb = CheckBox()
+        # objectName 带选项键（测试定位用）
+        cb.setObjectName(f"opt:{o.key}")
         # qfw QSS min-width:28px 把空文本框撑到 57px（indicator 右侧拖
         # 空白，选项名离勾选框过远）；polish 会把 min-width 写回
         # minimumWidth，setFixedWidth 前置必被顶回——走 qfw
@@ -272,7 +328,9 @@ class FontCard(CardWidget):
             name_row.addWidget(_pill(m))            # 简繁/字重等：中性灰
         name_row.addStretch(1)
         text.addLayout(name_row)
-        text.addWidget(CaptionLabel(self._metrics_text(o)))
+        m_lab = CaptionLabel(self._metrics_text(o))
+        self._metrics[o.key] = m_lab
+        text.addWidget(m_lab)
         g.addLayout(text, 1)
 
         if o.entity is not None:
@@ -282,6 +340,7 @@ class FontCard(CardWidget):
                              fit_width=False)   # 行内 hint 定宽：防呼吸边自反塌缩
             bar.setFixedHeight(28)
             self._bars.append(bar)
+            self._bar_by_key[o.key] = bar
             g.addWidget(bar, 0, Qt.AlignVCenter)
 
         # 行点击=切换选择：实例级覆盖 mousePressEvent（QFrame 默认不消费），
@@ -293,6 +352,7 @@ class FontCard(CardWidget):
                 self.option_checked.emit(self.card.norm_name, k)
 
         row.mousePressEvent = _row_press
+        self._rows[o.key] = row
         return row
 
     def _metrics_text(self, o) -> str:
@@ -331,6 +391,7 @@ class FontCard(CardWidget):
     # ---- 底部随状态 ----
     def _pick_btn(self) -> TransparentPushButton:
         btn = TransparentPushButton(FIF.SEARCH_MIRROR, "从字体库手动选择")
+        btn.setObjectName("pickBtn")
         # 搜索中禁用：评分任务会排在搜索片后迟迟不回，选择结果也易被
         # 回填的候选行冲掉
         btn.setEnabled(not self.card.searching)
@@ -339,33 +400,49 @@ class FontCard(CardWidget):
         return btn
 
     def _cont_btn(self) -> TransparentPushButton:
-        """搜索钮一钮三态（用户拍板 2026-10-28）：搜索中变「寻找中…
-        已对比/总数」+Pause 图标（再点=暂停，删独立的环+文字行）；攒够
-        暂停即还原；整池搜完变禁用「无更多符合要求的相似字体」+Info。
-        位置恒由 foot 的动作列钉住，不随状态搬动。target_error 同禁用，
-        文案说明缘由（替代原独立标签行）。"""
-        card = self.card
+        """搜索钮（用户拍板 2026-10-28 一钮三态，态由 _apply_cont_state
+        承载：构建与 apply 增量刷新共用同一套逻辑）。"""
         btn = TransparentPushButton()
+        btn.setObjectName("contBtn")
+        btn.clicked.connect(
+            lambda: self.continue_clicked.emit(self.card.norm_name))
+        self._apply_cont_state(btn)
+        return btn
+
+    def _apply_cont_state(self, btn: TransparentPushButton):
+        """搜索钮四态原地刷：idle=继续寻找 / searching=寻找中…已对比/总数
+        +Pause / exhausted=禁用无更多 / target_error=禁用说明缘由。文字变
+        才 setText 并重钉 hint 宽（_action_col 按 hint 定宽对齐左缘）；
+        图标/启停随态键变（计数频繁变不触发）。"""
+        card = self.card
         if card.searching:
             s = card.searcher
             text = (f"寻找中… {s.compared}/{s.pool_size}"
                     if s is not None and s.pool_size else "寻找中…")
-            btn.setIcon(FIF.PAUSE.icon())
-            btn.setText(text)
+            state = "searching"
         elif card.search_state == "exhausted":
-            btn.setIcon(FIF.INFO.icon())
-            btn.setText("无更多符合要求的相似字体")
-            btn.setEnabled(False)
+            text, state = "无更多符合要求的相似字体", "exhausted"
         elif card.search_state == "target_error":
-            btn.setIcon(FIF.INFO.icon())
-            btn.setText("原字体无法渲染，无法比较相似度")
-            btn.setEnabled(False)
+            text, state = "原字体无法渲染，无法比较相似度", "target_error"
         else:
-            btn.setIcon(FIF.MORE.icon())
-            btn.setText("继续寻找更多")
-        btn.clicked.connect(
-            lambda: self.continue_clicked.emit(self.card.norm_name))
-        return btn
+            text, state = "继续寻找更多", "idle"
+        if btn.property("state") != state:
+            enabled = state in ("searching", "idle")
+            # 禁用前交焦点：钮带焦被禁时 Qt 把焦点塞给任意下一焦点控件，
+            # QScrollArea 见 FocusIn 滚过去（exhausted 滚动乱跳真机实锤，
+            # 落点不可控）。交给同 foot 的手选钮——贴邻且必可见，零滚动。
+            if not enabled and btn.hasFocus() and self._pick is not None \
+                    and self._pick.isEnabled():
+                self._pick.setFocus(Qt.FocusReason.OtherFocusReason)
+            btn.setProperty("state", state)
+            btn.setIcon(FIF.PAUSE.icon() if state == "searching"
+                        else FIF.INFO.icon()
+                        if state in ("exhausted", "target_error")
+                        else FIF.MORE.icon())
+            btn.setEnabled(enabled)
+        if btn.text() != text:
+            btn.setText(text)
+            btn.setFixedWidth(btn.minimumSizeHint().width())
 
     def _action_col(self, *btns) -> QVBoxLayout:
         """foot 动作钮竖排：内容默认居中，长短不一的钮左缘参差——qfw 图标
@@ -382,16 +459,20 @@ class FontCard(CardWidget):
         return col
 
     def _build_foot(self) -> QHBoxLayout | None:
-        """foot 恒为单一动作列：搜索态全部由搜索钮自身表达（_cont_btn），
-        按钮位置各态一致。"""
+        """foot 恒为单一动作列：搜索态全部由搜索钮自身表达（_apply_cont_state），
+        按钮位置各态一致。foot 组成只由 kind/字数定（分类后不变），apply
+        只刷钮态不重排。"""
         ekind = self._ekind()
         if ekind == "zero":
             return None            # 无对白用字：无需任何动作
         if ekind == "missing":
             # 库中没有：无相似度可搜（target=None），只有手动挑选入口
-            btns = (self._pick_btn(),)
+            self._pick = self._pick_btn()
+            btns = (self._pick,)
         elif self.card.n_chars > 0:
-            btns = (self._cont_btn(), self._pick_btn())
+            self._cont = self._cont_btn()
+            self._pick = self._pick_btn()
+            btns = (self._cont, self._pick)
         else:
             return None            # 0 字卡无可比字型：不给搜索入口
         foot = QHBoxLayout()
@@ -427,10 +508,8 @@ class FontCard(CardWidget):
             row.setStyleSheet(_row_qss())
 
     def _resel_rows(self):
-        """整卡重建之外的轻量重选：仅同步行描边（勾选切换不重建整卡）。"""
-        for o in self.card.options:
-            row = self._boxes[o.key].parentWidget()
-            if isinstance(row, QFrame) and row.objectName() == "optRow":
-                row.setProperty("sel", o.key == self.card.checked_key)
-                row.style().unpolish(row)
-                row.style().polish(row)
+        """轻量重选：仅同步行描边（勾选切换/apply 不重建任何行）。"""
+        for key, row in self._rows.items():
+            row.setProperty("sel", key == self.card.checked_key)
+            row.style().unpolish(row)
+            row.style().polish(row)

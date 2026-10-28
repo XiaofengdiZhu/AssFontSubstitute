@@ -123,6 +123,25 @@ class PreviewBar(CaptionLabel):
         self._job = self._worker.submit(self._tag, _render_job,
                                         self._entity, self._text)
 
+    def set_text(self, text):
+        """换预览文字（预览框输入变化）：撤在途任务、断旧结果槽、清贴图
+        重渲。tag 不变（tag 标识行非文字），旧在途结果回传时按 (tag, text)
+        双重匹配失配丢弃。文字没变直接返回（apply 高频调用防抖）。"""
+        if text == self._text:
+            return
+        self.cancel()
+        if self._connected:              # 无连接时 disconnect 会刷 warning
+            self._worker.result.disconnect(self._on_result)
+            self._connected = False
+        self._text = text
+        self._strip = None
+        self._stale_theme = False
+        self._applied_w = -1
+        self.setToolTip("")               # 上一文字失败遗留的错误详情
+        self.setText("…")
+        self.setPixmap(QPixmap())
+        self._render()
+
     def set_entity(self, entity, tag):
         """行内切换 face（字重/斜体分段）：撤在途任务、断旧结果槽、清贴
         图重渲。tag 随 fingerprint 换新——已开跑不可撤的旧任务回传时

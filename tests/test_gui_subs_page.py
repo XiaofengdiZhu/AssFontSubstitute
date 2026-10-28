@@ -145,9 +145,10 @@ def test_search_chain_pause_resume_exhaust_and_relax(qapp, tmp_path, monkeypatch
     cands = [SimpleNamespace(fingerprint=f"c{i}", display_name=f"候选{i}",
                              coverage=0.99, similarity=0.9, size_ratio=1.0,
                              n_chars=3) for i in range(2)]
+    n_sub = len(page.worker.submits)
     page._on_result(f"pull:{norm}", (cands, "exhausted"))   # 渐进回填后耗尽
     assert card.search_state == "exhausted" and len(card.options) == 4
-    assert page.worker.submits[-1][0] != f"pull:{norm}"      # 不再续拉
+    assert len(page.worker.submits) == n_sub                 # 不再续拉
 
     # 耗尽后调低门槛再搜：新门槛建新搜索器（relax 钮已删，直设等价）
     card.min_sim = 0.75
@@ -160,6 +161,27 @@ def test_search_chain_pause_resume_exhaust_and_relax(qapp, tmp_path, monkeypatch
                                     compared=5, resume=lambda: None))
     page._on_result(f"pull:{norm}", ([], "cancelled"))   # 重算弃旧拉取不挂死
     assert not card.searching
+
+
+def test_search_activity_signal_tracks_card_searching(qapp, tmp_path,
+                                                      monkeypatch):
+    """searchActiveChanged（设置页「搜索中改门槛待生效」提示依赖）：
+    起搜发 True、终态回执发 False。曾因 _apply_card 漏调
+    _update_summary 整信号死亡（True 永不发射）。"""
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, _card, norm = _feed_replace_card(page, ent_a, ent_b)
+    events = []
+    page.searchActiveChanged.connect(events.append)
+    page._continue_search(norm)
+    assert events == [True]
+    page._on_result(f"newsearcher:{norm}",
+                    SimpleNamespace(min_sim=0.85, paused=False,
+                                    target_error=False, pool_size=10,
+                                    compared=0, resume=lambda: None))
+    page._on_result(f"pull:{norm}", ([], "exhausted"))
+    assert events == [True, False]
+    assert not page._search_active
 
 
 def test_apply_confirm_mapping_and_record(qapp, tmp_path, monkeypatch):
@@ -237,10 +259,13 @@ def test_preview_text_and_save_mode_combo(qapp, tmp_path, monkeypatch):
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
     _usage, _card, _norm = _feed_replace_card(page, ent_a, ent_b)
     old = page._cards_ui["甲字体"]
-    page.preview_edit.setText("永宇")               # 防抖后整卡重建
+    page.preview_edit.setText("永宇")               # 防抖后就地刷新
     page._preview_debounce.timeout.emit()
-    assert page._cards_ui["甲字体"] is not old       # 旧卡弃置、新卡持同一 vm 卡
-    assert page._cards_ui["甲字体"].card is page.vm.cards[0]
+    assert page._cards_ui["甲字体"] is old          # 零重建：卡控件原地换预览
+    fc = page._cards_ui["甲字体"]
+    assert fc.card is page.vm.cards[0]
+    from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
+    assert all(b._text == "永宇" for b in fc.findChildren(PreviewBar))
 
     assert page.save_mode.currentIndex() == 0       # 默认另存为新文件
     assert not page.suffix_edit.isHidden()          # 另存模式显示后缀行
@@ -491,6 +516,63 @@ def test_twin_metrics_lead_phrase(qapp, tmp_path, monkeypatch):
                for t in texts), texts
 
 
+def test_continue_search_keeps_scroll_focus_and_identity(qapp, tmp_path, monkeypatch):
+    # 真机回归三连：点「继续寻找更多」只翻按钮态不重建——卡控件身份
+    # 不变、焦点停在原按钮（旧整卡重建路线焦点随卡销毁乱跳致滚动瞬移）、
+    # 滚动位置一动不动。
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    for i in range(8):
+        name = f"字体{i}"
+        ents = [_ent(f"fp{i}-{j}", f"{name}候选{j}", chars="永宇好")
+                for j in range(4)]
+        usage = FontUsage(raw_name=name, norm_name=name, style_count=1,
+                          inline_count=1, chars=set("永宇好我在"),
+                          variants={name})
+        page._on_result(f"parse:p{i}.ass",
+                        FileParse(f"p{i}.ass", None, [usage], [], []))
+    for i in range(8):
+        name = f"字体{i}"
+        ents = [_ent(f"fp{i}-{j}", f"{name}候选{j}", chars="永宇好")
+                for j in range(4)]
+        usage = FontUsage(raw_name=name, norm_name=name, style_count=1,
+                          inline_count=1, chars=set("永宇好我在"),
+                          variants={name})
+        page._on_result(
+            f"classify:{page._gen}:{i}",
+            (usage, UsageClass(kind="replace", entities=ents, coverage=0.6,
+                               missing_chars=["阿", "八"])))
+    page.show()
+    page.resize(1100, 800)
+    for _ in range(10):
+        QApplication.processEvents()
+    sb = page.verticalScrollBar()
+    sb.setValue(sb.maximum())
+    for _ in range(5):
+        QApplication.processEvents()
+    before = sb.value()
+    assert before > 0                     # 内容须超视口：滚动才有意义
+
+    norm = "字体5"
+    fc = page._cards_ui[norm]
+    btn = fc.findChild(QWidget, "contBtn")
+    btn.setFocus()
+    for _ in range(5):
+        QApplication.processEvents()
+    page._continue_search(norm)
+    for _ in range(10):
+        QApplication.processEvents()
+    assert sb.value() == before           # 瞬移即回归
+    assert page._cards_ui[norm] is fc     # 整卡不重建
+    assert QApplication.focusWidget() is btn   # 焦点原地不动
+    assert btn.text() == "寻找中…"
+
+
 def test_option_row_retheme_tracks_accent_and_theme(qapp, tmp_path, monkeypatch):
     # 选中行描边/底色烤着 themeColor() 派生值，须跟两路刷新：换强调色
     # （themeColorChanged，且信号发出时 themeColor() 尚是旧值——实测慢
@@ -645,9 +727,10 @@ def test_cont_button_states_and_manual_pause(qapp, tmp_path, monkeypatch):
 
 
 def test_running_receipts_coalesce_refresh(qapp, tmp_path, monkeypatch):
-    """渐进回执节流：running 回执只记账 vm，重建由 300ms 单发定时器
-    合并——大片池缓存全命中时回执成洪，逐回执整卡拆除重建会把布局
-    挤崩（旧卡 deleteLater 迟到叠画成幽灵）。终态回执仍即时刷。"""
+    """渐进回执节流：running 回执只记账 vm，刷新由 300ms 单发定时器
+    合并成一次 FontCard.apply() 就地刷（按钮计数原地改，零重建零闪烁）
+    ——回执洪逐回执整卡拆除重建的旧路线已废（布局挤崩+整卡频闪）。
+    终态回执仍即时刷。"""
     page = _make_page(qapp, tmp_path, monkeypatch)
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
     _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
@@ -655,17 +738,19 @@ def test_running_receipts_coalesce_refresh(qapp, tmp_path, monkeypatch):
                         pool_size=100, compared=0)
     page._on_result(f"newsearcher:{norm}", s)
     fc0 = page._cards_ui[norm]
-    for i in range(10):                         # 回执洪：记账不重建
+    for i in range(10):                         # 回执洪：记账不刷
         s.compared = 24 * (i + 1)
         page._on_result(f"pull:{norm}", ([], "running"))
         assert card.searcher.compared == s.compared
-    assert page._cards_ui[norm] is fc0          # 未触发任何整卡重建
+    assert page._cards_ui[norm] is fc0          # 卡控件身份不变
     assert norm in page._refresh_pending
     page._flush_refresh()
-    assert page._cards_ui[norm] is not fc0      # 突发合并成一次重建
+    assert page._cards_ui[norm] is fc0          # 就地刷：身份仍不变
     assert not page._refresh_pending
+    assert _cont_btn(fc0).text() == "寻找中… 240/100"
     page._on_result(f"pull:{norm}", ([], "exhausted"))
     assert card.search_state == "exhausted"     # 终态不受节流影响
+    assert not _cont_btn(fc0).isEnabled()
 
 
 
@@ -731,28 +816,84 @@ def test_target_error_button_disabled(qapp, tmp_path, monkeypatch):
     assert _pick_btn(fc).isEnabled()
 
 
+def test_exhausted_handoff_focus_to_pick(qapp, tmp_path, monkeypatch):
+    """搜索钮带焦被禁（exhausted/target_error）时焦点交同 foot 手选钮：
+    Qt 缺省把焦点塞给任意下一焦点控件，QScrollArea 见 FocusIn 就滚过去
+    ——真机「无更多符合要求的相似字体」出现时滚动乱跳实锤。"""
+    from PySide6.QtWidgets import QApplication
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, _card, norm = _feed_replace_card(page, ent_a, ent_b)
+    s = _StubSearcher()
+    page._on_result(f"newsearcher:{norm}", s)
+    fc = page._cards_ui[norm]
+    btn = _cont_btn(fc)
+    page.show()                           # 焦点断言须窗口可见
+    qapp.processEvents()
+    btn.setFocus()
+    qapp.processEvents()
+    assert QApplication.focusWidget() is btn
+    page._on_result(f"pull:{norm}", ([], "exhausted"))
+    assert not btn.isEnabled()
+    assert QApplication.focusWidget() is _pick_btn(fc)   # 焦点交棒手选钮
+    page._on_result(f"pull:{norm}", ([], "cancelled"))   # 回 paused 仍正常
+    assert btn.isEnabled() and _pick_btn(fc).isEnabled()
+    page.hide()
 
-def test_card_rebuild_cancels_preview_jobs(qapp, tmp_path, monkeypatch):
-    """整卡重建撤预览渲染单：回执节流下重建频繁，不撤单则每轮重建
-    重复派任务，worker 串行队列被废任务塞死、预览永远轮不到上屏
-    （真机实锤；浏览页列表重建本就 cancel，字幕卡此前漏了）。"""
+
+
+def test_apply_keeps_preview_jobs_and_teardown_cancels(qapp, tmp_path, monkeypatch):
+    """apply 就地刷新不撤预览渲染单（行都活着，任务仍有效——旧整卡重建
+    路线每轮重建都重复派任务塞死队列）；预览文字变化经 set_text 原地撤
+    旧单重派；teardown（整页重算）才全撤。"""
     from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
     page = _make_page(qapp, tmp_path, monkeypatch)
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
     _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
-    old_bars = page._cards_ui[norm].findChildren(PreviewBar)
-    assert old_bars
-    old_jobs = [b._job for b in old_bars]
+    bars = page._cards_ui[norm].findChildren(PreviewBar)
+    assert bars
+    old_jobs = [b._job for b in bars]
     assert all(j is not None and not j.cancelled for j in old_jobs)
-    page._refresh_card(card)
-    assert all(j.cancelled for j in old_jobs)               # 旧条全部撤单
-    new_bars = page._cards_ui[norm].findChildren(PreviewBar)
-    assert new_bars
-    assert all(b._job is not None and not b._job.cancelled
-               for b in new_bars)                           # 新条照常派单
-    page._reclassify()                                      # 整页重算同撤
-    assert all(b._job.cancelled for b in new_bars)
+    page._apply_card(card)
+    assert all(not j.cancelled for j in old_jobs)           # 就地刷不撤单
 
+    page.preview_edit.setText("永宇好")                      # 预览文字变化
+    page._apply_all_cards()
+    assert all(b._text == "永宇好" for b in bars)           # 原地换文字
+    assert all(b._job is not None and not b._job.cancelled
+               for b in bars)                               # 新单照常在途
+    page._reclassify()                                      # 整页重算同撤
+    assert all(b._job.cancelled for b in bars)
+
+
+
+def test_new_candidates_insert_in_score_order(qapp, tmp_path, monkeypatch):
+    """新候选行按综合分位次插入（vm 稳定排序：新项插队、既有行相对次序
+    恒稳），apply 后行布局序 = card.options 序，旧行控件不搬不重建。"""
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体", chars="永宇")
+    _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
+    fc = page._cards_ui[norm]
+    old_rows = dict(fc._rows)
+    s = SimpleNamespace(min_sim=0.85, paused=False, target_error=False,
+                        pool_size=100, compared=24)
+    page._on_result(f"newsearcher:{norm}", s)
+    # 分数构造插队：c0 压过乙字体、c1 居中、c2 垫底（乙字体覆盖率单项
+    # 计分 0.4，落在 c1 与 c2 之间）
+    scores = [("c0", 0.99, 0.9), ("c1", 0.2, 0.3), ("c2", 0.3, 0.05)]
+    cands = [SimpleNamespace(fingerprint=k, display_name=k, coverage=cov,
+                             similarity=sim, size_ratio=1.0, n_chars=2)
+             for k, sim, cov in scores]
+    page._on_result(f"pull:{norm}", (cands, "running"))
+    page._flush_refresh()
+    assert page._cards_ui[norm] is fc               # 仍零重建
+    layout_keys = []
+    for i in range(fc._opt_layout.count()):
+        w = fc._opt_layout.itemAt(i).widget()
+        layout_keys.append(next(k for k, r in fc._rows.items() if r is w))
+    assert layout_keys == [o.key for o in card.options]   # 行序 = 数据序
+    assert all(fc._rows[k] is old_rows.get(k)
+               for k in old_rows)                   # 旧行控件原对象保留
 
 
 def _solid_strip() -> "object":
