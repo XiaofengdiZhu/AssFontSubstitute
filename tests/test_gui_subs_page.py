@@ -42,7 +42,9 @@ class _FakeWorker(QObject):
         self.submits = []
 
     def submit(self, tag, fn, *args, **kw):
+        handle = SimpleNamespace(cancelled=False)   # 预览条撤单句柄
         self.submits.append((tag, fn, args, kw))
+        return handle
 
 
 def _make_page(qapp, tmp_path, monkeypatch):
@@ -699,3 +701,61 @@ def test_target_error_button_disabled(qapp, tmp_path, monkeypatch):
     assert not btn.isEnabled()
     assert btn.text() == "原字体无法渲染，无法比较相似度"
     assert _pick_btn(fc).isEnabled()
+
+
+
+def test_card_rebuild_cancels_preview_jobs(qapp, tmp_path, monkeypatch):
+    """整卡重建撤预览渲染单：回执节流下重建频繁，不撤单则每轮重建
+    重复派任务，worker 串行队列被废任务塞死、预览永远轮不到上屏
+    （真机实锤；浏览页列表重建本就 cancel，字幕卡此前漏了）。"""
+    from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
+    old_bars = page._cards_ui[norm].findChildren(PreviewBar)
+    assert old_bars
+    old_jobs = [b._job for b in old_bars]
+    assert all(j is not None and not j.cancelled for j in old_jobs)
+    page._refresh_card(card)
+    assert all(j.cancelled for j in old_jobs)               # 旧条全部撤单
+    new_bars = page._cards_ui[norm].findChildren(PreviewBar)
+    assert new_bars
+    assert all(b._job is not None and not b._job.cancelled
+               for b in new_bars)                           # 新条照常派单
+    page._reclassify()                                      # 整页重算同撤
+    assert all(b._job.cancelled for b in new_bars)
+
+
+
+def _solid_strip() -> "object":
+    import numpy as np
+    a = np.zeros((28, 100), dtype=np.uint8)
+    a[4:24, 4:96] = 255
+    return a
+
+
+def test_card_preview_no_shrink_loop(qapp, tmp_path, monkeypatch):
+    """fit_width=False 防自反塌缩：真实行结构（定宽勾选框+stretch 文本列
+    +hint 条）下布局迭代宽度不漂、pixmap 不 null。单控件 hbox 里 QLabel
+    Preferred 策略吞宽度、反馈环不启动——必须走整卡装配才钉得住
+    （真机实锤 68→12→1px→贴图 null）。"""
+    from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    for e in (ent_a, ent_b):                # 建卡前预置条带缓存：构造期
+        page._pvm.put_tiles((e.fingerprint, e.display_name), _solid_strip())
+    _usage, _card, norm = _feed_replace_card(page, ent_a, ent_b)
+    page.show()
+    page.resize(1100, 800)
+    qapp.processEvents()
+    bars = page._cards_ui[norm].findChildren(PreviewBar)
+    assert bars
+    ws = {b._entity.fingerprint: b.width() for b in bars}
+    assert all(w > 1 for w in ws.values())
+    for _ in range(10):                     # 布局迭代：宽度钉死不漂
+        qapp.processEvents()
+        for b in bars:
+            assert b.width() == ws[b._entity.fingerprint]
+            assert not b.pixmap().isNull()
+    page.hide()
+    page.deleteLater()

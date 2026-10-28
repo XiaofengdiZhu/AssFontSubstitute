@@ -410,6 +410,7 @@ class SubsPage(ScrollArea):
         usages = self.vm.merged_usages()
         self.vm.cards.clear()
         for w in self._cards_ui.values():
+            w.teardown()    # 撤预览渲染单
             w.hide()        # deleteLater 迟到：不 hide 旧卡照旧叠画
             w.deleteLater()
         self._cards_ui.clear()
@@ -477,6 +478,7 @@ class SubsPage(ScrollArea):
         old = self._cards_ui.get(card.norm_name)
         idx = self.cards_box.indexOf(old) if old is not None else -1
         if old is not None:
+            old.teardown()   # 撤预览渲染单：重建频繁，不撤则废任务塞死队列
             self.cards_box.removeWidget(old)
             old.hide()      # deleteLater 迟到：不 hide 幽灵卡照旧叠画
             old.deleteLater()

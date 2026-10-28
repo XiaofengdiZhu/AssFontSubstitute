@@ -152,6 +152,7 @@ class FontCard(CardWidget):
         # 不同——都要重拼。receiver 是本卡，销毁时 Qt 自动断连
         qconfig.themeColorChanged.connect(self._retheme)
         qconfig.themeChangedFinished.connect(self._retheme)
+        self._bars: list[PreviewBar] = []   # 选项行预览条：teardown 撤单用
         v = QVBoxLayout(self)
         v.setSpacing(8)
         v.addWidget(self._build_head())
@@ -164,6 +165,13 @@ class FontCard(CardWidget):
         foot = self._build_foot()
         if foot is not None:
             v.addLayout(foot)
+
+    def teardown(self):
+        """整卡重建前由页面调用：撤销所有预览条的在途渲染任务。回执
+        节流下重建频繁，不撤单则每轮重建都重复派任务，worker 串行队列
+        被废任务塞死，预览永远轮不到上屏（真机实锤）。"""
+        for b in self._bars:
+            b.cancel()
 
     # ---- 头部 ----
     def _ekind(self) -> str:
@@ -270,8 +278,10 @@ class FontCard(CardWidget):
         if o.entity is not None:
             bar = PreviewBar(self._worker, self._pvm, o.entity,
                              self._preview_text_fn() or o.display_name,
-                             f"card:{self.card.norm_name}:{o.key}")
+                             f"card:{self.card.norm_name}:{o.key}",
+                             fit_width=False)   # 行内 hint 定宽：防呼吸边自反塌缩
             bar.setFixedHeight(28)
+            self._bars.append(bar)
             g.addWidget(bar, 0, Qt.AlignVCenter)
 
         # 行点击=切换选择：实例级覆盖 mousePressEvent（QFrame 默认不消费），

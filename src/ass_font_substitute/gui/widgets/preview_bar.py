@@ -42,7 +42,8 @@ class PreviewBar(CaptionLabel):
     条带按屏幕 DPR 渲染物理分辨率（STRIP_PX 超采样），显示前缩到
     本行物理高度再标 DPR——逻辑尺寸 28、像素级清晰。"""
 
-    def __init__(self, worker, pvm, entity, text, tag, height=28, parent=None):
+    def __init__(self, worker, pvm, entity, text, tag, height=28,
+                 parent=None, fit_width=True):
         # qfluentwidgets FluentLabelBase.__init__ 是 singledispatchmethod，
         # (text, parent) 分支会经 self.__init__ 重派发——子类下会递归回本构造，
         # 故只传 parent、占位文字改用 setText（1.11.3 API 适配，语义不变）
@@ -51,6 +52,12 @@ class PreviewBar(CaptionLabel):
         self.setFixedHeight(height)
         self._worker, self._pvm = worker, pvm
         self._entity, self._text, self._tag = entity, text, tag
+        # fit_width=True：条占满行宽（浏览页/选择器，vbox 拉伸行宽外部钉
+        # 死，width()-16 呼吸边稳定）。False：条按自身贴图 hint 定宽
+        # （字幕卡选项行，hbox 里没人管宽）——width() 就是贴图宽，呼吸边
+        # 自反：每轮 resizeEvent 缩 16px 直到 1px 隐形（真机实锤），改用
+        # 静态 360 上限、禁宽度反馈重贴
+        self._fit_width = fit_width
         self._inflight = False
         self._connected = False              # result 信号是否仍挂着本槽
         self._job = None                     # 在途任务的取消句柄
@@ -86,12 +93,15 @@ class PreviewBar(CaptionLabel):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         # 首贴发生在布局前（宽未知，退 360 上限）；布局定宽后按实际
-        # 可用宽重贴——QLabel 只裁不缩，超宽贴图会右缘截半字
-        if (self._strip is not None and self.width() > 1
+        # 可用宽重贴——QLabel 只裁不缩，超宽贴图会右缘截半字。
+        # hint 定宽模式（fit_width=False）无外部宽度可言，禁反馈重贴
+        if (self._fit_width and self._strip is not None and self.width() > 1
                 and self._applied_w != self._max_w()):
             self._apply(self._strip)
 
     def _max_w(self) -> int:
+        if not self._fit_width:
+            return _MAX_BAR_W
         if self.width() <= 1:
             return _MAX_BAR_W
         return max(0, min(_MAX_BAR_W, self.width() - _WIDTH_MARGIN))
