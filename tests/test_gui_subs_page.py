@@ -456,11 +456,39 @@ def test_pick_score_receipt_and_metrics_text(qapp, tmp_path, monkeypatch):
     fc = page._cards_ui["甲字体"]
     row = fc._boxes["fp2"].parentWidget()
     texts = [lab.text() for lab in row.findChildren(QLabel)]
-    assert any("相似 88.0%" in t and "未覆盖 2 字" in t for t in texts), texts
+    # 次序（用户拍板 2026-10-29）：相似 → 覆盖 → 未覆盖 → 相对大小
+    assert any(t == "相似 88.0% · 覆盖 60.0% · 未覆盖 2 字 · 相对大小 104.0%"
+               for t in texts), texts
 
     # 卡被重算后迟到的评分回执：弃置不炸
     page.on_library_changed()
     page._on_result("pickscore:甲字体", (ent_b, 0.5, 1.0))
+
+
+def test_twin_metrics_lead_phrase(qapp, tmp_path, monkeypatch):
+    # 孪生行次序（用户拍板 2026-10-29）：行首注明来由，后接覆盖/未覆盖；
+    # 孪生行无相似率/相对大小
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    from PySide6.QtWidgets import QLabel
+
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    ent_a = _ent("fp1", "甲字体")
+    ent_twin = _ent("fp-twin", "甲字体简", chars="永宇好")
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=1, chars=set("永宇好我在"), variants={"甲字体"})
+    page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0",
+                    (usage, UsageClass(kind="twin", entities=[ent_a],
+                                       twin_hit=ent_twin)))
+    card = page.vm.cards[0]
+    assert card.checked_key == "fp-twin"          # 默认勾选链：孪生优先
+    fc = page._cards_ui["甲字体"]
+    row = fc._boxes["fp-twin"].parentWidget()
+    texts = [lab.text() for lab in row.findChildren(QLabel)]
+    assert any(t == "原字体名称对应的简体名称 · 覆盖 60.0% · 未覆盖 2 字"
+               for t in texts), texts
 
 
 def test_option_row_retheme_tracks_accent_and_theme(qapp, tmp_path, monkeypatch):

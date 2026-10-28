@@ -307,16 +307,25 @@ class FontCard(CardWidget):
         parts = [p for p in (
             f"相似 {_pct(o.similarity)}" if o.similarity is not None else None,
             f"覆盖 {_pct(o.coverage)}" if o.coverage is not None else None,
-            f"相对大小 {_pct(o.size_ratio)}" if o.size_ratio is not None else None,
         ) if p]
+        # 孪生对应：行首注明来由（用户拍板 2026-10-29），后接覆盖/未覆盖；
+        # 孪生行无相似率/相对大小评分
+        if "孪生对应" in o.badges:
+            text = "原字体名称对应的简体名称"
+            if o.coverage is not None:
+                text += f" · 覆盖 {_pct(o.coverage)}"
+                n_missing = round(self.card.n_chars * (1 - o.coverage))
+                if n_missing > 0:
+                    text += f" · 未覆盖 {n_missing} 字"
+            return text
+        # 次序（用户拍板 2026-10-29）：相似 → 覆盖 → 未覆盖 → 相对大小
         text = " · ".join(parts) if parts else "已选"
-        # 覆盖不足的候选/手选行同原字体行补未覆盖字数；孪生注脚垫尾
         if o.coverage is not None:
             n_missing = round(self.card.n_chars * (1 - o.coverage))
             if n_missing > 0:
                 text += f" · 未覆盖 {n_missing} 字"
-        if "孪生对应" in o.badges:
-            text += " · 与原字体同款设计"
+        if o.size_ratio is not None:
+            text += f" · 相对大小 {_pct(o.size_ratio)}"
         return text
 
     # ---- 底部随状态 ----
