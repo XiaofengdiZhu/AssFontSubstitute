@@ -11,6 +11,7 @@ from PySide6.QtGui import QPainterPath
 from PySide6.QtGui import QPen
 from PySide6.QtWidgets import QFrame
 from PySide6.QtWidgets import QHBoxLayout
+from PySide6.QtWidgets import QLabel
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import BodyLabel
@@ -18,6 +19,7 @@ from qfluentwidgets import CaptionLabel
 from qfluentwidgets import CardWidget
 from qfluentwidgets import CheckBox
 from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import FluentStyleSheet
 from qfluentwidgets import IconWidget
 from qfluentwidgets import IndeterminateProgressRing
 from qfluentwidgets import InfoBadge
@@ -36,6 +38,34 @@ from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 
 def _pill(text: str) -> PillLabel:
     return pill(text)
+
+
+_TAG_STYLE = {"原": ("#757575", "#9a9a9a"), "孪": ("#0f7b0f", "#6ccb5f")}
+
+
+def _char_tag(ch: str) -> QWidget:
+    """名前单字圆角框标签（无底色）：亮暗各一份描边/文字色，经 qfw
+    setCustomStyleSheet 随主题切换。裸 QLabel 须先 apply 一个 qfw 样式表
+    挂上 CustomStyleSheetWatcher——否则自定义 QSS 只写属性无人应用。
+    壳层 margin 不对称（上 3 下 0）把框相对名行中心下压 1.5px：字体名
+    字形带在其 label 矩形里偏下，框按行居中会整体偏高（实测上差 2px、
+    下差 1px，取中对齐）。"""
+    light, dark = _TAG_STYLE[ch]
+    lab = QLabel(ch)
+    lab.setAlignment(Qt.AlignCenter)
+    lab.setFixedSize(15, 15)
+    FluentStyleSheet.LABEL.apply(lab)
+    setCustomStyleSheet(
+        lab,
+        f"QLabel{{color:{light}; border:1px solid {light};"
+        f" border-radius:3px; font-size:9px;}}",
+        f"QLabel{{color:{dark}; border:1px solid {dark};"
+        f" border-radius:3px; font-size:9px;}}")
+    wrap = QWidget()
+    v = QVBoxLayout(wrap)
+    v.setContentsMargins(0, 3, 0, 0)
+    v.addWidget(lab)
+    return wrap
 
 
 # 状态图标/徽章配色（亮/暗各一份，线框配色）
@@ -223,12 +253,17 @@ class FontCard(CardWidget):
         text.setSpacing(2)
         name_row = QHBoxLayout()
         name_row.setSpacing(6)
+        # 原字体/孪生对应 → 名前单字框标签（原=灰、孪=绿，无底色）
+        if "原字体" in o.badges:
+            name_row.addWidget(_char_tag("原"))
+        elif "孪生对应" in o.badges:
+            name_row.addWidget(_char_tag("孪"))
         name_row.addWidget(BodyLabel(o.display_name))
-        for b in [*o.badges, *o.meta]:
-            if b in ("孪生对应", "上次使用"):        # 强调标签用主题徽章
+        for b in o.badges:
+            if b == "上次使用":                     # 记忆回放仍走主题徽章
                 name_row.addWidget(InfoBadge.info(b))
-            else:                                   # 原字体/不改动/简繁/字重等：中性灰
-                name_row.addWidget(_pill(b))
+        for m in o.meta:
+            name_row.addWidget(_pill(m))            # 简繁/字重等：中性灰
         name_row.addStretch(1)
         text.addLayout(name_row)
         text.addWidget(CaptionLabel(self._metrics_text(o)))

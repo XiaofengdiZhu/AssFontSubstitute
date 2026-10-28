@@ -92,7 +92,7 @@ def test_make_card_keep_with_original_badge(vm_full):
     assert card.kind == "keep"
     assert card.header == "1 样式 · 2 行内 · 4 字"
     assert [o.key for o in card.options] == ["fp-hei", "fp-song"]
-    assert "原字体" in card.options[0].badges and "不改动" in card.options[0].badges
+    assert "原字体" in card.options[0].badges     # 「不改动」标签已删（2026-10-28）
     # _ent("fp-song", "宋体", "永宇", "宋")："宋" 落在 category 位，
     # script 保持默认 "简"、weight 默认 400
     assert card.options[1].meta == ["简", "W400", "宋"]
@@ -106,11 +106,12 @@ def test_make_card_twin_lists_originals(vm_full):
     usage = _usage("黑体", "永宇好字之外的字")            # 在库但覆盖不足
     cls = UsageClass("twin", [ents[2]], 1.0, [], twin_hit=ents[2])
     card = vm.make_card(usage, cls)
-    assert [o.key for o in card.options] == ["fp-twin", "fp-hei"]
-    assert "孪生对应" in card.options[0].badges
-    assert "原字体" in card.options[1].badges            # 用户拍板：补列原字体
+    # 行序（2026-10-28）：原字体恒第一，孪生第二
+    assert [o.key for o in card.options] == ["fp-hei", "fp-twin"]
+    assert "原字体" in card.options[0].badges            # 用户拍板：补列原字体
+    assert "孪生对应" in card.options[1].badges
     vm.apply_default_check(card)
-    assert card.checked_key == "fp-twin"
+    assert card.checked_key == "fp-twin"                 # 默认勾选链不变：孪生优先
 
 
 def test_make_card_replace_missing_preview(vm_full):
@@ -141,6 +142,29 @@ def test_make_card_missing_and_zero(vm_full):
     assert c1.checked_key == KEEP and c1.replaced is False
     c2 = vm.make_card(_usage("空用字体", ""), UsageClass("zero"))
     assert c2.kind == "zero" and c2.status_text == "无对白用字"
+
+
+def test_candidate_rows_resorted_by_score(vm_full):
+    # 行序（2026-10-28）：原字体恒第一；搜索候选按相似率+覆盖率综合分
+    # 插位（add_candidates 不再尾缀，重排中段）
+    vm, ents = _vm_full(vm_full)
+    card = vm.make_card(_usage("黑体", FULL), UsageClass("replace",
+                                                         [ents[0]], 0.5, []))
+    assert [o.key for o in card.options] == ["fp-hei"]
+
+    def cand(fp, sim, cov):
+        from types import SimpleNamespace
+        return SimpleNamespace(fingerprint=fp, display_name=fp,
+                               coverage=cov, similarity=sim, size_ratio=1.0,
+                               n_chars=4)
+
+    vm.add_candidates(card, [cand("fp-lo", 0.55, 0.60),
+                             cand("fp-hi", 0.95, 0.99)])
+    assert [o.key for o in card.options] == ["fp-hei", "fp-hi", "fp-lo"]
+    # 二批低分候选续排中段末尾
+    vm.add_candidates(card, [cand("fp-mid", 0.70, 0.70)])
+    assert [o.key for o in card.options] == ["fp-hei", "fp-hi", "fp-mid",
+                                             "fp-lo"]
 
 
 def test_default_check_last_decision_wins(vm_full, tmp_path):

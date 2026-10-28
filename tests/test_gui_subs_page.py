@@ -399,6 +399,33 @@ def test_remove_file_guards_late_parse_receipts(qapp, tmp_path, monkeypatch):
     assert page._gen == gen1 + 1                               # 重加照常重算
 
 
+def test_cards_inserted_by_kind_rank(qapp, tmp_path, monkeypatch):
+    # 卡序（2026-10-28）：孪生→需替换→库中没有→保留；回执乱序到达也按
+    # 档插入，vm.cards 与 UI 同步
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    from types import SimpleNamespace
+
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+
+    for n in ("甲", "乙", "丙"):
+        page._on_result(f"parse:{n}.ass", FileParse(f"{n}.ass", None, [], [], []))
+
+    def feed(norm, kind):
+        usage = FontUsage(raw_name=norm, norm_name=norm, style_count=1,
+                          inline_count=1, chars=set("永"), variants={norm})
+        cls = SimpleNamespace(kind=kind, entities=[], twin_hit=None,
+                              coverage=1.0, missing_chars=[])
+        page._on_result(f"classify:{page._gen}:x", (usage, cls))
+
+    for norm, kind in (("乙", "replace"), ("丙", "keep"), ("甲", "twin")):
+        feed(norm, kind)
+    assert [c.kind for c in page.vm.cards] == ["twin", "replace", "keep"]
+    idxs = [page.cards_box.indexOf(page._cards_ui[n])
+            for n in ("甲", "乙", "丙")]
+    assert idxs == sorted(idxs) and -1 not in idxs
+
+
 def test_option_row_retheme_tracks_accent_and_theme(qapp, tmp_path, monkeypatch):
     # 选中行描边/底色烤着 themeColor() 派生值，须跟两路刷新：换强调色
     # （themeColorChanged，且信号发出时 themeColor() 尚是旧值——实测慢

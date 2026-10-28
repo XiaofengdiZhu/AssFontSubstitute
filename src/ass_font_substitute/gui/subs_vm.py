@@ -24,6 +24,16 @@ KEEP = "__keep__"           # 「保留原字体名」选项键（missing/zero �
 SIM_FLOOR = 0.50            # 放宽重算下限（= SIM_BOUNDS[0]）
 RELAX_STEP = 0.10
 
+CARD_RANK = {"twin": 0, "replace": 1, "missing": 2, "keep": 3, "zero": 3}
+# 卡片展示序（用户拍板 2026-10-28）：孪生最前 → 需替换 → 库中没有 → 保留
+# 垫底；classify 回执按此插入（worker 串行，卡序与提交序一致）
+
+
+def _opt_score(o: OptionItem) -> float:
+    """候选行综合分：相似率+覆盖率等权求和（无相似率的在库推荐行按
+    覆盖率单项计）。仅用于行序，不影响勾选/替换语义。"""
+    return (o.similarity or 0.0) + (o.coverage or 0.0)
+
 _STATUS = {"zero": "无对白用字", "keep": "保留", "twin": "孪生对应",
            "replace": "需替换", "missing": "库中没有"}
 
@@ -42,7 +52,7 @@ class OptionItem:
     similarity: float | None = None
     size_ratio: float | None = None
     meta: list[str] = field(default_factory=list)     # 简/繁/简繁 · W400 · 黑
-    badges: list[str] = field(default_factory=list)   # 孪生对应/上次使用/原字体/不改动
+    badges: list[str] = field(default_factory=list)   # 原字体/孪生对应/上次使用
     source: str = "search"                            # original/twin/recommend/search/last/pick
     n_chars: int | None = None
     entity: FontEntity | None = None                  # KEEP 行为 None
@@ -155,29 +165,43 @@ class SubsVM:
                     variants=set(usage.variants))
         self.chars_by_norm[usage.norm_name] = set(usage.chars)
         if cls.kind in ("zero", "missing"):
-            card.options = [OptionItem(KEEP, "保留原字体名", badges=["不改动"])]
+            card.options = [OptionItem(KEEP, "保留原字体名")]
             return card
         opts = [self._entity_option(e, usage) for e in cls.entities]
         if cls.kind == "twin" and cls.twin_hit is not None:
             # 用户拍板 2026-10-23：孪生卡补列在库原字体（繁版可手选保留）。
             # classify 的 twin 类只携带孪生体，在库原字体按名补查实体集。
-            twin = cls.twin_hit
-            have = {e.fingerprint for e in cls.entities} | {twin.fingerprint}
+            have = {e.fingerprint for e in cls.entities}
+            have.add(cls.twin_hit.fingerprint)
             opts += [self._entity_option(e, usage)
                      for e in self._by_norm.get(usage.norm_name, [])
                      if e.fingerprint not in have]
-        opts.sort(key=lambda o: -(o.coverage or 0.0))
-        if cls.kind == "twin":
+        # 行序（用户拍板 2026-10-28）：原字体恒第一，孪生第二，其余按
+        # 相似率+覆盖率综合分降序——在库推荐行无相似率，覆盖率单项计分
+        origs = [o for o in opts if "原字体" in o.badges]
+        rest = [o for o in opts if "原字体" not in o.badges]
+        rest.sort(key=lambda o: -_opt_score(o))
+        if cls.kind == "twin" and cls.twin_hit is not None:
             twin = cls.twin_hit
-            tcov, _ = coverage_detail(twin.cmap, usage.chars)
-            twin_opt = OptionItem(twin.fingerprint, self._dname(twin),
-                                  coverage=tcov,
-                                  meta=self._meta(twin), badges=["孪生对应"],
-                                  source="twin", entity=twin)
-            card.options = [twin_opt] + [o for o in opts
-                                         if o.key != twin.fingerprint]
+            same = next((o for o in origs if o.key == twin.fingerprint), None)
+            if same is not None:
+                # 同名孪生（如 宋体→宋体）：原字体行与孪生行同指纹，单行
+                # 呈现、徽章双挂；source 翻成 twin——勾选=替换语义（映射
+                # 同名改写真实形态），保持 original 会丢映射
+                same.badges = ["原字体", "孪生对应"]
+                same.source = "twin"
+                card.options = [*origs, *rest]
+            else:
+                tcov, _ = coverage_detail(twin.cmap, usage.chars)
+                twin_opt = OptionItem(twin.fingerprint, self._dname(twin),
+                                      coverage=tcov,
+                                      meta=self._meta(twin),
+                                      badges=["孪生对应"],
+                                      source="twin", entity=twin)
+                rest = [o for o in rest if o.key != twin.fingerprint]
+                card.options = [*origs, twin_opt, *rest]
         else:
-            card.options = opts
+            card.options = origs + rest
         if cls.kind == "replace":
             card.n_missing = len(cls.missing_chars)
             card.missing_preview = list(cls.missing_chars)[:12]
@@ -193,7 +217,7 @@ class SubsVM:
         is_orig = usage.norm_name in {normalize_name(a) for a in e.aliases}
         return OptionItem(e.fingerprint, self._dname(e), coverage=cov,
                           meta=self._meta(e),
-                          badges=(["原字体", "不改动"] if is_orig else []),
+                          badges=(["原字体"] if is_orig else []),
                           source="original" if is_orig else "recommend",
                           entity=e)
 
@@ -223,7 +247,15 @@ class SubsVM:
                 card.checked_key = fp
                 return
         if card.kind == "twin":
-            card.checked_key = card.options[0].key
+            # 行序里孪生行可能在原字体之后，按 source 取（同名孪生合并行
+            # 也是 source=twin）；无实体孪生卡兜底 KEEP
+            twin = next((o for o in card.options if o.source == "twin"), None)
+            if twin is not None:
+                card.checked_key = twin.key
+            elif card.options:
+                card.checked_key = card.options[0].key
+            else:
+                card.checked_key = KEEP
             return
         orig = next((o for o in card.options if "原字体" in o.badges), None)
         if orig is not None:
@@ -242,7 +274,8 @@ class SubsVM:
         card.min_sim = float(searcher.min_sim)
 
     def add_candidates(self, card: Card, candidates) -> list[OptionItem]:
-        """搜索批次回填：按指纹去重，实体查 ent_by_fp；返回本次新增项。"""
+        """搜索批次回填：按指纹去重，实体查 ent_by_fp；返回本次新增项。
+        候选行并入综合分排序（原字体/孪生位置固定，见 make_card 行序）。"""
         added = []
         for c in candidates:
             if card.option(c.fingerprint) is not None:
@@ -259,6 +292,13 @@ class SubsVM:
                            entity=ent)
             card.options.append(o)
             added.append(o)
+        if added:
+            head = [o for o in card.options if o.source == "original"]
+            head += [o for o in card.options if o.source == "twin"]
+            rest = [o for o in card.options
+                    if o.source not in ("original", "twin")]
+            rest.sort(key=lambda o: -_opt_score(o))
+            card.options = head + rest
         return added
 
     def finish_search(self, card: Card, searcher: FontSearcher) -> None:
@@ -300,7 +340,8 @@ class SubsVM:
         return max(ents, key=lambda e: e.cmap.hit_ratio(chars)) if chars else ents[0]
 
     def attach_pick(self, card: Card, entity: FontEntity) -> OptionItem:
-        """选择对话框回填：去重后勾选该实体。"""
+        """选择对话框回填：去重后勾选该实体（并入综合分行序，同
+        add_candidates）。"""
         chars = self.chars_by_norm.get(card.norm_name, set())
         cov, _ = coverage_detail(entity.cmap, chars)
         o = card.option(entity.fingerprint)
@@ -309,6 +350,12 @@ class SubsVM:
                            coverage=cov,
                            meta=self._meta(entity), source="pick", entity=entity)
             card.options.append(o)
+            head = [x for x in card.options if x.source == "original"]
+            head += [x for x in card.options if x.source == "twin"]
+            rest = [x for x in card.options
+                    if x.source not in ("original", "twin")]
+            rest.sort(key=lambda x: -_opt_score(x))
+            card.options = head + rest
         card.checked_key = o.key
         return o
 

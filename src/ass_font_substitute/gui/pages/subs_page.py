@@ -36,6 +36,7 @@ from ass_font_substitute.gui.jobs import pull_chunk
 from ass_font_substitute.gui.lastdir import pick_open_files
 from ass_font_substitute.gui.paths import decisions_path
 from ass_font_substitute.gui.preview_vm import PreviewVM
+from ass_font_substitute.gui.subs_vm import CARD_RANK
 from ass_font_substitute.gui.subs_vm import SubsVM
 from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.widgets.font_card import FontCard
@@ -315,8 +316,14 @@ class SubsPage(ScrollArea):
             usage, cls = payload
             card = self.vm.make_card(usage, cls)
             self.vm.apply_default_check(card)
-            self.vm.cards.append(card)
-            self._append_card(card)
+            # 卡序按 CARD_RANK 插入（孪生→需替换→库中没有→保留）
+            idx = len(self.vm.cards)
+            for j, c in enumerate(self.vm.cards):
+                if CARD_RANK.get(c.kind, 9) > CARD_RANK.get(card.kind, 9):
+                    idx = j
+                    break
+            self.vm.cards.insert(idx, card)
+            self._append_card(card, idx)
         elif tag == "slib":
             self.vm.set_entities(payload.lib.entities())
         elif isinstance(tag, str) and (tag.startswith("searcher:")
@@ -419,10 +426,13 @@ class SubsPage(ScrollArea):
         fc.pick_clicked.connect(self._open_picker)
         return fc
 
-    def _append_card(self, card):
+    def _append_card(self, card, idx=None):
         fc = self._make_card_ui(card)
         self._cards_ui[card.norm_name] = fc
-        self.cards_box.addWidget(fc)
+        if idx is None or idx >= self.cards_box.count():
+            self.cards_box.addWidget(fc)
+        else:
+            self.cards_box.insertWidget(idx, fc)
         self._update_summary()
 
     def _refresh_card(self, card):
