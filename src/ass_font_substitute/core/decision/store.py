@@ -22,7 +22,11 @@ def _connect(db_path: Path) -> sqlite3.Connection:
 
 def record_decision(db_path: Path, norm_name: str, direction: str,
                     fingerprint: str | None, keep: bool = False):
-    """记录/覆盖一条决定；键 = 规范化字体名 + 方向，只保留最近一次。"""
+    """记录/覆盖一条决定；键 = 规范化字体名 + 方向，只保留最近一次。
+
+    本层不做归一：norm_name 必须由调用方传 normalize_name 结果
+    （生产调用点 subs_vm.record_all 传 c.norm_name）。传原始名记忆
+    静默 miss，不再补救。"""
     with closing(_connect(db_path)) as conn, conn:
         conn.execute("INSERT OR REPLACE INTO decisions VALUES (?,?,?,?,?)",
                      (norm_name, direction, fingerprint, int(keep), time.time()))
@@ -30,7 +34,8 @@ def record_decision(db_path: Path, norm_name: str, direction: str,
 
 def latest_decision(db_path: Path, norm_name: str,
                     direction: str) -> tuple[str | None, bool] | None:
-    """返回 (fingerprint, keep)；无记录 None。"""
+    """返回 (fingerprint, keep)；无记录 None。norm_name 须传归一名，
+    同 record_decision。"""
     conn = _connect(db_path)
     try:
         row = conn.execute(
