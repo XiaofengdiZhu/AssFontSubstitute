@@ -46,6 +46,23 @@ def test_parse_ttc(tmp_path):
     assert {r.aliases[0] for r in recs} >= {"A體", "B體"}
 
 
+def test_parse_missing_os2_falls_back(tmp_path):
+    # 终审 P1：缺 OS/2 表的老字库（恰是 v9 要救的文鼎系）曾整 face 丢弃
+    # ——度量表缺失回退中性默认（400/5/非斜体）继续；name/cmap 缺失才判坏
+    from fontTools.ttLib import TTFont
+
+    p = tmp_path / "a.ttf"
+    build_font(p, chars="永中", family="A體")
+    f = TTFont(p)
+    del f["OS/2"]
+    f.save(tmp_path / "noos2.ttf")
+    recs = parse_font_file(tmp_path / "noos2.ttf")
+    assert len(recs) == 1
+    r = recs[0]
+    assert r.weight == 400 and r.width == 5 and not r.italic
+    assert r.cmap.contains(ord("永"))
+
+
 def test_parse_ttc_partial_face_failure(tmp_path):
     # spec §11：TTC 个别子字体解析失败 → 跳过该子字体，文件其余照常
     p = tmp_path / "a.ttc"

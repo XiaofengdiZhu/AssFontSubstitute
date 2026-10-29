@@ -133,13 +133,19 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                 psname = next((r.toUnicode() for r in name.names if r.nameID == 6), None)
                 version = parse_version(next((r.toUnicode() for r in name.names
                                               if r.nameID == 5), None))
-                os2 = tt["OS/2"]
+                # OS/2 缺失（老字库/精简字体，恰是 v9 要救的文鼎系）回退
+                # 中性默认值继续——可渲染字体不该因缺度量表被整 face 丢弃；
+                # name/cmap 缺失才判坏（无名字无覆盖数据，实体无意义）
+                os2 = tt.get("OS/2")
+                weight = os2.usWeightClass if os2 is not None else 400
+                width = os2.usWidthClass if os2 is not None else 5
+                italic = bool(os2.fsSelection & 1) if os2 is not None else False
                 cmap = CmapRanges.from_cmap_subtables(tt["cmap"].tables)
                 out.append(FontRecord(
                     dir_path=str(path.parent), rel_path=path.name, face_index=idx,
                     psname=psname, version=version, aliases=aliases,
-                    weight=os2.usWeightClass, width=os2.usWidthClass,
-                    italic=bool(os2.fsSelection & 1),
+                    weight=weight, width=width,
+                    italic=italic,
                     cmap=cmap,
                     script=classify_script(cmap), category=classify_category(aliases),
                     display_name=_display_name(by_id, aliases),
