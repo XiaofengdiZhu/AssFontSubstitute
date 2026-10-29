@@ -437,8 +437,7 @@ class SubsPage(QWidget):
             self.vm.attach_pick(card, entity, sim, size)
             self._apply_card(card)
             self._update_summary()
-        elif isinstance(tag, str) and tag.startswith("apply:") \
-                and tag == f"apply:{self._apply_gen}":
+        elif tag == f"apply:{self._apply_gen}":
             self._on_apply_done(payload)
 
     def _on_failed(self, tag, err):
@@ -456,8 +455,7 @@ class SubsPage(QWidget):
                 card.searching = False
                 self._refresh_pending.discard(norm)
                 self._apply_card(card)
-        if isinstance(tag, str) and tag.startswith("apply:") \
-                and tag == f"apply:{self._apply_gen}":
+        if isinstance(tag, str) and tag == f"apply:{self._apply_gen}":
             # 派工链中断：复位防重入状态（非当前批次的迟到失败不碰计数）
             self._apply_results = []
             self._apply_total = 0

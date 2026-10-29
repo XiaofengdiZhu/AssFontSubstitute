@@ -536,6 +536,12 @@ class LibraryPage(ScrollArea):
     def _launch_update(self, dirs: list[str], force: bool = False):
         if not dirs or self._index_worker is not None:
             return
+        if self._retry_outstanding:
+            # 重试门反向：retry_bad rw 开库与 IndexWorker 并发写同库曾锁
+            # 冲突——重试在途时不启动索引更新
+            InfoBar.warning("重试进行中", "请等失败文件重试完成后再更新索引",
+                            parent=self)
+            return
         for d in dirs:
             self.vm.mark_indexing(d)
         # 先持 worker 再重排行：行内 upd/rm 按钮的在途禁用读该字段

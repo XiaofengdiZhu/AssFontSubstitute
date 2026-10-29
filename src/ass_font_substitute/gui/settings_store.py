@@ -154,9 +154,10 @@ class Settings(QObject):
         if key in _INT_KEYS and (not isinstance(value, int)
                                  or isinstance(value, bool)):
             raise ValueError(f"{key} 必须是整数")
-        if key in _FLOAT_KEYS and (not isinstance(value, (int, float))
-                                   or isinstance(value, bool)):
-            raise ValueError(f"{key} 必须是数值")
+        if key in _FLOAT_KEYS:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{key} 必须是数值")
+            value = float(value)   # int 实参归一（会话内 get 口径与 reload 一致）
         if key in _LIST_KEYS and not isinstance(value, list):
             raise ValueError(f"{key} 必须是列表")
         if key == "preview_history" and not isinstance(value, list):

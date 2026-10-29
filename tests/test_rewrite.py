@@ -121,6 +121,18 @@ def test_lowercase_keywords_rewritten(tmp_path):
     assert len(r.changed_lines) == 3
 
 
+def test_style_field_padding_preserved(tmp_path):
+    # Style 域内对齐空格保留："Style: Main, 舊字體 ," 的排版空格不抹
+    p = tmp_path / "in.ass"
+    p.write_bytes(ASS.encode("utf-8-sig").replace(
+        "Style: Main,華康主體W5,52".encode(),
+        "Style: Main, 華康主體W5 ,52".encode()))
+    out = tmp_path / "out.ass"
+    rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out)
+    text = out.read_text("utf-8-sig")
+    assert "Style: Main, 思源黑体 ,52" in text
+
+
 def test_big5_dual_encoding_bytes_preserved(tmp_path):
     # 终审 P1：big5 双编码字（a2 40 与 a2 42 同解 ＼）decode→encode 曾
     # 回写规范码 a2 42——未改动行字节也被翻转。未改行锁原字节。

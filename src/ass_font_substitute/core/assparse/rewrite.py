@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ass_font_substitute.core.assparse.encoding import BOMS
+from ass_font_substitute.core.assparse.encoding import EncodingDetectError
 from ass_font_substitute.core.assparse.encoding import detect_encoding
 
 
@@ -86,7 +87,12 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
     enc = detect_encoding(data)
     bom_b, body_codec = _bom_and_codec(data, enc)
     body = data[len(bom_b):]
-    text = body.decode(body_codec)
+    try:
+        text = body.decode(body_codec)
+    except UnicodeDecodeError as e:
+        # 探测只看前 64KB 样本（性能），>64KB 处才出现的非法序列在此浮出
+        # ——对调用方仍是编码问题，折包对齐错误契约
+        raise EncodingDetectError(f"样本通过但全文解码失败（{body_codec}）: {e}") from e
     lines = _split_lines(text)
     # 字节级行切片：未改动的行锁原字节（big5 等双编码字 decode→encode
     # 回写规范码，未改行字节也被翻转；对得上才用，行数不齐弃用）

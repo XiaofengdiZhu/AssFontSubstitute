@@ -93,6 +93,19 @@ def test_bad_suffix_rejected(tmp_path):
     assert s.get("save_suffix") == ".fixed.ass"
 
 
+def test_set_type_validation_rejects_before_save(tmp_path):
+    # 终审 P3：set() 验型与 reload 同口径前置——错型曾先落盘、重启后静默蒸发
+    s = Settings(tmp_path / "s.json")
+    for key, bad in (("n_pause", "3"), ("overwrite_default", 1),
+                     ("cov_threshold", "0.9"), ("font_dirs", "x"),
+                     ("preview_history", "x"), ("last_dirs", [])):
+        with pytest.raises(ValueError):
+            s.set(key, bad)
+    s.set("cov_threshold", 90)                        # int 实参归一 float
+    assert s.get("cov_threshold") == 90.0
+    assert isinstance(s.get("cov_threshold"), float)
+
+
 def test_atomic_write_no_tmp_leftover(tmp_path):
     s = Settings(tmp_path / "s.json")
     s.set("n_pause", 3)
