@@ -403,7 +403,10 @@ class FontCard(CardWidget):
         lh.addWidget(cb, 0, Qt.AlignVCenter)
         lh.addLayout(text, 1)
         left.setFixedWidth(_LEFT_W)
-        g.addWidget(left, 0, Qt.AlignVCenter)
+        # AlignLeft 必须显式：QLayout alignedRect 对无水平对齐位的 item
+        # 默认水平居中——KEEP 行（无预览条、独苗定宽左列）曾被居中缩进
+        # 行中部（真机 missing 卡实锤）；有 bar 的行 bar 填满剩余不受影响
+        g.addWidget(left, 0, Qt.AlignLeft | Qt.AlignVCenter)
 
         if o.entity is not None:
             bar = PreviewBar(self._worker, self._pvm, o.entity,

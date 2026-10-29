@@ -382,6 +382,34 @@ def test_zero_usage_keep_card_presentation_and_no_search(qapp, tmp_path, monkeyp
                 if s[0].startswith("newsearcher:")]
 
 
+def test_keep_row_hugs_left_edge(qapp, tmp_path, monkeypatch):
+    # KEEP 行（missing/zero 卡独苗行，无预览条）贴左缘：定宽左列进
+    # hbox 时 AlignVCenter 不带水平对齐位，Qt alignedRect 默认水平居中
+    # ——独苗行曾整体缩进行中部（真机 missing 卡截图实锤）
+    from PySide6.QtWidgets import QLabel
+
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    from ass_font_substitute.gui.subs_vm import KEEP
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=1, chars=set("永"), variants={"甲字体"})
+    page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0", (usage, UsageClass(
+        kind="missing", missing_chars=["永"])))
+    fc = page._cards_ui["甲字体"]
+    assert "保留原字体名" in [b.text() for b in fc.findChildren(QLabel)]
+    page.show()
+    page.resize(1100, 800)
+    qapp.processEvents()
+    left = fc._boxes[KEEP].parentWidget()       # 勾选框 reparent 进左列
+    assert left.geometry().x() <= 15            # 左列贴行左（旧居中 ~300）
+    page.hide()
+    page.deleteLater()
+
+
 def test_on_library_changed_reclassifies_and_defers_in_batch(qapp, tmp_path, monkeypatch):
     # 字体库管理页广播（删目录/索引更新）：空闲态立即换代重分类；
     # 解析批次中不打断——批末 _parse_arrived 才重算
