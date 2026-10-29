@@ -49,7 +49,8 @@ class PreviewVM:
         self.require_text: str | None = None
         """非空非空白=face 须覆盖其全部字符才通过筛选（预览框尾端开关）；
         空串/空白串一律视同不筛（空文字无可筛字符）；与 name_query 等
-        同属筛选状态，仅浏览页开关会置值"""
+        同属筛选状态，由 font_filter.PreviewTools 的覆盖开关置值
+        （字体库预览页/选择对话框各自的 pvm 各自的开关）"""
         self._tiles: OrderedDict = OrderedDict()
 
     def set_entities(self, entities) -> None:

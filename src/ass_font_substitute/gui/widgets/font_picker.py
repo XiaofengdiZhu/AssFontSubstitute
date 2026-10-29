@@ -1,33 +1,40 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import CaptionLabel
-from qfluentwidgets import ComboBox
 from qfluentwidgets import MessageBoxBase
-from qfluentwidgets import SearchLineEdit
 from qfluentwidgets import SubtitleLabel
 
-from ass_font_substitute.gui import script_filter
 from ass_font_substitute.gui.jobs import make_searcher
 from ass_font_substitute.gui.jobs import pull_chunk
 from ass_font_substitute.gui.name_lang import pick_display_name
 from ass_font_substitute.gui.name_lang import ui_lang
 from ass_font_substitute.gui.preview_vm import PreviewVM
+from ass_font_substitute.gui.widgets.font_filter import FontFilterBar
+from ass_font_substitute.gui.widgets.font_filter import PreviewTools
 from ass_font_substitute.gui.widgets.font_list import FontListWidget
 
 
 class FontPickerDialog(MessageBoxBase):
-    """「从字体库选择」：与字体库预览页同款筛选/列表；
-    chars 给定时顶部加「推荐」区（target=None 全池覆盖率门槛 + 探针粗排，
-    纯元数据一次搜穿，无渲染）。"""
+    """「从字体库选择」：照字体库预览页重做（2026-10-29）——页头预览
+    工具组（强制等宽/预览文字/覆盖筛选）与筛选行用 font_filter 同款共享
+    控件，行预览随预览文字渲染（留空退字体名）；chars 给定时顶部加
+    「推荐」区（target=None 全池覆盖率门槛 + 探针粗排，纯元数据一次搜穿，
+    无渲染）。"""
 
     def __init__(self, settings, worker, entities, chars=None,
                  direction="t2s", parent=None):
         super().__init__(parent)
         self.worker = worker            # _on_reco 取消订阅需要（brief 漏存）
         self.selected = None
+        # 重做后 tools/PreviewInput 各挂一条 settings.valueChanged 广播：
+        # exec 后不销毁则死弹窗随打开次数累积（subs_page._open_picker 复用
+        # 实例），关即删（font_detail 同款；淡出动画完成后才 deleteLater
+        # 不截断动画，exec 返回后读 selected 等 Python 属性不受影响）
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._settings = settings
         self.pvm = PreviewVM(settings)
         self.pvm.set_entities(entities)
@@ -37,7 +44,7 @@ class FontPickerDialog(MessageBoxBase):
         self.rec_title = SubtitleLabel("推荐（覆盖达标）")
         # 选择对话框行名不可划选（用户拍板「除外」2026-10-29）：名是
         # picker 行宽最大的点击目标，可选化会吃掉单击选中/双击接受
-        self.rec_list = FontListWidget(worker, self.pvm, lambda: self._preview(),
+        self.rec_list = FontListWidget(worker, self.pvm, self._preview,
                                        name_selectable=False)
         self.rec_list.entity_picked.connect(self._pick)
         self.rec_list.detail_requested.connect(self._accept_pick)
@@ -45,26 +52,27 @@ class FontPickerDialog(MessageBoxBase):
         self.rec_title.hide()
         self.rec_list.hide()
 
-        all_title = SubtitleLabel("全部字体")
-        self.name_edit = SearchLineEdit()
-        self.name_edit.setPlaceholderText("搜索字体名")
-        self.cb_cat, self.cb_weight = ComboBox(), ComboBox()
-        self.cb_script = script_filter.StrikeTailComboBox()
-        for cb, ph in ((self.cb_cat, "分类"), (self.cb_script, "简繁"),
-                       (self.cb_weight, "字重")):
-            cb.setPlaceholderText(ph)
-            cb.currentIndexChanged.connect(self._apply_filters)
-        filters = QHBoxLayout()
-        for w in (self.name_edit, self.cb_cat, self.cb_script, self.cb_weight):
-            filters.addWidget(w)
-        self.filter_bar = QWidget()
-        self.filter_bar.setLayout(filters)
+        # 预览工具组 + 筛选行：字体库预览页同款共享控件（font_filter）；
+        # 文字/搜索变化经 300ms 防抖重载（照预览页口径），开关与下拉即时
+        self.tools = PreviewTools(settings, self.pvm)
+        self.bar = FontFilterBar(self.pvm)
+        self._debounce = QTimer(self)
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(300)
+        self._debounce.timeout.connect(self._reload_all)
+        self.tools.previewChanged.connect(lambda _: self._debounce.start())
+        self.tools.covChanged.connect(lambda _on: self._reload_all())
+        self.tools.monoChanged.connect(lambda _on: self._reload_all())
+        self.bar.name_edit.textChanged.connect(
+            lambda _: self._debounce.start())
+        self.bar.filtersChanged.connect(self._reload_all)
 
-        self.all_list = FontListWidget(worker, self.pvm, lambda: self._preview(),
+        self.all_list = FontListWidget(worker, self.pvm, self._preview,
                                        name_selectable=False)
         self.all_list.entity_picked.connect(self._pick)
         self.all_list.detail_requested.connect(self._accept_pick)
         self.all_list.setMinimumHeight(120)
+        self.all_list.count_changed.connect(self.bar.set_count)
 
         self.hint = CaptionLabel("未选择")
         self.empty_label = CaptionLabel(
@@ -72,8 +80,8 @@ class FontPickerDialog(MessageBoxBase):
         self.empty_label.setWordWrap(True)
         self.empty_label.hide()
         if not self.pvm.entities:
-            all_title.hide()
-            self.filter_bar.hide()
+            self.tools.hide()
+            self.bar.hide()
             self.all_list.hide()
             self.hint.hide()
             self.empty_label.show()
@@ -85,8 +93,8 @@ class FontPickerDialog(MessageBoxBase):
         body_v.addWidget(self.titleLabel)
         body_v.addWidget(self.rec_title)
         body_v.addWidget(self.rec_list)
-        body_v.addWidget(all_title)
-        body_v.addWidget(self.filter_bar)
+        body_v.addWidget(self.tools)
+        body_v.addWidget(self.bar)
         body_v.addWidget(self.all_list, 1)
         body_v.addWidget(self.empty_label)
         body_v.addWidget(self.hint)
@@ -108,9 +116,7 @@ class FontPickerDialog(MessageBoxBase):
         self.yesButton.setEnabled(False)
         self.cancelButton.setText("取消")
 
-        self._fill_filters()
         self._reload_all()
-        self.name_edit.textChanged.connect(lambda _: self._reload_all())
 
         if chars:
             worker.result.connect(self._on_reco)
@@ -125,30 +131,10 @@ class FontPickerDialog(MessageBoxBase):
         # 复用字体库预览的文字；对话框自己不发 blib（实体由调用方传入）
 
     def _preview(self):
-        return ""
-
-    def _fill_filters(self):
-        script_items = ["全部", *script_filter.options(self.pvm)]
-        for cb, items in ((self.cb_cat, ["全部", *self.pvm.categories()]),
-                          (self.cb_script, script_items),
-                          (self.cb_weight, ["全部", *self.pvm.weight_buckets()])):
-            cb.blockSignals(True)
-            cb.clear()
-            cb.addItems([str(x) for x in items])
-            cb.blockSignals(False)
-
-    def _apply_filters(self):
-        def pick(cb):
-            t = cb.currentText()
-            return None if (not t or t == "全部") else t
-        self.pvm.category = pick(self.cb_cat)
-        self.pvm.script = script_filter.pick(self.cb_script)
-        wt = pick(self.cb_weight)
-        self.pvm.weight = int(wt) if wt else None
-        self._reload_all()
+        return self.tools.text()
 
     def _reload_all(self):
-        self.pvm.name_query = self.name_edit.text()
+        self.pvm.name_query = self.bar.name_edit.text()
         rows = self.pvm.filtered()
         shown = {f.fingerprint for r in rows for f in r.matching}
         self.all_list.set_rows(rows)

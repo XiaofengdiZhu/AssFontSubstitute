@@ -28,13 +28,13 @@ class _FakeWorker(QObject):
         self.submits.append((tag, fn, args, kw))
 
 
-def _ent(fp, name):
+def _ent(fp, name, category="黑", chars="永宇"):
     from ass_font_substitute.core.fontindex.library import FontEntity
     from ass_font_substitute.core.models import CmapRanges
     return FontEntity(fingerprint=fp, display_name=name, aliases=(name,),
                       psname=name, version=(1,), weight=400, width=5,
-                      italic=False, script="简", category="黑",
-                      cmap=CmapRanges.from_chars([ord(c) for c in "永宇"]),
+                      italic=False, script="简", category=category,
+                      cmap=CmapRanges.from_chars([ord(c) for c in chars]),
                       dir_path="d", rel_path="r.ttf", face_index=0)
 
 
@@ -117,3 +117,80 @@ def test_picker_row_names_not_selectable(qapp, tmp_path):
     for lab in name_labs:
         assert not lab.textInteractionFlags() & sel
         assert lab.cursor().shape() != Qt.CursorShape.IBeamCursor
+
+
+def test_picker_preview_tools_and_filter_bar(qapp, tmp_path):
+    # 照预览页重做（2026-10-29）：预览工具组与筛选行是 font_filter 共享
+    # 控件，行为口径与字体库预览页同源——预览文字进渲染通路（空退字体
+    # 名）、覆盖筛选写 require_text、等宽开关落 settings 双向同步、搜索
+    # 防抖重载、下拉即时筛选、计数随 all_list
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+
+    s = Settings(tmp_path / "s.json")
+    w = _FakeWorker()
+    # 乙字体 cmap 不含「永」：覆盖筛选钉行数变化用
+    ents = [_ent("fp1", "甲字体"),
+            _ent("fp2", "乙字体", category="宋", chars="宇")]
+    host = QWidget()
+    host.resize(780, 560)
+    dlg = FontPickerDialog(s, w, ents, parent=host)
+
+    # 预览文字：空=行退字体名（FontListWidget 兜底），非空进渲染通路
+    assert dlg._preview() == ""
+    dlg.tools.preview_edit.setText("永宇")
+    assert dlg._preview() == "永宇"
+
+    # 覆盖筛选：开=写 require_text 且行随之收窄（乙字体缺「永」被筛掉），
+    # 关=清且行回全量
+    dlg.tools.btn_cov.setChecked(True)
+    assert dlg.pvm.require_text == "永宇"
+    assert len(dlg.all_list._rows) == 1
+    dlg.tools.btn_cov.setChecked(False)
+    assert dlg.pvm.require_text is None
+    assert len(dlg.all_list._rows) == 2
+
+    # 等宽开关：本页翻转落设置；他处改设置回开关联动
+    dlg.tools.sw_mono.setChecked(True)
+    assert s.get("preview_mono") is True
+    s.set("preview_mono", False)
+    assert not dlg.tools.sw_mono.isChecked()
+
+    # 搜索防抖重载 + 计数随 all_list
+    dlg.bar.name_edit.setText("甲")
+    QTest.qWait(400)
+    assert dlg.pvm.name_query == "甲"
+    assert len(dlg.all_list._rows) == 1
+    assert dlg.bar.count_label.text() == "1 款字体"
+
+    # 下拉筛选：写 pvm + 即时重载（不经防抖）
+    dlg.bar.name_edit.setText("")
+    QTest.qWait(400)
+    dlg.bar.cb_cat.setCurrentIndex(2)       # 宋（0=全部、1=黑）
+    assert dlg.pvm.category == "宋"
+    assert len(dlg.all_list._rows) == 1
+    assert dlg.bar.count_label.text() == "1 款字体"
+    dlg.bar.cb_cat.setCurrentIndex(0)
+    assert len(dlg.all_list._rows) == 2
+    dlg.deleteLater()
+
+
+def test_picker_empty_library_hides_tools_and_bar(qapp, tmp_path):
+    # 空库态：工具组/筛选行与列表一起全隐，只剩标题+提示
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+
+    s = Settings(tmp_path / "s.json")
+    host = QWidget()            # 持引用：临时对象被回收会连坐销毁弹窗内容
+    dlg = FontPickerDialog(s, _FakeWorker(), [], parent=host)
+    assert dlg.tools.isHidden()
+    assert dlg.bar.isHidden()
+    assert dlg.all_list.isHidden()
+    assert dlg.hint.isHidden()
+    assert not dlg.empty_label.isHidden()
+    dlg.deleteLater()
