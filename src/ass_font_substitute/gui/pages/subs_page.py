@@ -653,7 +653,12 @@ class SubsPage(QWidget):
                                 "该字体卡片已被重新分类，请重新选择", parent=self)
                 return
             # 相似率/相对大小经 worker 评分（渲染+比较 ~57ms，UI 线程不做）；
-            # 行先不入列，评分回执一并 attach（免两帧重建）
+            # 行先不入列，评分回执一并 attach（免两帧重建）。同 norm 在途
+            # 防重入：双 pick 会让 pending 记录互相覆盖，失败回执张冠李戴
+            if norm in self._pending_picks:
+                InfoBar.warning("评分进行中", "该字体的上一次评分还在路上，"
+                                "请稍候再选", parent=self)
+                return
             self.worker.submit(f"pickscore:{norm}", _pick_score_job,
                                vm_target(self.vm, card), dlg.selected)
             self._pending_picks[norm] = dlg.selected

@@ -49,8 +49,7 @@ def score_pair(target: FontEntity, entity: FontEntity, cache: Cache,
     def bundle(e: FontEntity):
         return cache.get_render(
             e.fingerprint, tver,
-            lambda: render_bundle(Path(e.dir_path) / e.rel_path,
-                                  e.face_index, sample_text))
+            lambda: render_bundle(_entity_path(e), e.face_index, sample_text))
 
     try:
         tb = bundle(target)

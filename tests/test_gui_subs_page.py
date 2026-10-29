@@ -522,11 +522,17 @@ def test_pick_score_receipt_and_metrics_text(qapp, tmp_path, monkeypatch):
 
     # 评分失败降级：无分回填保住用户选择（不弹「任务失败」改 warning 语义）
     page2 = _make_page(qapp, tmp_path, monkeypatch)
+    from qfluentwidgets import InfoBar
     page2._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
     page2._on_result(f"classify:{page2._gen}:0",
                      (usage, UsageClass(kind="replace", entities=[ent_a])))
     page2._pending_picks["甲字体"] = ent_b
+    fired = []
+    monkeypatch.setattr(InfoBar, "warning",
+                        classmethod(lambda cls, *a, **k: fired.append(a[0])))
     page2._on_failed("pickscore:甲字体", "boom")
+    monkeypatch.setattr(InfoBar, "warning", InfoBar.warning)   # 还原防误伤后段
+    assert fired == ["相似度评分失败"]    # 降级走 warning，不是静默也不是 error
     card2 = page2.vm.cards[0]
     o2 = card2.option("fp2")
     assert o2 is not None and o2.source == "pick" and card2.checked_key == "fp2"
@@ -534,7 +540,9 @@ def test_pick_score_receipt_and_metrics_text(qapp, tmp_path, monkeypatch):
     assert "甲字体" not in page2._pending_picks
 
     # 无 pending（迟到失败）/卡已重算孤儿：无从回填，照白名单报错不炸
+    fired.clear()
     page2._on_failed("pickscore:甲字体", "boom")
+    assert fired == []                 # 白名单走 InfoBar.error，未拦
     page2.on_library_changed()
     page2._pending_picks["甲字体"] = ent_b
     page2._on_failed("pickscore:甲字体", "boom")
