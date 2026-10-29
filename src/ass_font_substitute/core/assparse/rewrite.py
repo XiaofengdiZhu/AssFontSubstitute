@@ -69,14 +69,17 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
 
     for i, line in enumerate(lines):
         stripped = line.strip()
+        # 关键字统一小写比对（VSFilter 对行关键字不敏感；小写关键字的
+        # 文件曾整段跳过=静默零改写）
+        low = stripped.lower()
         if stripped.startswith("[") and stripped.endswith("]"):
-            section = stripped.lower()
+            section = low
             continue
-        if stripped.lower().startswith("format:") and "styles" in section:
+        if low.startswith("format:") and "styles" in section:
             formats[section] = [f.strip().lower() for f in
                                 stripped[len("Format:"):].split(",")]
             continue
-        if stripped.startswith("Style:") and "styles" in section:
+        if low.startswith("style:") and "styles" in section:
             fmt = formats.get(section)
             if not fmt or "fontname" not in fmt:
                 continue
@@ -86,11 +89,12 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
                 cur = parts[fi].strip()
                 if cur in m:
                     parts[fi] = m[cur]
-                    newline = "Style:" + ",".join(parts)
+                    # 关键字原样写回（小写文件不改写成 Style:）
+                    newline = stripped[:len("Style:")] + ",".join(parts)
                     lines[i] = line.replace(stripped, newline, 1)
                     changed.append(i)
             continue
-        if stripped.startswith(("Dialogue:", "Comment:")) and "events" in section:
+        if low.startswith(("dialogue:", "comment:")) and "events" in section:
             # 只在 {...} 块内替换 \fn（Comment 行的 \fn 也改写）——外壳
             # 限定块级，正文里的字面 \fn 片段不动
             if fn_re is not None:

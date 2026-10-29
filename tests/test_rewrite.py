@@ -103,6 +103,24 @@ def test_fn_with_surrounding_spaces_replaced(tmp_path):
     assert "{\\fn 思源黑体 }甲" in text
 
 
+def test_lowercase_keywords_rewritten(tmp_path):
+    # 终审 P1：行关键字大小写敏感曾让小写关键字的文件静默零改写
+    # （VSFilter 对关键字不敏感）
+    p = tmp_path / "in.ass"
+    p.write_bytes(ASS.encode("utf-8-sig").replace(b"[Script Info]", b"[script info]")
+                  .replace(b"[V4+ Styles]", b"[v4+ styles]")
+                  .replace(b"Style:", b"style:")
+                  .replace(b"[Events]", b"[events]")
+                  .replace(b"Format:", b"format:")
+                  .replace(b"Dialogue:", b"dialogue:"))
+    out = tmp_path / "out.ass"
+    r = rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out)
+    text = out.read_text("utf-8-sig")
+    assert "style: Main,思源黑体,52" in text   # 关键字原样
+    assert "{\\fn思源黑体}甲" in text
+    assert len(r.changed_lines) == 3
+
+
 def test_at_variant(tmp_path):
     _mk(tmp_path)
     out = tmp_path / "out.ass"
