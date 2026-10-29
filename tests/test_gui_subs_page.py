@@ -726,7 +726,7 @@ def _cont_btn(fc):
     """foot 搜索钮（按态文案前缀识别，避开手选钮）。"""
     from qfluentwidgets import TransparentPushButton
     hits = [b for b in fc.findChildren(TransparentPushButton) if b.text()[
-        :4] in ("继续寻找", "寻找中…", "无更多符", "原字体无")]
+        :4] in ("开始寻找", "继续寻找", "寻找中…", "无更多符", "原字体无")]
     assert len(hits) == 1
     return hits[0]
 
@@ -749,7 +749,8 @@ def test_cont_button_states_and_manual_pause(qapp, tmp_path, monkeypatch):
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
     _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
     btn = _cont_btn(page._cards_ui[norm])
-    assert btn.text() == "继续寻找更多" and btn.isEnabled()
+    # 没寻找过=开始寻找；寻过暂停=继续寻找更多相似字体（用户拍板 2026-10-29）
+    assert btn.text() == "开始寻找相似字体" and btn.isEnabled()
 
     page._continue_search(norm)                 # 搜索器未挂：无计数的寻找中
     btn = _cont_btn(page._cards_ui[norm])
@@ -771,7 +772,7 @@ def test_cont_button_states_and_manual_pause(qapp, tmp_path, monkeypatch):
     assert card.search_state == "paused" and not card.searching
     fc = page._cards_ui[norm]
     btn = _cont_btn(fc)
-    assert btn.text() == "继续寻找更多" and btn.isEnabled()
+    assert btn.text() == "继续寻找更多相似字体" and btn.isEnabled()
     assert _pick_btn(fc).isEnabled()            # 暂停即恢复手选
 
     s.paused = False                            # 搜索器走完剩余池 → 耗尽

@@ -502,10 +502,11 @@ class FontCard(CardWidget):
         return btn
 
     def _apply_cont_state(self, btn: TransparentPushButton):
-        """搜索钮四态原地刷：idle=继续寻找 / searching=寻找中…已对比/总数
-        +Pause / exhausted=禁用无更多 / target_error=禁用说明缘由。文字变
-        才 setText 并重钉 hint 宽（_action_col 按 hint 定宽对齐左缘）；
-        图标/启停随态键变（计数频繁变不触发）。"""
+        """搜索钮四态原地刷：idle=开始/继续寻找（按寻没寻过分文案，态键
+        同为 idle）/ searching=寻找中…已对比/总数+Pause / exhausted=禁用
+        无更多 / target_error=禁用说明缘由。文字变才 setText 并重钉 hint
+        宽（_action_col 按 hint 定宽对齐左缘）；图标/启停随态键变（计数
+        频繁变不触发）。"""
         card = self.card
         if card.searching:
             s = card.searcher
@@ -516,8 +517,10 @@ class FontCard(CardWidget):
             text, state = "无更多符合要求的相似字体", "exhausted"
         elif card.search_state == "target_error":
             text, state = "原字体无法渲染，无法比较相似度", "target_error"
+        elif card.search_state == "paused":
+            text, state = "继续寻找更多相似字体", "idle"
         else:
-            text, state = "继续寻找更多", "idle"
+            text, state = "开始寻找相似字体", "idle"
         if btn.property("state") != state:
             enabled = state in ("searching", "idle")
             # 禁用前交焦点：钮带焦被禁时 Qt 把焦点塞给任意下一焦点控件，
