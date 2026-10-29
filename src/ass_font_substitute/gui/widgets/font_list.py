@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import weakref
 
+import shiboken6
 from PySide6.QtCore import QPropertyAnimation
 from PySide6.QtCore import QRect
 from PySide6.QtCore import QSize
@@ -86,9 +87,13 @@ _ITALIC_HOOKED = False
 def _refresh_italic_icons():
     # 缓存 pixmap 是冻结位图：强调色/主题 live 切换后 QSS 系控件自动跟
     # 色，已物化行的斜体钮却攥着旧墨色 pixmap（浅强调色下白 I 隐形）。
-    # 清缓存后给活钮换新图标；死钮 WeakSet 自动剔除。
+    # 清缓存后给活钮换新图标；死钮 WeakSet 自动剔除。isValid 守卫：
+    # 行滚出 deleteLater 已删 C++ 对象、wrapper 未 GC 时抛 RuntimeError
+    # 会中断后续活钮刷新（冻结白 I 残留正是历史坑本体）
     _ITALIC_ICONS.clear()
     for btn in list(_ITALIC_BTNS):
+        if not shiboken6.isValid(btn):
+            continue
         btn.setIcon(_italic_icon())
 
 
