@@ -20,6 +20,7 @@ def qapp():
 
 class _FakeWorker(QObject):
     result = Signal(object, object)
+    failed = Signal(object, str)
 
     def submit(self, tag, fn, *args, **kw):
         return type("H", (), {"cancelled": False})()
@@ -41,4 +42,18 @@ def test_mono_switch_two_way_sync(qapp, tmp_path, monkeypatch):
     assert page.sw_mono.isChecked()                 # 广播联动，无死循环
     page.sw_mono.setChecked(False)
     assert page.settings.get("preview_mono") is False
+    page.deleteLater()
+
+
+def test_blib_failure_reports(qapp, tmp_path, monkeypatch):
+    # 终审 P1：blib 失败曾全层无人处理——页面保持旧列表+误导性 hint
+    from qfluentwidgets import InfoBar
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    fired = []
+    monkeypatch.setattr(InfoBar, "error",
+                        lambda *a, **kw: fired.append(a))
+    page.worker.failed.emit("blib", "RuntimeError: boom")
+    assert fired and "boom" in fired[0][1]
+    page.worker.failed.emit("unrelated", "x")       # 白名单外不弹
+    assert len(fired) == 1
     page.deleteLater()

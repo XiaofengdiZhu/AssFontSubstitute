@@ -5,6 +5,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QVBoxLayout
 from qfluentwidgets import BodyLabel
+from qfluentwidgets import InfoBar
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import setFont
 
@@ -75,6 +76,7 @@ class BrowsePage(ScrollArea):
         self.tools.covChanged.connect(lambda _on: self._reload_list())
         self.tools.monoChanged.connect(lambda _on: self._reload_list())
         self.worker.result.connect(self._on_result)
+        self.worker.failed.connect(self._on_failed)
         self._lib_key: tuple | None = None  # 上次装载对应 快照失效键（jobs.lib_key）
         self.reload_library()
 
@@ -106,6 +108,11 @@ class BrowsePage(ScrollArea):
         self.pvm.set_entities(snap.lib.entities())
         self.bar.fill()
         self._reload_list()
+
+    def _on_failed(self, tag, err):
+        # blib 失败曾全层无人处理：页面保持旧列表+误导性 hint，无任何报错
+        if tag == "blib":
+            InfoBar.error("字体库加载失败", err, parent=self)
 
     def reload_names(self):
         """界面语言变更：行展示名按语言链重挑（行模型即建即显，重建
