@@ -74,3 +74,20 @@ def test_fn_paren_name_full(tmp_path):
     assert "華康行內體(p)" in by
     assert by["華康行內體(p)"].inline_count == 1
     assert "行" in by["華康行內體(p)"].chars
+
+
+def test_style_name_case_insensitive(tmp_path):
+    # 终审 P1：VSFilter/libass 对样式名不敏感——`main` 引用 `Main` 样式
+    # 曾整行丢字+误报 unknown_styles
+    ass = ASS.replace("0,0:00:00.00,0:00:05.00,Main,,", "0,0:00:00.00,0:00:05.00,main,,")
+    r = extract_usages(_write(tmp_path, ass))
+    by = {u.norm_name: u for u in r.usages}
+    assert by["華康主體w5"].inline_count == 0
+    assert {"永", "和"} <= by["華康主體w5"].chars
+    assert r.unknown_styles == ["Ghost"]
+    # \\r 引用样式名同口径
+    line = "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,{\\ralt}天氣的中文字幕"
+    r2 = extract_usages(_write(tmp_path, ASS.replace(
+        "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,永和的中文字", line)))
+    by2 = {u.norm_name: u for u in r2.usages}
+    assert {"天", "氣"} <= by2["華康副體w7"].chars

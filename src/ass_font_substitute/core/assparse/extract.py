@@ -58,8 +58,16 @@ def extract_usages(path: Path) -> ExtractResult:
 def _extract(doc: Document) -> ExtractResult:
     buckets: dict[str, FontUsage] = {}
     style_fonts = {name: st.fontname for name, st in doc.styles.items()}
+    # VSFilter/libass 对样式名不敏感匹配：`main` 引用 `Main` 样式按
+    # 大小写敏感取值会整行丢字+误报 unknown_styles；精确命中优先
+    style_fonts_cf: dict[str, str] = {}
+    for name, fname in style_fonts.items():
+        style_fonts_cf.setdefault(name.casefold(), fname)
     used_styles: set[str] = set()
     invalid_styles = [n for n, f in style_fonts.items() if not f]
+
+    def lookup_style(s: str) -> str | None:
+        return style_fonts.get(s) or style_fonts_cf.get(s.casefold())
 
     def bucket(raw: str) -> FontUsage:
         norm = normalize_name(raw)
@@ -75,7 +83,7 @@ def _extract(doc: Document) -> ExtractResult:
             bucket(fontname).style_count += 1
 
     for ev in doc.events:
-        style_font = style_fonts.get(ev.style)
+        style_font = lookup_style(ev.style)
         if style_font is None:
             used_styles.add(ev.style)
             continue
@@ -93,7 +101,7 @@ def _extract(doc: Document) -> ExtractResult:
                 else:
                     current = style_font  # \fn0 / \fn 空 = 还原样式字体
             elif isinstance(node, ResetStyleTag):
-                current = style_fonts.get(node.value, style_font) if node.value else style_font
+                current = lookup_style(node.value) or style_font if node.value else style_font
             elif isinstance(node, TextNode) and not is_comment and current:
                 bucket(current).chars.update(node.text)
             # DrawingNode / EscapeNode / RawTag / CommentNode 不计
