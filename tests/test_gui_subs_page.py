@@ -1090,5 +1090,129 @@ def test_missing_strip_30_cap_and_copy_button(qapp, tmp_path, monkeypatch):
     assert btns[0].x() - (lab.x() + lab.width()) <= 12
     qapp.clipboard().clear()
     btns[0].click()
-    assert qapp.clipboard().text() == shown     # 拷贝展示的 30 字
+    # 拷贝载荷=**全部**未覆盖 43 字（用户纠偏 2026-10-29：展示截 30 只
+    # 管显示）；cls.missing_chars 列表序直通 card.missing
+    assert qapp.clipboard().text() == chars[1:]
+    page.deleteLater()
+
+
+def test_missing_hover_popup_chars_and_copy(qapp, tmp_path, monkeypatch):
+    """未覆盖指标悬停 Flyout：qfw Flyout 加复制钮，常驻可点（旧 ToolTip
+    窗悬停即收，复制钮够不着，真机实锤）；鼠标同离指标行与浮层即收
+    （轮询光标）；复制/行移除也收；原生 tooltip 事件被吃不双弹。"""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    from qfluentwidgets import Flyout
+    from qfluentwidgets import TransparentToolButton
+
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    from ass_font_substitute.gui.tip import SHOW_DELAY
+    from ass_font_substitute.gui.widgets.font_card import _MissingFlyoutFilter
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    chars = "永" + "".join(chr(0x4E00 + i) for i in range(43))
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=1, chars=set(chars), variants={"甲字体"})
+    page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    ent = _ent("fp1", "乙字体", chars="永")     # 只盖「永」→ 43 字未覆盖
+    page._on_result(f"classify:{page._gen}:0", (usage, UsageClass(
+        kind="replace", entities=[ent], coverage=0.02,
+        missing_chars=list(chars[1:]))))
+    fc = page._cards_ui["甲字体"]
+    m_lab = fc._metrics["fp1"]
+    filt = m_lab.findChildren(_MissingFlyoutFilter)[0]
+    assert filt.eventFilter(m_lab, QEvent(QEvent.Type.ToolTip)) is True
+    # offscreen 光标恒 (0,0)，钉行内防轮询 tick 误收；移出判定走
+    # _close_if_out 直喂
+    filt._pos_fn = lambda: m_lab.mapToGlobal(m_lab.rect().center())
+
+    page.show()
+    page.resize(1100, 800)
+    qapp.processEvents()
+    qapp.sendEvent(m_lab, QEvent(QEvent.Type.Enter))
+    QTest.qWait(SHOW_DELAY + 300)               # 真定时器走完延时出泡
+    fly = page.findChildren(Flyout)[0]
+    assert fly.isVisible() and filt._tick.isActive()
+    assert fly.view.label.text().endswith("…") and len(fly.view.label.text()) == 31
+    # 锚点：x=光标在浮层中轴（复刻 qfw 屏缘钳制公式，含阴影余量 5——
+    # qfw 1.11.3 flyout.py FlyoutAnimationManager._adjustPosition，
+    # qfw 升级若挂先查此处）、y 贴指标行下缘
+    from PySide6.QtGui import QGuiApplication
+    scr = QGuiApplication.primaryScreen().availableGeometry()
+    cx = filt._pos_fn().x()
+    w = fly.sizeHint().width() + 5
+    expected_x = max(scr.left(), min(cx - (w - 5) // 2, scr.right() - w))
+    assert abs(fly.geometry().left() - expected_x) <= 4
+    lab_bottom = m_lab.mapToGlobal(QPoint(0, m_lab.height())).y()
+    assert abs(fly.geometry().top() - lab_bottom) <= 12
+
+    # 移出判定：行内/浮层内都不收，两者之外才收
+    filt._close_if_out(m_lab.mapToGlobal(m_lab.rect().center()))
+    assert fly.isVisible()
+    filt._close_if_out(fly.geometry().center())
+    assert fly.isVisible()
+    filt._close_if_out(QPoint(fly.geometry().left() - 500,
+                              fly.geometry().top() - 500))
+    assert not fly.isVisible()                  # 同离两者即收
+    QTest.qWait(50)
+    # 实走 destroyed→_forget 停 tick 路径（deleteOnClose DeferredDelete
+    # 在 qWait 内落地），非 _on_tick 早退路径
+    assert not filt._tick.isActive()
+
+    # 复制收：拷展示字符（同缺字条），浮层引用随析构清掉
+    qapp.sendEvent(m_lab, QEvent(QEvent.Type.Enter))
+    QTest.qWait(SHOW_DELAY + 300)
+    fly2 = page.findChildren(Flyout)[0]
+    assert fly2.isVisible()
+    shown = fly2.view.label.text()[:-1]
+    assert len(shown) == 30
+    btn = fly2.view.findChild(TransparentToolButton)
+    qapp.clipboard().clear()
+    btn.click()
+    # 拷贝载荷=**全部**未覆盖（用户纠偏 2026-10-29：截 30 只管显示）；
+    # o.missing 经 coverage_detail 集合来，无序
+    copied = qapp.clipboard().text()
+    assert len(copied) == 43 and set(copied) == set(chars[1:])
+    assert not fly2.isVisible()
+    QTest.qWait(50)                             # deleteOnClose 析构落地
+    assert filt._flyout is None
+
+    # 行被移除（Hide）→ 浮层立收不留孤窗
+    qapp.sendEvent(m_lab, QEvent(QEvent.Type.Enter))
+    QTest.qWait(SHOW_DELAY + 300)
+    fly3 = page.findChildren(Flyout)[0]
+    assert fly3.isVisible()
+    qapp.sendEvent(m_lab, QEvent(QEvent.Type.Hide))
+    assert not fly3.isVisible()
+    QTest.qWait(50)                             # 析构落地，下组断言从零起
+
+    # 延时窗口内移出（Enter→Leave）不出泡
+    qapp.sendEvent(m_lab, QEvent(QEvent.Type.Enter))
+    qapp.sendEvent(m_lab, QEvent(QEvent.Type.Leave))
+    QTest.qWait(SHOW_DELAY + 100)
+    assert not page.findChildren(Flyout)        # Leave 停了延时定时器
+
+    # 可见期重复 Enter 不重复弹（_show 可见即 return）
+    qapp.sendEvent(m_lab, QEvent(QEvent.Type.Enter))
+    QTest.qWait(SHOW_DELAY + 300)
+    assert len(page.findChildren(Flyout)) == 1
+    qapp.sendEvent(m_lab, QEvent(QEvent.Type.Enter))
+    QTest.qWait(SHOW_DELAY + 100)
+    assert len(page.findChildren(Flyout)) == 1
+    page.deleteLater()
+
+
+def test_full_coverage_row_has_no_popup_filter(qapp, tmp_path, monkeypatch):
+    # 全覆盖行无浮层过滤器：无未覆盖字符可言，省略号全文 tooltip 照旧
+    from ass_font_substitute.gui.widgets.font_card import _MissingFlyoutFilter
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _feed_replace_card(page, ent_a, ent_b)
+    fc = page._cards_ui["甲字体"]
+    assert fc._metrics["fp1"].findChildren(_MissingFlyoutFilter) == []
+    assert fc._metrics["fp2"].findChildren(_MissingFlyoutFilter) == []
     page.deleteLater()

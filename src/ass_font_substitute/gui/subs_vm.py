@@ -56,6 +56,7 @@ class OptionItem:
     source: str = "search"                            # original/twin/recommend/search/last/pick
     n_chars: int | None = None
     entity: FontEntity | None = None                  # KEEP 行为 None
+    missing: list[str] = field(default_factory=list)  # 未覆盖字符全列（指标悬停浮层源，展示截 30）
 
 
 @dataclass
@@ -67,8 +68,8 @@ class Card:
     inline_count: int = 0
     n_chars: int = 0
     variants: set[str] = field(default_factory=set)
-    missing_preview: list[str] = field(default_factory=list)   # 需替换卡 tofu 预览
-    n_missing: int = 0                                # 未覆盖总字数（预览截 30 字）
+    missing: list[str] = field(default_factory=list)   # 未覆盖字符全列（预览截 30 在 UI 层）
+    n_missing: int = 0                                # 未覆盖总字数
     options: list[OptionItem] = field(default_factory=list)
     checked_key: str | None = None
     searching: bool = False
@@ -192,9 +193,9 @@ class SubsVM:
                 same.source = "twin"
                 card.options = [*origs, *rest]
             else:
-                tcov, _ = coverage_detail(twin.cmap, usage.chars)
+                tcov, tmiss = coverage_detail(twin.cmap, usage.chars)
                 twin_opt = OptionItem(twin.fingerprint, self._dname(twin),
-                                      coverage=tcov,
+                                      coverage=tcov, missing=list(tmiss),
                                       meta=self._meta(twin),
                                       badges=["孪生对应"],
                                       source="twin", entity=twin)
@@ -204,7 +205,7 @@ class SubsVM:
             card.options = origs + rest
         if cls.kind == "replace":
             card.n_missing = len(cls.missing_chars)
-            card.missing_preview = list(cls.missing_chars)[:30]
+            card.missing = list(cls.missing_chars)
         elif cls.kind == "twin":
             # 缺字条=**原字体**未覆盖的字（用户纠偏 2026-10-29：这行历来
             # 是原字体缺字口径，孪生体的未覆盖在指标行另说）。cls.missing_chars
@@ -215,7 +216,7 @@ class SubsVM:
             if origs:
                 _cov, missing = coverage_detail(origs[0].cmap, usage.chars)
                 card.n_missing = len(missing)
-                card.missing_preview = list(missing)[:30]
+                card.missing = list(missing)
         card.min_sim = float(self._settings.get("min_sim"))
         return card
 
@@ -224,9 +225,10 @@ class SubsVM:
         return pick_display_name(e, ui_lang(self._settings))
 
     def _entity_option(self, e: FontEntity, usage: FontUsage) -> OptionItem:
-        cov, _ = coverage_detail(e.cmap, usage.chars)
+        cov, missing = coverage_detail(e.cmap, usage.chars)
         is_orig = usage.norm_name in {normalize_name(a) for a in e.aliases}
         return OptionItem(e.fingerprint, self._dname(e), coverage=cov,
+                          missing=list(missing),
                           meta=self._meta(e),
                           badges=(["原字体"] if is_orig else []),
                           source="original" if is_orig else "recommend",
@@ -292,11 +294,18 @@ class SubsVM:
             if card.option(c.fingerprint) is not None:
                 continue
             ent = self.ent_by_fp.get(c.fingerprint)
+            missing: list[str] = []
+            if ent is not None:
+                # 候选自报覆盖率不携带缺字列，按卡字集现补（浮层悬停源）
+                _cov, miss = coverage_detail(
+                    ent.cmap, self.chars_by_norm.get(card.norm_name, set()))
+                missing = list(miss)
             o = OptionItem(c.fingerprint,
                            self._dname(ent) if ent is not None
                            else c.display_name,
                            coverage=c.coverage,
                            similarity=c.similarity, size_ratio=c.size_ratio,
+                           missing=missing,
                            meta=self._meta(ent)
                            if ent is not None else [],
                            source="search", n_chars=c.n_chars,
@@ -359,12 +368,12 @@ class SubsVM:
         """选择对话框回填：去重后勾选该实体（并入综合分行序，同
         add_candidates）。相似率/相对大小由 worker 评分任务回填。"""
         chars = self.chars_by_norm.get(card.norm_name, set())
-        cov, _ = coverage_detail(entity.cmap, chars)
+        cov, missing = coverage_detail(entity.cmap, chars)
         o = card.option(entity.fingerprint)
         if o is None:
             o = OptionItem(entity.fingerprint, self._dname(entity),
                            coverage=cov, similarity=similarity,
-                           size_ratio=size_ratio,
+                           size_ratio=size_ratio, missing=list(missing),
                            meta=self._meta(entity), source="pick", entity=entity)
             card.options.append(o)
             head = [x for x in card.options if x.source == "original"]

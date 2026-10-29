@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import shiboken6
+from PySide6.QtCore import QEvent
+from PySide6.QtCore import QObject
+from PySide6.QtCore import QPoint
 from PySide6.QtCore import QRectF
 from PySide6.QtCore import QSize
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor
+from PySide6.QtGui import QCursor
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtGui import QPainter
 from PySide6.QtGui import QPainterPath
@@ -23,6 +27,9 @@ from qfluentwidgets import CardWidget
 from qfluentwidgets import CheckBox
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import FluentStyleSheet
+from qfluentwidgets import Flyout
+from qfluentwidgets import FlyoutAnimationType
+from qfluentwidgets import FlyoutViewBase
 from qfluentwidgets import IconWidget
 from qfluentwidgets import InfoBadge
 from qfluentwidgets import InfoBar
@@ -35,6 +42,7 @@ from qfluentwidgets import themeColor
 
 from ass_font_substitute.gui.subs_vm import KEEP
 from ass_font_substitute.gui.subs_vm import Card
+from ass_font_substitute.gui.tip import SHOW_DELAY
 from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.widgets.pill import PillLabel
 from ass_font_substitute.gui.widgets.pill import padded_badge
@@ -178,6 +186,121 @@ class _MetricsLabel(_ElideMixin, CaptionLabel):
     pass
 
 
+class _MissingFlyoutView(FlyoutViewBase):
+    """未覆盖字符浮层视图：单行 HBox——字列（截 30，超出尾加「…」）+
+    复制钮。不走 FlyoutView（竖排，容纳不了行内钮）；圆角底/描边承
+    基类 paintEvent 亮暗自适应。复制走卡级回执（同缺字条），拷贝载荷
+    是**全部**未覆盖字符——展示截 30 只管显示（用户纠偏 2026-10-29）。"""
+
+    closed = Signal()
+
+    def __init__(self, shown: str, copy_text: str, more: bool, on_copy,
+                 parent=None):
+        super().__init__(parent)
+        self._copy_text, self._on_copy = copy_text, on_copy
+        h = QHBoxLayout(self)
+        h.setContentsMargins(12, 8, 8, 8)
+        h.setSpacing(4)
+        self.label = CaptionLabel(shown + ("…" if more else ""))
+        h.addWidget(self.label, 0, Qt.AlignVCenter)
+        btn = TransparentToolButton(FIF.COPY.icon(), self)
+        btn.setIconSize(QSize(14, 14))
+        btn.setFixedSize(22, 22)
+        install_tip(btn, "复制未覆盖字符")
+        btn.clicked.connect(self._copy)
+        h.addWidget(btn, 0, Qt.AlignVCenter)
+
+    def _copy(self):
+        self._on_copy(self._copy_text)
+        self.closed.emit()
+
+
+class _MissingFlyoutFilter(QObject):
+    """未覆盖指标悬停过滤器：Enter 起 SHOW_DELAY 延时弹 Flyout（贴指标
+    行 DROP_DOWN）。浮层常驻可点（旧 ToolTip 窗悬停即收，复制钮够不着，
+    真机实锤）；鼠标离开指标行与浮层两者即收——Qt.Popup 抓鼠标，行/浮层
+    的 enter/leave 在抓取下不可靠，轮询光标判定（点外点击仍可立收）。
+    原生 tooltip 事件吃掉不双弹；行被移除（Hide）时浮层立收不留孤窗。"""
+
+    CURSOR_TICK_MS = 120
+
+    def __init__(self, label, shown: str, copy_text: str, more: bool,
+                 on_copy):
+        super().__init__(label)
+        self._lab, self._enter = label, False
+        self._shown, self._copy_text = shown, copy_text
+        self._more, self._on_copy = more, on_copy
+        self._flyout: Flyout | None = None
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._show)
+        self._tick = QTimer(self)
+        self._tick.setInterval(self.CURSOR_TICK_MS)
+        self._tick.timeout.connect(self._on_tick)
+        self._pos_fn = QCursor.pos      # 测试注替（offscreen 光标不可驱）
+
+    def eventFilter(self, obj, e):
+        t = e.type()
+        if t == QEvent.Type.ToolTip:
+            return True
+        if t == QEvent.Type.Enter:
+            self._enter = True
+            self._timer.start(SHOW_DELAY)
+        elif t in (QEvent.Type.Leave, QEvent.Type.Hide):
+            self._enter = False
+            self._timer.stop()
+            if t == QEvent.Type.Hide and self._flyout is not None \
+                    and self._flyout.isVisible():
+                self._flyout.close()
+        return False
+
+    def _show(self):
+        if not self._enter:
+            return
+        if self._flyout is not None:
+            if self._flyout.isVisible():
+                return
+            # 弃旧引用前先撤 destroyed 连接：旧浮层的 deleteLater 在途，
+            # 迟到的 destroyed 会把新浮层引用清掉、停掉其轮询（审查 P2-1）
+            self._flyout.destroyed.disconnect(self._forget)
+            self._flyout = None
+        view = _MissingFlyoutView(self._shown, self._copy_text, self._more,
+                                  self._on_copy)
+        fly = Flyout(view, self._lab.window())
+        view.closed.connect(fly.close)
+        fly.destroyed.connect(self._forget)
+        self._flyout = fly
+        # x=光标为浮层中轴（用户拍板：跟光标曾偏右展开，收为居中）、
+        # y 贴指标行下缘：DROP_DOWN 的 widget 目标按 380px 定宽列居中，
+        # 短指标串时浮层飘离悬停点（真机截图实锤）；QPoint 目标直喂
+        # exec 绕开居中，屏缘钳制仍由 _adjustPosition 管
+        gp = self._pos_fn()
+        w = fly.sizeHint().width()
+        pos = QPoint(gp.x() - w // 2,
+                     self._lab.mapToGlobal(QPoint(0, self._lab.height())).y())
+        fly.exec(pos, FlyoutAnimationType.DROP_DOWN)
+        self._tick.start()
+
+    def _on_tick(self):
+        if self._flyout is None or not self._flyout.isVisible():
+            self._tick.stop()
+            return
+        self._close_if_out(self._pos_fn())
+
+    def _close_if_out(self, pos):
+        """光标同时在指标行与浮层之外 → 收。浮层贴行下缘零缝，途经无死区。"""
+        if self._flyout is None or not self._flyout.isVisible():
+            return
+        in_lab = self._lab.rect().contains(self._lab.mapFromGlobal(pos))
+        in_fly = self._flyout.geometry().contains(pos)
+        if not in_lab and not in_fly:
+            self._flyout.close()
+
+    def _forget(self):
+        self._flyout = None
+        self._tick.stop()
+
+
 class FontCard(CardWidget):
     """单张字体卡（线框重排）：状态图标+名称+用量+右侧状态徽章；缺字虚线框；
     选项逐行成带边框行（勾选框|名称+标签+指标|预览条），选中行主题色描边；
@@ -214,7 +337,7 @@ class FontCard(CardWidget):
 
         # 缺字条：replace=原字体未覆盖；twin=孪生体未覆盖（换过去会缺的
         # 字，勾选前可见）
-        if card.kind in ("replace", "twin") and card.missing_preview:
+        if card.kind in ("replace", "twin") and card.missing:
             v.addWidget(self._build_missing_strip())
 
         v.addWidget(self._build_options())
@@ -323,22 +446,23 @@ class FontCard(CardWidget):
         h = QHBoxLayout(box)
         h.setContentsMargins(10, 6, 10, 6)
         h.setSpacing(4)
-        chars = "".join(self.card.missing_preview)
+        shown = "".join(self.card.missing[:30])
         lab = CaptionLabel(
             f"未覆盖 {self.card.n_missing} 字："
-            + chars
-            + ("…" if self.card.n_missing > len(self.card.missing_preview)
-               else ""))
+            + shown
+            + ("…" if len(self.card.missing) > 30 else ""))
         lab.setWordWrap(False)               # 单行条：30 字封顶后宽有界
         h.addWidget(lab, 0, Qt.AlignVCenter)
         # 复制钮紧跟最后一个字/省略号右边（不钉行尾，用户拍板
-        # 2026-10-29）：拷贝展示的字符（预览截 30 字；全文以「未覆盖
-        # N 字」计数为准）。小号 22×22/icon 14，行内不抢高
+        # 2026-10-29）：拷贝**全部**未覆盖字符（展示截 30 只管显示，
+        # 用户纠偏 2026-10-29：截断的是预览不是载荷）。小号 22×22/icon
+        # 14，行内不抢高
         btn = TransparentToolButton(FIF.COPY.icon(), box)
         btn.setIconSize(QSize(14, 14))
         btn.setFixedSize(22, 22)
         install_tip(btn, "复制未覆盖字符")
-        btn.clicked.connect(lambda: self._copy_missing_chars(chars))
+        btn.clicked.connect(
+            lambda: self._copy_missing_chars("".join(self.card.missing)))
         h.addWidget(btn, 0, Qt.AlignVCenter)
         h.addStretch(1)
         return box
@@ -417,6 +541,13 @@ class FontCard(CardWidget):
         m_lab.setFixedWidth(_TEXT_W)
         m_lab.setFullText(self._metrics_text(o))
         self._metrics[o.key] = m_lab
+        if o.missing and o.entity is not None:
+            # 未覆盖指标悬停弹字符 Flyout（展示截 30+复制钮；拷贝载荷
+            # 全列）。带过滤器的行原生 tooltip 事件被吃，省略号全文
+            # tooltip 让位
+            m_lab.installEventFilter(_MissingFlyoutFilter(
+                m_lab, "".join(o.missing[:30]), "".join(o.missing),
+                len(o.missing) > 30, self._copy_missing_chars))
         text.addWidget(m_lab)
         # 左列（勾选框+名称+指标）定宽：各行预览条起点一致、预览同宽
         # （用户拍板 2026-10-29，防预览大大小小）

@@ -114,24 +114,55 @@ def test_make_card_twin_lists_originals(vm_full):
     assert card.checked_key == "fp-twin"                 # 默认勾选链不变：孪生优先
 
 
-def test_make_card_replace_missing_preview(vm_full):
+def test_make_card_replace_missing_all(vm_full):
     vm, ents = _vm_full(vm_full)
     usage = _usage("黑体", "永宇好字之外的字")
     cls = UsageClass("replace", [ents[0]], 0.4, list("之外的字"))
     card = vm.make_card(usage, cls)
     assert card.kind == "replace"
-    assert card.missing_preview == list("之外的字")[:30]
+    assert card.missing == list("之外的字")        # 全列存（截 30 在 UI 层）
     assert card.n_missing == 4
     vm.apply_default_check(card)
     assert card.checked_key == "fp-hei"
 
-    # 缺字超预览上限：预览截 30 字（用户拍板 2026-10-29），n_missing 是未覆盖总数
-    long_chars = "永宇的好" + "一二三四五六七八九" + "甲乙丙丁"
-    usage2 = _usage("黑体", long_chars)
-    cls2 = UsageClass("replace", [ents[0]], 0.1, list("之外" + "一二三四五六七八九甲乙丙丁"))
+    # 缺字超预览上限 30：**存储不截**（用户纠偏 2026-10-29：复制载荷要
+    # 全文），n_missing 是未覆盖总数
+    long_missing = list("之外" + "一二三四五六七八九" + "甲乙丙丁"
+                        + "".join(chr(0x4E00 + i) for i in range(28)))
+    usage2 = _usage("黑体", FULL + "".join(long_missing))
+    cls2 = UsageClass("replace", [ents[0]], 0.1, long_missing)
     card2 = vm.make_card(usage2, cls2)
-    assert card2.n_missing == 15
-    assert len(card2.missing_preview) == 15
+    assert card2.n_missing == 43
+    assert card2.missing == long_missing
+
+
+def test_option_missing_filled_all_sources(vm_full):
+    # 未覆盖字符全列进 OptionItem（指标悬停浮层源）：原字体/孪生/候选/
+    # 手选四处同填；KEEP 行无实体永远空
+    vm, ents = _vm_full(vm_full)
+    usage = _usage("黑体", "永宇好字之外的字")
+    card = vm.make_card(usage, UsageClass("replace", [ents[0]], 0.4,
+                                          list("之外的字")))
+    assert set(card.option("fp-hei").missing) == set("字之外")
+
+    # 孪生行缺字=孪生体自身口径
+    card2 = vm.make_card(usage, UsageClass("twin", [ents[2]], 1.0, [],
+                                           twin_hit=ents[2]))
+    assert set(card2.option("fp-twin").missing) == set("字之外")
+
+    # 搜索候选：候选自报不携带缺字列，vm 按卡字集现补
+    def cand(fp, sim, cov):
+        from types import SimpleNamespace
+        return SimpleNamespace(fingerprint=fp, display_name=fp,
+                               coverage=cov, similarity=sim, size_ratio=1.0,
+                               n_chars=8)
+
+    vm.add_candidates(card, [cand("fp-song", 0.7, 0.5)])
+    assert set(card.option("fp-song").missing) == set("好字之外的")
+
+    # 手选回填同填
+    vm.attach_pick(card, ents[2])
+    assert set(card.option("fp-twin").missing) == set("字之外")
 
 
 def test_make_card_missing_and_zero(vm_full):
