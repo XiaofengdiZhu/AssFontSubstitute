@@ -80,6 +80,7 @@ class SubsPage(QWidget):
         self._apply_total = 0
         self._apply_results: list = []
         self._apply_dispatching = False     # 派工在途标志（防重入）
+        self._apply_gen = 0                 # apply 批次号：tag 带代次防跨批串账
         self._confirmed_once = False
         self._search_active = False
         self._removed: set[str] = set()    # 已移除文件：迟到解析回执弃置
@@ -244,6 +245,7 @@ class SubsPage(QWidget):
         if not paths:
             return
         self._removed.difference_update(paths)   # 重加同一文件：解除弃置
+        self._confirmed_once = False             # 文件集变化：覆盖确认失效
         self._parsing.update(paths)
         for p in paths:
             self.worker.submit(f"parse:{p}", _parse_job, p)
@@ -358,6 +360,7 @@ class SubsPage(QWidget):
 
     def _on_file_checked(self, path, on):
         self.vm.set_checked(path, on)
+        self._confirmed_once = False     # 勾选集变化：覆盖确认针对的是旧集合
         self._update_files_summary()
         # 批次解析中不立即重算：勾选变化会在批末统一重算时生效，
         # 免得半批数据先拆一次卡
@@ -432,7 +435,8 @@ class SubsPage(QWidget):
             self.vm.attach_pick(card, entity, sim, size)
             self._apply_card(card)
             self._update_summary()
-        elif tag == "apply":
+        elif isinstance(tag, str) and tag.startswith("apply:") \
+                and tag == f"apply:{self._apply_gen}":
             self._on_apply_done(payload)
 
     def _on_failed(self, tag, err):
@@ -450,7 +454,9 @@ class SubsPage(QWidget):
                 card.searching = False
                 self._refresh_pending.discard(norm)
                 self._apply_card(card)
-        if tag == "apply":                 # 派工链中断：复位防重入状态
+        if isinstance(tag, str) and tag.startswith("apply:") \
+                and tag == f"apply:{self._apply_gen}":
+            # 派工链中断：复位防重入状态（非当前批次的迟到失败不碰计数）
             self._apply_results = []
             self._apply_total = 0
             self._apply_dispatching = False
@@ -470,8 +476,8 @@ class SubsPage(QWidget):
         # 弹泡白名单：只报本页任务。其余 tag（cachestat/预览渲染
         # 失败等）别页自会提示或已自行降级——无差别弹泡只会刷屏且不可读
         if isinstance(tag, str) and (
-                tag in ("slib", "apply")
-                or tag.startswith(("parse:", "classify:", "pull:",
+                tag == "slib"
+                or tag.startswith(("apply:", "parse:", "classify:", "pull:",
                                    "newsearcher:", "pickscore:",
                                    "scandir:"))):
             InfoBar.error("任务失败", f"{tag}: {err}", parent=self)
@@ -683,8 +689,12 @@ class SubsPage(QWidget):
             return                        # 无勾选文件：不派工、不禁用
         self._apply_dispatching = True
         self.btn_apply.setEnabled(False)   # 派工期禁用：防连点重复写文件
+        # 批次号入 tag：批 N 失败复位后，批 N 的迟到回执不得计入批 N+1
+        # （裸 tag "apply" 曾提前凑满总数、成功 InfoBar 早发）
+        self._apply_gen += 1
+        tag = f"apply:{self._apply_gen}"
         for f in self.vm.checked_parses():
-            self.worker.submit("apply", _apply_job, f.path, mapping,
+            self.worker.submit(tag, _apply_job, f.path, mapping,
                                self.settings.get("save_suffix"), overwrite)
 
     def _on_apply_done(self, result):
@@ -754,6 +764,7 @@ class SubsPage(QWidget):
                           parent=self)
             self.suffix_edit.setText(self.settings.get("save_suffix"))
             return
+        self._confirmed_once = False      # 覆盖目标集随目标后缀变化，确认失效
         self.suffixChanged.emit(self.settings.get("save_suffix"))
 
     def set_save_suffix(self, text: str):

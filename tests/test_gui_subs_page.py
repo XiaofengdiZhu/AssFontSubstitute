@@ -206,14 +206,15 @@ def test_apply_confirm_mapping_and_record(qapp, tmp_path, monkeypatch):
     page._cards_ui["甲字体"].option_checked.emit("甲字体", "fp2")
 
     page._apply()                                   # 首击：只警告不执行
-    assert not [s for s in page.worker.submits if s[0] == "apply"]
+    assert not [s for s in page.worker.submits if s[0].startswith("apply")]
     page._apply()                                   # 再击确认 → 派工
-    assert page.worker.submits[-1][0] == "apply"
+    assert page.worker.submits[-1][0] == f"apply:{page._apply_gen}"
     path, mapping, suffix, overwrite = page.worker.submits[-1][2]
     assert path == str(src) and mapping == {"甲字体": "乙字体"}
     assert suffix == ".substituted.ass" and overwrite is False
 
-    page._on_result("apply", ApplyFileResult(str(src), str(out), 1))
+    page._on_result(f"apply:{page._apply_gen}",
+                    ApplyFileResult(str(src), str(out), 1))
     d = latest_decision(Path(page.vm.decisions_db), "甲字体", "t2s")
     assert d == ("fp2", False)                      # record_all 已落库
 
@@ -243,14 +244,15 @@ def test_apply_reentry_guard_disables_during_dispatch(qapp, tmp_path, monkeypatc
     assert page.btn_apply.isEnabled()
 
     page._apply()                                   # 首击即派工（无冲突路径）
-    assert len([s for s in page.worker.submits if s[0] == "apply"]) == 1
+    assert len([s for s in page.worker.submits if s[0].startswith("apply")]) == 1
     assert page._apply_dispatching is True
     assert not page.btn_apply.isEnabled()           # 派工期禁用：防连点重复写
     page._apply()                                   # 在途重复点击：忽略
-    assert len([s for s in page.worker.submits if s[0] == "apply"]) == 1
+    assert len([s for s in page.worker.submits if s[0].startswith("apply")]) == 1
 
-    page._on_result("apply", ApplyFileResult(str(src),
-                                             str(src) + ".substituted.ass", 1))
+    page._on_result(f"apply:{page._apply_gen}",
+                    ApplyFileResult(str(src),
+                                    str(src) + ".substituted.ass", 1))
     assert page._apply_dispatching is False
     assert page.btn_apply.isEnabled()               # 收尾经 _update_summary 恢复
 
@@ -347,12 +349,35 @@ def test_apply_late_result_after_failed_reset_is_dropped(qapp, tmp_path, monkeyp
     page = _make_page(qapp, tmp_path, monkeypatch)
     from ass_font_substitute.gui.jobs import ApplyFileResult
 
-    page._on_failed("apply", "boom")
+    page._on_failed("apply:0", "boom")
     before = len(page.vm.files)                    # record_all 不该被迟到回执触发
     page._on_apply_done(ApplyFileResult("p.ass", ".substituted.ass", None))
     assert page._apply_results == []
     assert page._apply_total == 0
     assert len(page.vm.files) == before
+
+
+def test_apply_late_receipt_of_old_batch_ignored(qapp, tmp_path, monkeypatch):
+    # 终审 P1：批 1 失败复位后批 2 派工，批 1 迟到回执不得计入批 2 计数
+    # （裸 tag 曾提前凑满 _apply_total、成功 InfoBar 早发）
+    from ass_font_substitute.gui.jobs import ApplyFileResult
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    page._apply_gen = 1                            # 批 1 已派工（直接摆状态）
+    page._apply_dispatching = True
+    page._apply_total = 2
+    page._apply_results = []
+    page._on_failed("apply:1", "boom")             # 批 1 中断复位
+    assert page._apply_dispatching is False
+    page._apply_gen = 2                            # 批 2 派工
+    page._apply_dispatching = True
+    page._apply_total = 1
+    page._apply_results = []
+    page._on_result("apply:1", ApplyFileResult("p.ass", "q.ass", 1))  # 批 1 迟到
+    assert page._apply_results == []               # 不计入批 2
+    assert page._apply_dispatching is True
+    page._on_result("apply:2", ApplyFileResult("p.ass", "q.ass", 1))  # 批 2 正主
+    assert page._apply_dispatching is False        # 正常收尾
 
 
 def test_zero_usage_keep_card_presentation_and_no_search(qapp, tmp_path, monkeypatch):
