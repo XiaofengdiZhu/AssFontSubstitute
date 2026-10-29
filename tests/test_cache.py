@@ -47,6 +47,45 @@ def test_trim_and_clear(tmp_path):
     c.clear_all()
 
 
+def test_algo_ver_isolates_entries(tmp_path):
+    # 算法版本入键：ver 变更后旧口径持久缓存不命中（静默过期根因）
+    c = Cache(tmp_path / "cache.db")
+    calls = []
+    c.get_render("fp", "v1", lambda: calls.append(1) or _bundle())
+    assert len(calls) == 1
+    c.ALGO_VER = "2"                       # 模拟算法升级
+    c.get_render("fp", "v1", lambda: calls.append(1) or _bundle())
+    assert len(calls) == 2                 # 旧口径不命中，重算
+
+
+def test_pairs_lru_trim(tmp_path):
+    c = Cache(tmp_path / "cache.db")
+    r = CompareResult(0.5, 1.0, 4)
+    for i in range(6):
+        c.put_pair(f"a{i}", f"b{i}", "v1", r)
+    c._trim_pairs(max_rows=3)
+    assert c.pair_count == 3
+    # 早写的被淘汰（used_at 递增序，同秒全等时删任意——只验数量与存活数）
+    assert c.pair_count == 3
+
+
+def test_old_schema_pairs_dropped(tmp_path):
+    # 旧库 pairs 无 used_at 列：打开即弃表重建，不炸
+    import sqlite3
+    p = tmp_path / "cache.db"
+    conn = sqlite3.connect(p)
+    conn.execute("CREATE TABLE pairs(fpa TEXT, fpb TEXT, text_ver TEXT, "
+                 "score REAL, size_ratio REAL, n_chars INT, "
+                 "PRIMARY KEY(fpa, fpb, text_ver))")
+    conn.execute("INSERT INTO pairs VALUES ('a','b','v1',0.5,1.0,4)")
+    conn.commit()
+    conn.close()
+    c = Cache(p)
+    assert c.pair_count == 0               # 旧行弃用（键前缀也不兼容）
+    c.put_pair("a", "b", "v1", CompareResult(0.5, 1.0, 4))
+    assert c.get_pair("a", "b", "v1").score == 0.5
+
+
 def test_move(tmp_path):
     p1, p2 = tmp_path / "a.db", tmp_path / "b" / "c.db"
     p2.parent.mkdir()
