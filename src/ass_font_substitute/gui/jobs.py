@@ -31,7 +31,10 @@ class DirStatus:
 
 def probe_dir_status(dir_path: str) -> DirStatus:
     """只读探测（URI mode=ro，绝不创建/写库）。missing=目录不存在；
-    offline=库存在但打不开（只读盘/权限/损坏）；stale=有未入索引文件。"""
+    offline=库存在但打不开（只读盘/权限/损坏/深层损坏）；stale=有未入
+    索引文件。注意与 open_db 的语义差：probe 恒只读，损坏库报 offline；
+    装载路径（open_db）会把头级损坏静默重建为空库——目录行状态与聚合
+    实况可能短暂不一致，属有意的读/写分层。"""
     d = Path(dir_path)
     if not d.is_dir():
         return DirStatus(dir_path, "missing")

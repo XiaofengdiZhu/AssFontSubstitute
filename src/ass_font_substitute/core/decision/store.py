@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import os
 import sqlite3
 import time
 from contextlib import closing
@@ -14,10 +16,34 @@ CREATE TABLE IF NOT EXISTS decisions(
 
 def _connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=5)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.executescript(DDL)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.executescript(DDL)
+    except sqlite3.DatabaseError:
+        conn.close()   # Windows：句柄不关，隔离 os.replace 必炸
+        raise
     return conn
+
+
+def _rebuild_corrupt(db_path: Path) -> sqlite3.Connection:
+    """记忆库损坏（非空但非法）→ 备份 .corrupt 重建空库（记忆可丢：只
+    影响回放默认值，不损字幕数据）。旁车一并隔离，防旧 WAL 回放污染。
+    主库被占用转译 OperationalError（打不上≠损坏，别炸调用方）。"""
+    bak = db_path.parent / (db_path.name + ".corrupt")
+    try:
+        os.replace(db_path, bak)
+    except OSError as e:
+        raise sqlite3.OperationalError(f"库隔离失败（被占用？）: {e}") from e
+    for side in ("-wal", "-shm"):
+        p = Path(str(db_path) + side)
+        if p.exists():
+            try:
+                os.replace(p, Path(str(bak) + side))
+            except OSError:
+                with contextlib.suppress(OSError):
+                    p.unlink()
+    return _connect(db_path)
 
 
 def record_decision(db_path: Path, norm_name: str, direction: str,
@@ -27,7 +53,13 @@ def record_decision(db_path: Path, norm_name: str, direction: str,
     本层不做归一：norm_name 必须由调用方传 normalize_name 结果
     （生产调用点 subs_vm.record_all 传 c.norm_name）。传原始名记忆
     静默 miss，不再补救。"""
-    with closing(_connect(db_path)) as conn, conn:
+    try:
+        conn = _connect(db_path)
+    except sqlite3.OperationalError:
+        raise                                # 打不开≠损坏（目录缺失/权限）
+    except sqlite3.DatabaseError:
+        conn = _rebuild_corrupt(db_path)
+    with closing(conn), conn:
         conn.execute("INSERT OR REPLACE INTO decisions VALUES (?,?,?,?,?)",
                      (norm_name, direction, fingerprint, int(keep), time.time()))
 
@@ -36,7 +68,12 @@ def latest_decision(db_path: Path, norm_name: str,
                     direction: str) -> tuple[str | None, bool] | None:
     """返回 (fingerprint, keep)；无记录 None。norm_name 须传归一名，
     同 record_decision。"""
-    conn = _connect(db_path)
+    try:
+        conn = _connect(db_path)
+    except sqlite3.OperationalError:
+        raise                                # 打不开≠损坏（目录缺失/权限）
+    except sqlite3.DatabaseError:
+        conn = _rebuild_corrupt(db_path)     # 损坏：空库视角，读侧返 None
     try:
         row = conn.execute(
             "SELECT fingerprint, keep FROM decisions WHERE norm_name=? AND direction=?",

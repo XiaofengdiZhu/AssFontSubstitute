@@ -111,6 +111,48 @@ def test_schema_mismatch_backs_up_and_rebuilds(tmp_path):
     backup.close()
 
 
+def test_corrupt_db_backs_up_and_rebuilds(tmp_path):
+    # 终审 P1：库损坏（非空但非法，NAS 截断/磁盘坏块）曾 executescript
+    # 直崩无重建——备份 .corrupt 重建空库
+    d = tmp_path / "fonts"
+    d.mkdir()
+    db = d / "fontindex.db"
+    db.write_bytes(b"this is not a sqlite database" * 10)
+    conn = open_db(db)
+    assert conn.execute("SELECT v FROM schema_version").fetchone()[0] \
+        == SCHEMA_VERSION
+    assert stats(conn) == {"files": 0, "fonts": 0, "support_sc": 0,
+                           "support_tc": 0}
+    conn.close()
+    assert (d / "fontindex.db.corrupt").read_bytes().startswith(
+        b"this is not a sqlite database")
+    # 重建后的库可正常使用
+    conn2 = open_db(db)
+    assert conn2.execute("SELECT v FROM schema_version").fetchone()[0] \
+        == SCHEMA_VERSION
+    conn2.close()
+
+
+def test_schema_mismatch_quarantines_wal_sidecars(tmp_path):
+    # 终审 P1：版本升级只挪主库时遗留 -wal/-shm 被新库捡到——并发读者
+    # 场景旧 WAL 回放污染新库（schema_version 双行）。旁车须一并隔离。
+    # sqlite 自身 close 会清旁车，并发残留直接单测 _quarantine
+    from ass_font_substitute.core.fontindex.store import _quarantine
+
+    d = tmp_path / "fonts"
+    d.mkdir()
+    db = d / "fontindex.db"
+    db.write_bytes(b"main db bytes")
+    (d / "fontindex.db-wal").write_bytes(b"stale wal")
+    (d / "fontindex.db-shm").write_bytes(b"stale shm")
+    bak = _quarantine(db, ".bak")
+    assert bak.read_bytes() == b"main db bytes"
+    assert not (d / "fontindex.db-wal").exists()
+    assert not (d / "fontindex.db-shm").exists()
+    assert (d / "fontindex.db.bak-wal").read_bytes() == b"stale wal"
+    assert (d / "fontindex.db.bak-shm").read_bytes() == b"stale shm"
+
+
 def test_schema_v2_with_xxh_column_migrates(tmp_path):
     # 真实 v2 旧库形状（files/fingerprints 含 xxh 列）→ 备份重建后照常索引
     d = tmp_path / "fonts"

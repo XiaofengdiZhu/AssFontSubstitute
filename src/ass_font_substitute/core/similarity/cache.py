@@ -24,11 +24,6 @@ DEFAULT_LIMIT = 500 * 1024 * 1024
 # pairs 行数上限：N 字体库 O(N²) 增长曾无上界持久膨胀
 PAIRS_MAX = 300_000
 
-# 渲染/比对算法版本：TILE/TARGET_INK/BASE_PX/CHAR_WEIGHT/phash/NCC 任一
-# 变更时 +1——缓存键随之整体失效，持久库（Data/cache.db）里的旧口径
-# 相似度不再静默命中。改用键前缀实现，无需 schema 迁移
-ALGO_VER = "1"
-
 
 class Cache:
     """渲染/比对缓存（SQLite WAL，单连接）。
@@ -40,6 +35,9 @@ class Cache:
     fontindex 定义（名称+cmap+度量，不含字形轮廓——字体文件更新而度量
     不变的窄场景缓存可能 stale，索引重算不失效，已知限制）。"""
 
+    # 渲染/比对算法版本（单一事实源，变更时 +1）：TILE/TARGET_INK/
+    # BASE_PX/CHAR_WEIGHT/phash/NCC 任一变更后缓存键随之整体失效，持久
+    # 库（Data/cache.db）里的旧口径相似度不再静默命中。键前缀实现，零迁移
     ALGO_VER = "1"
 
     def __init__(self, path: Path):

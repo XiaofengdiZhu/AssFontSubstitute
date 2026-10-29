@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import zlib
@@ -103,19 +104,76 @@ class UpdateResult:
 
 def _connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=5)
-    conn.execute("PRAGMA journal_mode=WAL")
-    # NORMAL（WAL 安全默认，Cache 层同款）：进程崩溃不丢已提交事务，
-    # 掉电最多丢最近几秒；逐文件事务的 COMMIT 免每次 fsync——17k 文件
-    # 首建省 17k 次 fsync 等待。取消/续跑语义不变（增量门照常续传）。
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.executescript(DDL)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        # NORMAL（WAL 安全默认，Cache 层同款）：进程崩溃不丢已提交事务，
+        # 掉电最多丢最近几秒；逐文件事务的 COMMIT 免每次 fsync——17k 文件
+        # 首建省 17k 次 fsync 等待。取消/续跑语义不变（增量门照常续传）。
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.executescript(DDL)
+    except sqlite3.DatabaseError:
+        conn.close()   # Windows：句柄不关，后续隔离 os.replace 必炸
+        raise
     return conn
 
 
+def _quarantine(path: Path, suffix: str) -> Path:
+    """主库+旁车文件一并改名隔离：只挪主库时遗留的 -wal/-shm 会被新库
+    打开路径捡到——并发读者（CoreWorker 常开只读连接）场景下旧 WAL 回放
+    污染新库（帧校验只对 -wal 自身头 salt，schema_version 出现双行）。
+
+    主库被占用（第二实例/他进程开句柄）无法改名时转译 OperationalError：
+    调用方（load_library）按 offline 语义处理，不拖垮整体装载。
+
+    只保头级损坏的重建：深层损坏（头合法、数据页坏）会穿过 schema_version
+    探测，在装载 SELECT 层以 sqlite3.Error 浮出——同样落 offline，不重建。
+    """
+    bak = path.parent / (path.name + suffix)
+    try:
+        os.replace(path, bak)
+    except OSError as e:
+        raise sqlite3.OperationalError(f"库隔离失败（被占用？）: {e}") from e
+    for side in ("-wal", "-shm"):
+        p = Path(str(path) + side)
+        if p.exists():
+            try:
+                os.replace(p, Path(str(bak) + side))
+            except OSError:
+                # 旁车被占用（并发读者）：删不掉也必须挪离新库路径；
+                # 两头都失败只能留告警——残留 -wal 可能被重建库回放
+                try:
+                    p.unlink()
+                except OSError:
+                    logging.getLogger(__name__).warning(
+                        "索引旁车 %s 隔离失败（被占用），重建库可能被旧 WAL 污染",
+                        p)
+    return bak
+
+
 def open_db(path: Path) -> sqlite3.Connection:
+    try:
+        return _open_checked(path)
+    except sqlite3.OperationalError:
+        # 打不开（目录缺失/权限/锁定）≠损坏：原样抛，调用方保持 offline 语义
+        raise
+    except sqlite3.DatabaseError:
+        # 库损坏（非空但非法：NAS 截断/磁盘坏块）——executescript/SELECT
+        # 层炸。备份 .corrupt 重建空库（同版本不符路径），索引可重扫恢复
+        _quarantine(path, ".corrupt")
+        conn = _connect(path)
+        conn.execute("INSERT INTO schema_version VALUES (?)", (SCHEMA_VERSION,))
+        conn.commit()
+        return conn
+
+
+def _open_checked(path: Path) -> sqlite3.Connection:
     conn = _connect(path)
-    row = conn.execute("SELECT v FROM schema_version").fetchone()
+    try:
+        row = conn.execute("SELECT v FROM schema_version").fetchone()
+    except sqlite3.DatabaseError:
+        conn.close()
+        raise
     if row is None:
         conn.execute("INSERT INTO schema_version VALUES (?)", (SCHEMA_VERSION,))
         conn.commit()
@@ -124,11 +182,10 @@ def open_db(path: Path) -> sqlite3.Connection:
         return conn
     # spec §5：版本不符 → 改名备份旧库（覆盖既有 .bak）后全量重建
     conn.close()  # 干净关闭：WAL 落盘、清掉 -wal/-shm 旁车文件
-    bak = path.parent / (path.name + ".bak")
     try:
-        os.replace(path, bak)
+        _quarantine(path, ".bak")
     except OSError as e:
-        raise IndexSchemaError(f"备份旧库失败（{bak}）: {e}") from e
+        raise IndexSchemaError(f"备份旧库失败: {e}") from e
     conn = _connect(path)
     conn.execute("INSERT INTO schema_version VALUES (?)", (SCHEMA_VERSION,))
     conn.commit()

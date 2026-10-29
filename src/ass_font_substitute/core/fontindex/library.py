@@ -77,6 +77,7 @@ class LibraryIndex:
         self.dirs = dirs
         self._entities: list[FontEntity] = []
         self._skipped: list[str] = []
+        self._by_alias: dict[str, list[FontEntity]] = {}   # _load 末尾灌满
         self._load()
 
     @classmethod
