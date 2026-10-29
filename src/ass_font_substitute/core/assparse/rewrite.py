@@ -6,6 +6,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from ass_font_substitute.core.assparse.encoding import BOMS
 from ass_font_substitute.core.assparse.encoding import detect_encoding
 
 
@@ -13,6 +14,44 @@ from ass_font_substitute.core.assparse.encoding import detect_encoding
 class RewriteResult:
     out_path: Path | None
     changed_lines: list[int]
+
+
+# 行终止符只认 \r\n|\r|\n（str/bytes.splitlines 在 \v \f \x85 \u2028 等
+# 上也断行——正文字段含这些字符时行被劈开、段落状态机错乱）
+_LINE_RE = re.compile(r"\r\n|\r|\n")
+_LINE_RE_B = re.compile(rb"\r\n|\r|\n")
+
+# 多字节序列不含 0x0A/0x0D 的编码：可在字节级切行（big5/sjis/gb 尾字节
+# 范围均不含控制符，utf-8 续字节 ≥0x80），逐行锁原字节。utf-16/32 单元
+# 流里 0A/00 相邻可能是字符内容（U+xx0A 等），只能文本级整编
+BYTE_LINE_CODECS = frozenset(
+    {"utf-8", "utf-8-sig", "gb18030", "big5", "shift_jis", "euc-kr"})
+
+
+def _split_lines(s) -> list:
+    rx = _LINE_RE_B if isinstance(s, bytes) else _LINE_RE
+    out = []
+    start = 0
+    for mo in rx.finditer(s):
+        out.append(s[start:mo.end()])
+        start = mo.end()
+    if start < len(s) or (not out and s):
+        out.append(s[start:])
+    return out
+
+
+def _bom_and_codec(data: bytes, enc: str) -> tuple[bytes, str]:
+    """(BOM 字节, 正体裁码)：BOM 拆出正文外统一手工补回——通用 utf-16
+    编解码器恒写 LE、"utf-8-sig" 之外自管不了端序；BOM 文件的正体一律
+    用显式端序 codec。"""
+    for bom, codec in BOMS:
+        if data.startswith(bom):
+            if codec == "utf-8-sig":
+                return bom, "utf-8"
+            if codec == "utf-16":
+                return bom, "utf-16-le"
+            return bom, codec
+    return b"", enc
 
 
 def _expand_at(mapping: dict[str, str]) -> dict[str, str]:
@@ -45,13 +84,17 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
     src = Path(src)
     data = src.read_bytes()
     enc = detect_encoding(data)
-    text = data.decode(enc)
-    # "-le"/"-be" 编解码器不剥 BOM：剥出文本外，写回补回（"utf-16"/
-    # "utf-8-sig" 自管 BOM，bom=False 不受影响）
-    bom = text.startswith("\ufeff")
-    if bom:
-        text = text[1:]
-    lines = text.splitlines(keepends=True)
+    bom_b, body_codec = _bom_and_codec(data, enc)
+    body = data[len(bom_b):]
+    text = body.decode(body_codec)
+    lines = _split_lines(text)
+    # 字节级行切片：未改动的行锁原字节（big5 等双编码字 decode→encode
+    # 回写规范码，未改行字节也被翻转；对得上才用，行数不齐弃用）
+    byte_lines = None
+    if enc in BYTE_LINE_CODECS:
+        bl = _split_lines(body)
+        if len(bl) == len(lines):
+            byte_lines = bl
     m = _expand_at(mapping)
 
     section = ""
@@ -111,8 +154,15 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
                 lines[i] = new_line
                 changed.append(i)
 
-    result_text = ("\ufeff" if bom else "") + "".join(lines)
-    result_bytes = result_text.encode(enc)
+    changed_set = set(changed)
+    if byte_lines is not None:
+        chunks = [bom_b]
+        for i, tl in enumerate(lines):
+            chunks.append(tl.encode(body_codec) if i in changed_set
+                          else byte_lines[i])
+        result_bytes = b"".join(chunks)
+    else:
+        result_bytes = bom_b + "".join(lines).encode(body_codec)
     if overwrite_src:
         tmp = src.with_name(src.name
                             + f".tmp{os.getpid()}-{threading.get_ident()}")

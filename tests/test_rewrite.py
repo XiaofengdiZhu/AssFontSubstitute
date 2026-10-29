@@ -121,6 +121,34 @@ def test_lowercase_keywords_rewritten(tmp_path):
     assert len(r.changed_lines) == 3
 
 
+def test_big5_dual_encoding_bytes_preserved(tmp_path):
+    # 终审 P1：big5 双编码字（a2 40 与 a2 42 同解 ＼）decode→encode 曾
+    # 回写规范码 a2 42——未改动行字节也被翻转。未改行锁原字节。
+    # 正文用纯中性高频字驱动编码检出（gb18030 硬解 big5 字节也能凑够
+    # 命中数，长杂文会被误判 gb18030——检出层固有歧义，另案）
+    body = ("[Script Info]\r\n"
+            "Title: t\r\n"
+            "\r\n"
+            "[V4+ Styles]\r\n"
+            "Format: Name, Fontname\r\n"
+            "Style: Main,FontX,52\r\n"
+            "\r\n"
+            "[Events]\r\n"
+            "Format: Layer, Style, Text\r\n"
+            "Dialogue: 0,Main,,0,0,0,,的的是是中中大\r\n")
+    p = tmp_path / "in.ass"
+    # 字节级拼装：a2 40 是非规范 big5（与 a2 42 同解 ＼），直书进 Title 行
+    p.write_bytes(body.encode("big5").replace(b"Title: t\r\n",
+                                              b"Title: t\xa2\x40\r\n"))
+    out = tmp_path / "out.ass"
+    r = rewrite_file(p, {"FontX": "思源黑体"}, out=out)
+    data = out.read_bytes()
+    assert b"\xa2\x40" in data                   # 未改行的非规范字节原样
+    assert "思源黑体".encode("big5") in data     # 改动行正常替换
+    assert data.decode("big5").count("思源黑体") == 1
+    assert len(r.changed_lines) == 1
+
+
 def test_at_variant(tmp_path):
     _mk(tmp_path)
     out = tmp_path / "out.ass"
