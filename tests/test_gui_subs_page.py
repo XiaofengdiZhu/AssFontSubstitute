@@ -524,6 +524,9 @@ def test_twin_metrics_lead_phrase(qapp, tmp_path, monkeypatch):
     # 孪生行次序（用户拍板 2026-10-29）：行首注明来由，后接覆盖/未覆盖；
     # 孪生行无相似率/相对大小
     page = _make_page(qapp, tmp_path, monkeypatch)
+    from PySide6.QtWidgets import QLabel
+    from qfluentwidgets import TransparentToolButton
+
     from ass_font_substitute.core.coverage.matcher import UsageClass
     from ass_font_substitute.core.models import FontUsage
     from ass_font_substitute.gui.jobs import FileParse
@@ -532,9 +535,12 @@ def test_twin_metrics_lead_phrase(qapp, tmp_path, monkeypatch):
     ent_twin = _ent("fp-twin", "甲字体简", chars="永宇好")
     usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
                       inline_count=1, chars=set("永宇好我在"), variants={"甲字体"})
+    page.vm.set_entities([ent_a])     # 缺字条=原字体口径，原字体按名取自 vm 库
     page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
     page._on_result(f"classify:{page._gen}:0",
                     (usage, UsageClass(kind="twin", entities=[ent_a],
+                                       coverage=0.6,
+                                       missing_chars=["我", "在"],
                                        twin_hit=ent_twin)))
     card = page.vm.cards[0]
     assert card.checked_key == "fp-twin"          # 默认勾选链：孪生优先
@@ -543,6 +549,18 @@ def test_twin_metrics_lead_phrase(qapp, tmp_path, monkeypatch):
     fulls = [lab.fullText() for lab in row.findChildren(_MetricsLabel)]
     assert any(t == "原字体名称对应的简体名称 · 覆盖 60.0% · 未覆盖 2 字"
                for t in fulls), fulls
+    # 孪生卡也带缺字条（用户纠偏 2026-10-29：这行=**原字体**未覆盖，
+    # 非孪生体——孪生体的未覆盖在指标行另说）。原字体甲字体 cmap 永宇，
+    # 用字 永宇好我在 → 缺 好我在 3 字
+    strips = [b for b in fc.findChildren(QLabel)
+              if b.text().startswith("未覆盖 ")]
+    assert len(strips) == 1
+    # missing 集合无序：只钉字集不钉序
+    assert strips[0].text().startswith("未覆盖 3 字：")
+    assert set(strips[0].text()[len("未覆盖 3 字："):]) == set("好我在")
+    copy_btns = [b for b in fc.findChildren(TransparentToolButton)
+                 if b.toolTip() == "复制未覆盖字符"]
+    assert len(copy_btns) == 1
 
 
 def test_elide_labels_survive_layout(qapp, tmp_path, monkeypatch):
@@ -1032,4 +1050,45 @@ def test_mono_switch_broadcast_rerenders_bars(qapp, tmp_path, monkeypatch):
     assert page.worker.submits[-1][2][-1] is True   # 派发参数带 mono
     page.sw_mono.setChecked(False)
     assert page.settings.get("preview_mono") is False
+    page.deleteLater()
+
+
+def test_missing_strip_30_cap_and_copy_button(qapp, tmp_path, monkeypatch):
+    """缺字条预览截 30 字（用户拍板 2026-10-29，原 12）；行尾复制钮拷贝
+    展示字符、InfoBar 回执。未超 30 无省略号，超 30 补「……」。"""
+    from PySide6.QtWidgets import QLabel
+    from qfluentwidgets import TransparentToolButton
+
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    chars = "永宇好在" + "".join(chr(0x4E00 + i) for i in range(40))
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=1, chars=set(chars), variants={"甲字体"})
+    page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    ent = _ent("fp1", "乙字体", chars="永")     # 覆盖极少 → 大量未覆盖
+    page._on_result(f"classify:{page._gen}:0", (usage, UsageClass(
+        kind="replace", entities=[ent], coverage=0.02,
+        missing_chars=list(chars[1:]))))
+    fc = page._cards_ui["甲字体"]
+
+    def strip_label():
+        return next(b for b in fc.findChildren(QLabel)
+                    if b.text().startswith("未覆盖 "))
+
+    lab = strip_label()
+    assert lab.text().startswith("未覆盖 43 字：") and lab.text().endswith("…")
+    shown = lab.text()[len("未覆盖 43 字："):-len("…")]
+    assert len(shown) == 30                     # 预览截 30 字
+    btns = [b for b in fc.findChildren(TransparentToolButton)
+            if b.toolTip() == "复制未覆盖字符"]
+    assert len(btns) == 1
+    assert btns[0].width() == 22                # 小号钮
+    # 钮紧跟文本尾（不钉行尾）：钮左缘 − 标签右缘 ≤ 间距
+    assert btns[0].x() - (lab.x() + lab.width()) <= 12
+    qapp.clipboard().clear()
+    btns[0].click()
+    assert qapp.clipboard().text() == shown     # 拷贝展示的 30 字
     page.deleteLater()

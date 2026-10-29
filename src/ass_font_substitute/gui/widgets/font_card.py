@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shiboken6
 from PySide6.QtCore import QRectF
+from PySide6.QtCore import QSize
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtCore import Signal
@@ -10,6 +11,7 @@ from PySide6.QtGui import QFontMetrics
 from PySide6.QtGui import QPainter
 from PySide6.QtGui import QPainterPath
 from PySide6.QtGui import QPen
+from PySide6.QtWidgets import QApplication
 from PySide6.QtWidgets import QFrame
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QLabel
@@ -23,14 +25,17 @@ from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import FluentStyleSheet
 from qfluentwidgets import IconWidget
 from qfluentwidgets import InfoBadge
+from qfluentwidgets import InfoBar
 from qfluentwidgets import StrongBodyLabel
 from qfluentwidgets import TransparentPushButton
+from qfluentwidgets import TransparentToolButton
 from qfluentwidgets import qconfig
 from qfluentwidgets import setCustomStyleSheet
 from qfluentwidgets import themeColor
 
 from ass_font_substitute.gui.subs_vm import KEEP
 from ass_font_substitute.gui.subs_vm import Card
+from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.widgets.pill import PillLabel
 from ass_font_substitute.gui.widgets.pill import padded_badge
 from ass_font_substitute.gui.widgets.pill import pill
@@ -207,7 +212,9 @@ class FontCard(CardWidget):
         v.setSpacing(8)
         v.addWidget(self._build_head())
 
-        if card.kind == "replace" and card.missing_preview:
+        # 缺字条：replace=原字体未覆盖；twin=孪生体未覆盖（换过去会缺的
+        # 字，勾选前可见）
+        if card.kind in ("replace", "twin") and card.missing_preview:
             v.addWidget(self._build_missing_strip())
 
         v.addWidget(self._build_options())
@@ -315,14 +322,31 @@ class FontCard(CardWidget):
         box = _TofuFrame(self)
         h = QHBoxLayout(box)
         h.setContentsMargins(10, 6, 10, 6)
+        h.setSpacing(4)
+        chars = "".join(self.card.missing_preview)
         lab = CaptionLabel(
             f"未覆盖 {self.card.n_missing} 字："
-            + "".join(self.card.missing_preview)
-            + ("……" if self.card.n_missing > len(self.card.missing_preview)
+            + chars
+            + ("…" if self.card.n_missing > len(self.card.missing_preview)
                else ""))
-        lab.setWordWrap(True)
-        h.addWidget(lab, 1)
+        lab.setWordWrap(False)               # 单行条：30 字封顶后宽有界
+        h.addWidget(lab, 0, Qt.AlignVCenter)
+        # 复制钮紧跟最后一个字/省略号右边（不钉行尾，用户拍板
+        # 2026-10-29）：拷贝展示的字符（预览截 30 字；全文以「未覆盖
+        # N 字」计数为准）。小号 22×22/icon 14，行内不抢高
+        btn = TransparentToolButton(FIF.COPY.icon(), box)
+        btn.setIconSize(QSize(14, 14))
+        btn.setFixedSize(22, 22)
+        install_tip(btn, "复制未覆盖字符")
+        btn.clicked.connect(lambda: self._copy_missing_chars(chars))
+        h.addWidget(btn, 0, Qt.AlignVCenter)
+        h.addStretch(1)
         return box
+
+    def _copy_missing_chars(self, chars: str):
+        QApplication.clipboard().setText(chars)
+        InfoBar.success("已复制", f"未覆盖 {len(chars)} 字",
+                        duration=1500, parent=self.window())
 
     # ---- 选项行 ----
     def _build_options(self) -> QWidget:

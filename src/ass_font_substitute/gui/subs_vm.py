@@ -68,7 +68,7 @@ class Card:
     n_chars: int = 0
     variants: set[str] = field(default_factory=set)
     missing_preview: list[str] = field(default_factory=list)   # 需替换卡 tofu 预览
-    n_missing: int = 0                                # 未覆盖总字数（预览截 12 字）
+    n_missing: int = 0                                # 未覆盖总字数（预览截 30 字）
     options: list[OptionItem] = field(default_factory=list)
     checked_key: str | None = None
     searching: bool = False
@@ -204,7 +204,18 @@ class SubsVM:
             card.options = origs + rest
         if cls.kind == "replace":
             card.n_missing = len(cls.missing_chars)
-            card.missing_preview = list(cls.missing_chars)[:12]
+            card.missing_preview = list(cls.missing_chars)[:30]
+        elif cls.kind == "twin":
+            # 缺字条=**原字体**未覆盖的字（用户纠偏 2026-10-29：这行历来
+            # 是原字体缺字口径，孪生体的未覆盖在指标行另说）。cls.missing_chars
+            # 是孪生体的，此处不用；原字体实体按名取（孪生卡「原字体」行
+            # 同源 _by_norm），原字体不在库（不在库→孪生路径）则无原字体
+            # 覆盖可言，不显缺字条
+            origs = self._by_norm.get(usage.norm_name) or []
+            if origs:
+                _cov, missing = coverage_detail(origs[0].cmap, usage.chars)
+                card.n_missing = len(missing)
+                card.missing_preview = list(missing)[:30]
         card.min_sim = float(self._settings.get("min_sim"))
         return card
 
