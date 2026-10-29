@@ -65,6 +65,7 @@ class PreviewBar(CaptionLabel):
         self._strip = None                   # 最近一次贴上的条带，换肤重贴用
         self._stale_theme = False            # 不可见期换肤未贴上，showEvent 补
         self._applied_w = -1                 # 最近一次贴图用的宽度上限
+        self._applied_h = -1                 # 同上高度维（0 高首贴曾固化 1px 贴图）
         self._mono = False                   # 在途任务的 mono 口径（回传校验）
         qconfig.themeChanged.connect(self._on_theme_changed)
         # 错误详情走 Fluent 气泡（过滤器装一次，set_row 换 tooltip 文本照常生效）
@@ -87,18 +88,27 @@ class PreviewBar(CaptionLabel):
         if self._stale_theme and self.height() > 0:
             self._stale_theme = False
             self._apply(self._strip)
-        # 布局时序保险：首贴宽度上限过时（首贴早于定宽）在此补齐
+        # 布局时序保险：首贴宽度/高度上限过时（首贴早于定宽定高，0 高时
+        # 曾缩成 1 物理像素且宽度恰未变而永不重贴）在此补齐
         if (self._strip is not None and self.width() > 1
-                and self._applied_w != self._max_w()):
+                and (self._applied_w != self._max_w()
+                     or self._applied_h != round(self.height()
+                                                 * (self.devicePixelRatioF()
+                                                    or 1.0)))):
             self._apply(self._strip)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
         # 首贴发生在布局前（宽未知，退 360 上限）；布局定宽后按实际
         # 可用宽重贴——QLabel 只裁不缩，超宽贴图会右缘截半字。
-        # hint 定宽模式（fit_width=False）无外部宽度可言，禁反馈重贴
-        if (self._fit_width and self._strip is not None and self.width() > 1
-                and self._applied_w != self._max_w()):
+        # hint 定宽模式（fit_width=False）无外部宽度可言，宽度免反馈重贴；
+        # 高度维两种模式都要跟（0 高首贴固化的 1px 贴图靠此解封）
+        if (self._strip is not None and self.width() > 1
+                and (self._applied_h != round(self.height()
+                                              * (self.devicePixelRatioF()
+                                                 or 1.0))
+                     or (self._fit_width
+                         and self._applied_w != self._max_w()))):
             self._apply(self._strip)
 
     def _max_w(self) -> int:
@@ -229,6 +239,7 @@ class PreviewBar(CaptionLabel):
             pm = pm.copy(0, 0, max(1, round(mw * dpr)), pm.height())
             pm.setDevicePixelRatio(dpr)
         self._applied_w = mw
+        self._applied_h = round(self.height() * dpr)
         self.setPixmap(pm)
 
 
