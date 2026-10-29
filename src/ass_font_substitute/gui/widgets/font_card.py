@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtGui import QPainter
 from PySide6.QtGui import QPainterPath
 from PySide6.QtGui import QPen
@@ -41,6 +42,14 @@ def _pill(text: str) -> PillLabel:
 
 
 _TAG_STYLE = {"原": ("#757575", "#9a9a9a"), "孪": ("#0f7b0f", "#6ccb5f")}
+
+# 选项行左列定宽（用户拍板 2026-10-29：预览条起点一致、各行预览同宽）
+_NAME_W = 200       # 名称（超宽省略号）
+_TEXT_W = 380       # 文本列宽：真机雅黑 12px 容下常见指标行；最全指标串
+                    # （相似+覆盖+未覆盖+相对大小，offscreen 实测 516）超出
+                    # 部分省略号+tooltip 全文。左列每胖 1px 预览条瘦 1px
+                    # （150% 缩放小窗左列 554 曾把预算压到 250 < 旧上限 360）
+_LEFT_W = 24 + 10 + _TEXT_W   # 勾选框 24 + 列距 10 + 文本列
 
 
 def _char_tag(ch: str) -> QWidget:
@@ -127,6 +136,43 @@ def _pct(v: float | None) -> str:
     return f"{v * 100:.1f}%" if v is not None else ""
 
 
+class _ElideMixin:
+    """定宽省略标签：左列锁宽后名称/指标可能放不下，超宽折成 … 不撑列。
+    宽度由子类 setFixedWidth 锁死，elide 按自身宽现算（resize 时重算），
+    hint 与显示宽一致，布局零反馈。"""
+
+    _full = ""
+
+    def setFullText(self, t: str):
+        if t == self._full:
+            return
+        self._full = t
+        self._relayout()
+
+    def fullText(self) -> str:
+        return self._full
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._relayout()
+
+    def _relayout(self):
+        fm = QFontMetrics(self.font())
+        t = fm.elidedText(self._full, Qt.ElideRight, max(1, self.width()))
+        if t != self.text():
+            self.setText(t)
+        # 截断时 tooltip 给全文（省略号丢的指标可悬停补读）
+        self.setToolTip("" if t == self._full else self._full)
+
+
+class _NameLabel(_ElideMixin, BodyLabel):
+    pass
+
+
+class _MetricsLabel(_ElideMixin, CaptionLabel):
+    pass
+
+
 class FontCard(CardWidget):
     """单张字体卡（线框重排）：状态图标+名称+用量+右侧状态徽章；缺字虚线框；
     选项逐行成带边框行（勾选框|名称+标签+指标|预览条），选中行主题色描边；
@@ -189,8 +235,8 @@ class FontCard(CardWidget):
             if o.key in old_rows:
                 lab = self._metrics.get(o.key)
                 t = self._metrics_text(o)
-                if lab is not None and lab.text() != t:
-                    lab.setText(t)
+                if lab is not None and lab.fullText() != t:
+                    lab.setFullText(t)
                 continue
             row = self._build_option_row(o)
             anchor = next((self._rows[x.key] for x in self.card.options[i + 1:]
@@ -321,7 +367,14 @@ class FontCard(CardWidget):
             name_row.addWidget(_char_tag("原"))
         elif "孪生对应" in o.badges:
             name_row.addWidget(_char_tag("孪"))
-        name_row.addWidget(BodyLabel(o.display_name))
+        # 不走带文字构造：qfw FluentLabelBase singledispatch 对子类会重派发
+        # 回本构造（同 PreviewBar 坑），且 mixin _full 需经 setFullText 立账
+        name_lab = _NameLabel()
+        # 封顶不锁死：短名贴身、药丸紧跟（锁死 200 曾在短名后留死空白），
+        # 长名 200 截断省略
+        name_lab.setMaximumWidth(_NAME_W)
+        name_lab.setFullText(o.display_name)
+        name_row.addWidget(name_lab)
         for b in o.badges:
             if b == "上次使用":                     # 记忆回放仍走主题徽章
                 name_row.addWidget(padded_badge(InfoBadge.info, b))
@@ -329,16 +382,28 @@ class FontCard(CardWidget):
             name_row.addWidget(_pill(m))            # 简繁/字重等：中性灰
         name_row.addStretch(1)
         text.addLayout(name_row)
-        m_lab = CaptionLabel(self._metrics_text(o))
+        m_lab = _MetricsLabel()
+        m_lab.setFixedWidth(_TEXT_W)
+        m_lab.setFullText(self._metrics_text(o))
         self._metrics[o.key] = m_lab
         text.addWidget(m_lab)
-        g.addLayout(text, 1)
+        # 左列（勾选框+名称+指标）定宽：各行预览条起点一致、预览同宽
+        # （用户拍板 2026-10-29，防预览大大小小）
+        left = QWidget(row)
+        lh = QHBoxLayout(left)
+        lh.setContentsMargins(0, 0, 0, 0)
+        lh.setSpacing(10)
+        lh.addWidget(cb, 0, Qt.AlignVCenter)
+        lh.addLayout(text, 1)
+        left.setFixedWidth(_LEFT_W)
+        g.addWidget(left, 0, Qt.AlignVCenter)
 
         if o.entity is not None:
             bar = PreviewBar(self._worker, self._pvm, o.entity,
                              self._preview_text_fn() or o.display_name,
                              f"card:{self.card.norm_name}:{o.key}",
-                             fit_width=False)   # 行内 hint 定宽：防呼吸边自反塌缩
+                             fit_width=False,
+                             width_fn=self._bar_budget(row, left))
             bar.setFixedHeight(28)
             self._bars.append(bar)
             self._bar_by_key[o.key] = bar
@@ -353,8 +418,27 @@ class FontCard(CardWidget):
                 self.option_checked.emit(self.card.norm_name, k)
 
         row.mousePressEvent = _row_press
+        if o.entity is not None:
+            base_resize = QFrame.resizeEvent
+
+            def _row_resize(e, _r=row, _b=bar):
+                base_resize(_r, e)
+                _b.budget_changed()   # 行宽变化：按新预算重贴预览
+
+            row.resizeEvent = _row_resize
         self._rows[o.key] = row
         return row
+
+    @staticmethod
+    def _bar_budget(row: QFrame, left: QWidget):
+        """预览条宽度预算：行内容宽（contentsRect 已扣 QSS 1px 边框，否则
+        满宽贴图比 bar 宽 2px 右缘被裁）− 列间距 − 定宽左列。bar 不自述
+        宽度（自反塌缩真机实锤），只读行几何。"""
+        def fn() -> int:
+            g = row.layout()
+            return (row.contentsRect().width()
+                    - g.spacing() - left.width())
+        return fn
 
     def _metrics_text(self, o) -> str:
         if o.key == KEEP:

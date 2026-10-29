@@ -11,8 +11,8 @@ from qfluentwidgets import qconfig
 
 from ass_font_substitute.gui.tip import install_tip
 
-# 贴图条宽度静态上限（布局未跑时的兜底）；布局定宽后取实际可用宽再扣
-# 呼吸边——顶满标签宽会末字贴死右缘、细笔画被裁半个
+# 布局未跑（宽未知/预算≤0）时的兜底上限；真上限=实际可用宽（fit_width
+# 行取自身宽扣呼吸边，width_fn 行取宿主预算），贴图超宽才缩
 _MAX_BAR_W = 360
 _WIDTH_MARGIN = 16
 
@@ -43,7 +43,7 @@ class PreviewBar(CaptionLabel):
     本行物理高度再标 DPR——逻辑尺寸 28、像素级清晰。"""
 
     def __init__(self, worker, pvm, entity, text, tag, height=28,
-                 parent=None, fit_width=True):
+                 parent=None, fit_width=True, width_fn=None):
         # qfluentwidgets FluentLabelBase.__init__ 是 singledispatchmethod，
         # (text, parent) 分支会经 self.__init__ 重派发——子类下会递归回本构造，
         # 故只传 parent、占位文字改用 setText（1.11.3 API 适配，语义不变）
@@ -53,11 +53,12 @@ class PreviewBar(CaptionLabel):
         self._worker, self._pvm = worker, pvm
         self._entity, self._text, self._tag = entity, text, tag
         # fit_width=True：条占满行宽（浏览页/选择器，vbox 拉伸行宽外部钉
-        # 死，width()-16 呼吸边稳定）。False：条按自身贴图 hint 定宽
-        # （字幕卡选项行，hbox 里没人管宽）——width() 就是贴图宽，呼吸边
-        # 自反：每轮 resizeEvent 缩 16px 直到 1px 隐形（真机实锤），改用
-        # 静态 360 上限、禁宽度反馈重贴
+        # 死，width()-16 呼吸边稳定）。False：条宽由 width_fn 给出（字幕卡
+        # 选项行传行几何预算，左侧文本列定宽后各行预览同宽）——width() 就
+        # 是贴图宽，呼吸边自反：每轮 resizeEvent 缩 16px 直到 1px 隐形
+        # （真机实锤），禁用宽度反馈
         self._fit_width = fit_width
+        self._width_fn = width_fn
         self._inflight = False
         self._connected = False              # result 信号是否仍挂着本槽
         self._job = None                     # 在途任务的取消句柄
@@ -100,11 +101,20 @@ class PreviewBar(CaptionLabel):
             self._apply(self._strip)
 
     def _max_w(self) -> int:
-        if not self._fit_width:
-            return _MAX_BAR_W
+        if self._width_fn is not None:
+            b = self._width_fn()
+            # 布局未跑（预算≤0）：退兜底上限，行定宽后 budget_changed 补贴
+            return b if b > 1 else _MAX_BAR_W
         if self.width() <= 1:
             return _MAX_BAR_W
-        return max(0, min(_MAX_BAR_W, self.width() - _WIDTH_MARGIN))
+        return max(0, self.width() - _WIDTH_MARGIN)
+
+    def budget_changed(self):
+        """宿主行 resize 后由行回调：条带现成且真上限变了才重贴（_apply
+        记 _applied_w 防重复贴）。"""
+        if (self._width_fn is not None and self._strip is not None
+                and self.width() > 1 and self._applied_w != self._max_w()):
+            self._apply(self._strip)
 
     def _render(self):
         if not self._text.strip() or self._entity is None:

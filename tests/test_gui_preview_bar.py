@@ -49,11 +49,12 @@ def _ent(fp, name):
                       dir_path="d", rel_path="r.ttf", face_index=0)
 
 
-def _make_bar(qapp):
+def _make_bar(qapp, width_fn=None, fit_width=False):
     from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
     w = _FakeWorker()
     pvm = _FakePVM()
-    bar = PreviewBar(w, pvm, _ent("fp1", "甲字体"), "永", "t:fp1")
+    bar = PreviewBar(w, pvm, _ent("fp1", "甲字体"), "永", "t:fp1",
+                     fit_width=fit_width, width_fn=width_fn)
     return w, pvm, bar
 
 
@@ -77,17 +78,56 @@ def test_stale_failure_is_discarded(qapp):
 
 
 def test_bar_refits_pixmap_to_layout_width(qapp):
-    # QLabel 只裁不缩：布局前的贴图按兜底上限 360；定宽后按实际宽重贴，
-    # 长名预览不再右缘截半字；变宽回贴到上限
+    # QLabel 只裁不缩：贴图按实际可用宽重贴（上限不再写死 360，用户拍板
+    # 2026-10-29 预览吃满行宽），扣呼吸边；变宽随之放宽
     import numpy as np
 
     _w, _pvm, bar = _make_bar(qapp)
     strip = np.full((48, 900), 255, dtype=np.uint8)
-    bar._apply(strip)
-    assert bar.pixmap().width() == 360              # 布局前兜底上限
     bar.show()
     qapp.processEvents()        # 未显示的 widget resize 不发事件：先 show
     bar.resize(200, 28)
-    assert bar.pixmap().width() == 184              # 定宽后重贴，扣呼吸边
+    bar._apply(strip)
+    assert bar.pixmap().width() == 184              # 可用宽 200-16
     bar.resize(500, 28)
-    assert bar.pixmap().width() == 360              # 变宽回贴到上限
+    bar._apply(strip)
+    assert bar.pixmap().width() == 484              # 放宽到新可用宽
+    bar.resize(1000, 28)
+    bar._apply(np.full((48, 2400), 255, dtype=np.uint8))
+    assert bar.pixmap().width() == 984              # 无 360 上限：吃满可用宽
+
+
+def test_width_fn_budget_refit_and_fallback(qapp):
+    # width_fn 行（字幕卡选项行）：预算≤0（布局未跑）退兜底 360；预算
+    # 就位后行 resize 回调 budget_changed 按真预算重贴
+    import numpy as np
+
+    budget = {"w": 0}
+    _w, _pvm, bar = _make_bar(qapp, width_fn=lambda: budget["w"])
+    strip = np.full((48, 900), 255, dtype=np.uint8)
+    bar.show()
+    qapp.processEvents()
+    bar.resize(100, 28)
+    bar._apply(strip)
+    assert bar.pixmap().width() == 360              # 预算 0：兜底上限
+    budget["w"] = 250
+    bar.budget_changed()
+    assert bar.pixmap().width() == 250              # 真预算重贴
+    budget["w"] = 400
+    bar.budget_changed()
+    assert bar.pixmap().width() == 400
+
+
+def test_fit_width_auto_refits_on_resize(qapp):
+    # fit_width=True（浏览页/选择器行）：resizeEvent 自动按新可用宽重贴
+    # （不手动 _apply），360 上限已删——长条带吃满行宽扣呼吸边
+    import numpy as np
+
+    _w, _pvm, bar = _make_bar(qapp, fit_width=True)
+    bar._apply(np.full((48, 2400), 255, dtype=np.uint8))
+    bar.show()
+    qapp.processEvents()        # 未显示的 widget resize 不发事件：先 show
+    bar.resize(200, 28)
+    assert bar.pixmap().width() == 184              # resize 即自动重贴
+    bar.resize(500, 28)
+    assert bar.pixmap().width() == 484              # 无 360 上限

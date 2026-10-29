@@ -460,11 +460,10 @@ def test_pick_score_receipt_and_metrics_text(qapp, tmp_path, monkeypatch):
     # 手选流程：picker 回执走 pickscore 分支 attach（相似/大小/覆盖齐）；
     # 覆盖不足的手选行第二行补「未覆盖 N 字」（原只显覆盖的 bug）
     page = _make_page(qapp, tmp_path, monkeypatch)
-    from PySide6.QtWidgets import QLabel
-
     from ass_font_substitute.core.coverage.matcher import UsageClass
     from ass_font_substitute.core.models import FontUsage
     from ass_font_substitute.gui.jobs import FileParse
+    from ass_font_substitute.gui.widgets.font_card import _MetricsLabel
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体", chars="永宇好")
     usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
                       inline_count=1, chars=set("永宇好我在"), variants={"甲字体"})
@@ -480,11 +479,13 @@ def test_pick_score_receipt_and_metrics_text(qapp, tmp_path, monkeypatch):
     assert o.similarity == 0.88 and o.size_ratio == 1.04
     assert o.coverage == 0.6                       # 区段覆盖率口径（3 字子集）
     fc = page._cards_ui["甲字体"]
-    row = fc._boxes["fp2"].parentWidget()
-    texts = [lab.text() for lab in row.findChildren(QLabel)]
-    # 次序（用户拍板 2026-10-29）：相似 → 覆盖 → 未覆盖 → 相对大小
+    row = fc._rows["fp2"]                     # 勾选框 reparent 进左列后，
+    fulls = [lab.fullText()                   # parentWidget 不再是 optRow
+             for lab in row.findChildren(_MetricsLabel)]
+    # 次序（用户拍板 2026-10-29）：相似 → 覆盖 → 未覆盖 → 相对大小。
+    # fullText 断言：文本列定宽后超宽指标折省略号，text() 不再保全文
     assert any(t == "相似 88.0% · 覆盖 60.0% · 未覆盖 2 字 · 相对大小 104.0%"
-               for t in texts), texts
+               for t in fulls), fulls
 
     # 卡被重算后迟到的评分回执：弃置不炸
     page.on_library_changed()
@@ -495,11 +496,10 @@ def test_twin_metrics_lead_phrase(qapp, tmp_path, monkeypatch):
     # 孪生行次序（用户拍板 2026-10-29）：行首注明来由，后接覆盖/未覆盖；
     # 孪生行无相似率/相对大小
     page = _make_page(qapp, tmp_path, monkeypatch)
-    from PySide6.QtWidgets import QLabel
-
     from ass_font_substitute.core.coverage.matcher import UsageClass
     from ass_font_substitute.core.models import FontUsage
     from ass_font_substitute.gui.jobs import FileParse
+    from ass_font_substitute.gui.widgets.font_card import _MetricsLabel
     ent_a = _ent("fp1", "甲字体")
     ent_twin = _ent("fp-twin", "甲字体简", chars="永宇好")
     usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
@@ -511,10 +511,37 @@ def test_twin_metrics_lead_phrase(qapp, tmp_path, monkeypatch):
     card = page.vm.cards[0]
     assert card.checked_key == "fp-twin"          # 默认勾选链：孪生优先
     fc = page._cards_ui["甲字体"]
-    row = fc._boxes["fp-twin"].parentWidget()
-    texts = [lab.text() for lab in row.findChildren(QLabel)]
+    row = fc._rows["fp-twin"]                 # 勾选框 reparent 后取行走 _rows
+    fulls = [lab.fullText() for lab in row.findChildren(_MetricsLabel)]
     assert any(t == "原字体名称对应的简体名称 · 覆盖 60.0% · 未覆盖 2 字"
-               for t in texts), texts
+               for t in fulls), fulls
+
+
+def test_elide_labels_survive_layout(qapp, tmp_path, monkeypatch):
+    """定宽省略标签：布局后名称/指标可见非空（曾病：文字走 QLabel 构造
+    传参而 mixin _full 未立账，首次 resize elide 空串把整行文字清空——
+    真机截图名称/指标全白实锤）。"""
+    from PySide6.QtWidgets import QApplication
+
+    from ass_font_substitute.gui.widgets.font_card import _MetricsLabel
+    from ass_font_substitute.gui.widgets.font_card import _NameLabel
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, _card, norm = _feed_replace_card(page, ent_a, ent_b)
+    page.show()
+    page.resize(1100, 800)
+    for _ in range(10):
+        QApplication.processEvents()
+    fc = page._cards_ui[norm]
+    names = fc.findChildren(_NameLabel)
+    metrics = fc.findChildren(_MetricsLabel)
+    assert names and metrics
+    assert all(lab.text() for lab in names)             # 名称/指标非空可见
+    assert all(lab.text() and lab.fullText() for lab in metrics)
+    for lab in (*names, *metrics):        # fullText 前缀关系（未超宽=全文）
+        assert lab.text() == "" or lab.fullText().startswith(
+            lab.text().rstrip("…"))
+    page.hide()
 
 
 def test_continue_search_keeps_scroll_focus_and_identity(qapp, tmp_path, monkeypatch):
@@ -932,10 +959,10 @@ def _solid_strip() -> "object":
 
 
 def test_card_preview_no_shrink_loop(qapp, tmp_path, monkeypatch):
-    """fit_width=False 防自反塌缩：真实行结构（定宽勾选框+stretch 文本列
-    +hint 条）下布局迭代宽度不漂、pixmap 不 null。单控件 hbox 里 QLabel
-    Preferred 策略吞宽度、反馈环不启动——必须走整卡装配才钉得住
-    （真机实锤 68→12→1px→贴图 null）。"""
+    """width_fn 预算条防自反塌缩：真实行结构（定宽左列+预算条）下布局
+    迭代宽度不漂、pixmap 不 null。预算只读行几何（bar 宽与贴图无关），
+    单控件 hbox 里 QLabel Preferred 策略吞宽度、反馈环不启动——必须走
+    整卡装配才钉得住（真机实锤 68→12→1px→贴图 null）。"""
     from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
     page = _make_page(qapp, tmp_path, monkeypatch)
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
