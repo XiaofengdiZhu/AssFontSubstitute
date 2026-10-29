@@ -59,11 +59,23 @@ class CoreWorker(QThread):
 
     def submit(self, tag, fn, *args, **kw) -> JobHandle:
         handle = JobHandle()
+        if self._stop:
+            handle.cancelled = True   # 置停后窗口仍可交互：入队即弃（防静默忙态）
+            return handle
         self._q.put((handle, tag, fn, args, kw))
         return handle
 
     def shutdown(self):
+        """置停 + 排空：先积压任务逐个置 cancelled 再放哨兵——哨兵排在
+        队尾时退出要等全部积压跑完（大库下 wait 必超时 → 进程带活线程
+        退出硬崩）。在途单个任务仍会跑完（开始执行后不可中断），由
+        closeEvent 的 wait 兜底。幂等：closeEvent「继续等待」路径会二次
+        调用，残留的哨兵 None 进快照会让 item[0] 下标炸。"""
+        if self._stop:
+            return
         self._stop = True
+        for item in list(self._q.queue):
+            item[0].cancelled = True
         self._q.put(None)
 
 

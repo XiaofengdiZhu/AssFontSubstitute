@@ -16,6 +16,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QMessageBox
 from qfluentwidgets import BodyLabel
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import FluentWindow
@@ -297,10 +298,28 @@ class AFSWindow(FluentWindow):
 
     def closeEvent(self, e):
         self._save_geometry()
-        self.library_page.shutdown()        # 先汇合在途索引线程（写库中不能退）
-        self.worker.shutdown()
-        self.worker.wait(10000)
+        lib_ok = self.library_page.shutdown()   # 先汇合在途索引线程（写库中不能退）
+        self.worker.shutdown()                  # 排空取消积压任务再放哨兵
+        worker_ok = self.worker.wait(10000)
+        if not (lib_ok and worker_ok) and not self._confirm_exit_anyway():
+            e.ignore()
+            return
         super().closeEvent(e)
+
+    def _confirm_exit_anyway(self) -> bool:
+        """线程未在预算内收尾：让用户选「继续等待」（忽略本次关闭）或
+        「强制退出」。静默带活线程退出 = QThread destroyed 硬崩 + 写库
+        可能半截。worker 队列已被 shutdown 排空取消，超时只剩单个在途
+        任务（不可中断），重试关闭通常几秒内即过。"""
+        box = QMessageBox(self)
+        box.setWindowTitle("后台任务未结束")
+        box.setText("后台任务仍在收尾（可能正在写盘）。\n"
+                    "强制退出可能损坏数据。建议稍等片刻再关闭窗口。")
+        wait_btn = box.addButton("继续等待", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("强制退出", QMessageBox.ButtonRole.DestructiveRole)
+        box.setEscapeButton(wait_btn)   # Esc/点 X=默认继续等待，非强制退出
+        box.exec()
+        return box.clickedButton() is not wait_btn
 
     # ---- 窗口位置/大小记忆 ----
 

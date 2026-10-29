@@ -183,6 +183,45 @@ def test_worker_skips_cancelled_jobs(qapp, tmp_path, monkeypatch):
         assert w.wait(2000)
 
 
+def test_shutdown_drains_queued_jobs(qapp, tmp_path, monkeypatch):
+    # 退出排空（终审 P0）：shutdown 先把积压任务全置 cancelled 再放
+    # 哨兵——否则哨兵排队尾，退出要等积压全跑完（大库下 wait 必超时
+    # → 进程带活线程退出硬崩）
+    import threading
+    import time
+
+    from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.workers import CoreWorker
+
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    s = Settings(tmp_path / "s.json")
+    w = CoreWorker(s)
+    results = []
+    w.result.connect(lambda tag, p: results.append(tag))
+    w.start()
+    started, release = threading.Event(), threading.Event()
+
+    def blocker(ctx):
+        started.set()
+        release.wait(5)
+        return "b"
+
+    try:
+        w.submit("b", blocker)
+        assert started.wait(5)              # 阻塞住工作者，积压停在队列里
+        handles = [w.submit(f"j{i}", lambda ctx: "x") for i in range(3)]
+        w.shutdown()                        # 排空：三个积压全被取消
+        release.set()
+        assert w.wait(5000)                 # 哨兵直达，不等积压跑完
+        deadline = time.monotonic() + 5.0   # result 跨线程排队投递，主线程要转事件循环
+        while time.monotonic() < deadline and "b" not in results:
+            qapp.processEvents()
+            time.sleep(0.01)
+        assert results == ["b"] and all(h.cancelled for h in handles)
+    finally:
+        release.set()
+
+
 def test_index_worker_cancel_dir(qapp, tmp_path, monkeypatch):
     # 单停：排队目录到队即跳（回发取消结果让行按钮脱「更新中」），
     # 在途目录 progress 回调返 False 中断剩余文件，其余目录照常
