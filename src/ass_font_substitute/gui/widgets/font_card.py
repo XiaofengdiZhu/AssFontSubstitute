@@ -229,6 +229,7 @@ class _MissingFlyoutFilter(QObject):
     原生 tooltip 事件吃掉不双弹；行被移除（Hide）时浮层立收不留孤窗。"""
 
     CURSOR_TICK_MS = 120
+    TICK_START_DELAY_MS = 200   # 盖过 DROP_DOWN 出场动画 187ms
 
     def __init__(self, label, shown: str, copy_text: str, more: bool,
                  on_copy):
@@ -285,7 +286,14 @@ class _MissingFlyoutFilter(QObject):
         pos = QPoint(gp.x() - w // 2,
                      self._lab.mapToGlobal(QPoint(0, self._lab.height())).y())
         fly.exec(pos, FlyoutAnimationType.DROP_DOWN)
-        self._tick.start()
+        # 轮询延到出场动画（qfw 1.11.3 DROP_DOWN 187ms）完再起：120ms
+        # tick 在动画期拍到的浮层 geometry 少一截，行贴缝误判出界收窗
+        # （挂账 P3-1；singleShot 若迟到浮层已收，_on_tick 早退即停）
+        QTimer.singleShot(self.TICK_START_DELAY_MS, self._start_tick)
+
+    def _start_tick(self):
+        if self._flyout is not None and self._flyout.isVisible():
+            self._tick.start()
 
     def _on_tick(self):
         if self._flyout is None or not self._flyout.isVisible():

@@ -21,8 +21,6 @@ from ass_font_substitute.gui.name_lang import pick_display_name
 from ass_font_substitute.gui.name_lang import ui_lang
 
 KEEP = "__keep__"           # 「保留原字体名」选项键（missing/zero 卡）
-SIM_FLOOR = 0.50            # 放宽重算下限（= SIM_BOUNDS[0]）
-RELAX_STEP = 0.10
 
 CARD_RANK = {"twin": 0, "replace": 1, "missing": 2, "keep": 3, "zero": 3}
 # 卡片展示序（用户拍板 2026-10-28）：孪生最前 → 需替换 → 库中没有 → 保留
@@ -360,18 +358,6 @@ class SubsVM:
             card.search_state = "target_error"
         else:
             card.search_state = "exhausted"
-
-    def relax_min_sim(self, card: Card) -> float | None:
-        """放宽重算门槛：降 10 个百分点，下限 50%。新门槛入 card.min_sim，
-        由页面用新值建**新**搜索器（hit 计数清零）；旧结果保留——被拒 pair
-        已入缓存，重算零渲染。已达下限返回 None。"""
-        cur = card.min_sim if card.min_sim is not None \
-            else float(self._settings.get("min_sim"))
-        nxt = round(max(SIM_FLOOR, cur - RELAX_STEP), 2)
-        if nxt >= cur:
-            return None
-        card.min_sim = nxt
-        return nxt
 
     def _search_target(self, card: Card) -> FontEntity | None:
         """相似度基准 = 字幕原字体对应的在库实体（优先原名命中，否则覆盖

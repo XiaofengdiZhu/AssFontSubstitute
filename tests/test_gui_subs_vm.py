@@ -340,7 +340,7 @@ def test_search_round_appends_and_finishes_paused(lib_env):
     assert card.search_state in ("paused", "exhausted")
 
 
-def test_exhausted_and_relax(lib_env):
+def test_exhausted_then_lower_min_sim(lib_env):
     vm, lib, ctx = lib_env
     card = _card_for(vm, lib, "TGT圆")
     s = make_searcher(ctx, target=vm._search_target(card), chars=set("永中木"),
@@ -351,8 +351,7 @@ def test_exhausted_and_relax(lib_env):
     vm.add_candidates(card, cands)
     vm.finish_search(card, s)
     assert card.search_state == "exhausted"
-    new_min = vm.relax_min_sim(card)
-    assert new_min == pytest.approx(0.89)
+    card.min_sim = new_min = 0.89    # relax 钮已删，直设门槛（与页面同径）
     s2 = make_searcher(ctx, target=vm._search_target(card), chars=set("永中木"),
                        threshold=0.95, n_pause=99, min_sim=new_min,
                        size_range=(0.5, 2.0), direction="t2s")
@@ -366,15 +365,6 @@ def test_exhausted_and_relax(lib_env):
     n_before = len(card.options)
     vm.add_candidates(card, cands2)
     assert len(card.options) == n_before
-
-
-def test_relax_floor(lib_env):
-    vm, lib, _ctx = lib_env
-    card = _card_for(vm, lib, "TGT圆")
-    card.min_sim = 0.55
-    assert vm.relax_min_sim(card) == pytest.approx(0.50)
-    card.min_sim = 0.50
-    assert vm.relax_min_sim(card) is None
 
 
 def test_search_target_prefers_original(lib_env):

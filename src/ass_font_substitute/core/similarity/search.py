@@ -29,6 +29,42 @@ def text_version(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
 
 
+class TargetRenderError(Exception):
+    """score_pair：目标（原字体）渲染失败。与候选渲染失败区分——搜索侧
+    目标失败置 target_error 短路整池，候选失败仅跳过单个。"""
+
+
+def score_pair(target: FontEntity, entity: FontEntity, cache: Cache,
+               sample_text: str, tver: str | None = None):
+    """两实体相似度对比，pair/render 缓存口径与 FontSearcher 一致
+    （键 = text_version(sample_text)；搜索侧传已算的 _tver 免重哈希）。
+    目标渲染失败抛 TargetRenderError；候选渲染失败或交集空返回 None。
+    FontSearcher 与 GUI 手选评分共用，防缓存口径漂移。"""
+    if tver is None:
+        tver = text_version(sample_text)
+    r = cache.get_pair(target.fingerprint, entity.fingerprint, tver)
+    if r is not None:
+        return r
+
+    def bundle(e: FontEntity):
+        return cache.get_render(
+            e.fingerprint, tver,
+            lambda: render_bundle(Path(e.dir_path) / e.rel_path,
+                                  e.face_index, sample_text))
+
+    try:
+        tb = bundle(target)
+    except Exception as exc:
+        raise TargetRenderError(str(exc)) from exc
+    try:
+        r = compare(tb, bundle(entity))
+    except Exception:
+        return None             # 候选渲染失败无法证明达标（spec §11：跳过）
+    if r is not None:
+        cache.put_pair(target.fingerprint, entity.fingerprint, tver, r)
+    return r
+
+
 def _probe_score(e: FontEntity, direction: str) -> float:
     probes = PROBE_SC if direction == "t2s" else PROBE_TC
     return e.cmap.hit_ratio(probes)
@@ -82,32 +118,11 @@ class FontSearcher:
         self.pool_size = 0            # 对比池总数（GUI 进度分母）
         self.compared = 0             # 已对比字体数（GUI 进度分子）
         self._tver = text_version(sample_text)
-        self._tcache: dict[str, object] = {}
         pool = [e for e in lib.entities()
                 if target is None or e.fingerprint != target.fingerprint]
         ranked = rank_pool(target, pool, direction)
         self.pool_size = len(ranked)
         self._iter: Iterator[FontEntity] = iter(ranked)
-        self._tgt = None
-        self._tgt_resolved = False
-
-    def _bundle(self, e: FontEntity):
-        def loader():
-            return render_bundle(
-                _entity_path(e), e.face_index, self.sample_text)
-        return self.cache.get_render(e.fingerprint, self._tver, loader)
-
-    def _target(self):
-        """目标渲染条首次需要时解析一次；失败置 target_error，不逐候选重试。"""
-        if self._tgt_resolved:
-            return self._tgt
-        self._tgt_resolved = True
-        try:
-            self._tgt = self._bundle(self.target)
-        except Exception:
-            self._tgt = None
-            self.target_error = True
-        return self._tgt
 
     def resume(self) -> None:
         """续搜：清暂停**并重置 hit 计数**。暂停语义是「每批 n_pause 个
@@ -169,23 +184,20 @@ class FontSearcher:
                              weight=e.weight, source="recommend")
         if self.target_error:
             return None             # 目标渲染失败：不逐候选重试，GUI 显「原字体无法渲染」
+        # pair 缓存先读一次做覆盖率前置门槛（门槛按成本升序：缓存读 ~5µs
+        # < coverage ~15µs < 渲染评分 ~57ms；score_pair 内会再读一次，µs 级）
         r = self.cache.get_pair(self.target.fingerprint, e.fingerprint, self._tver)
         cov: float | None = None
         if r is None:
             cov, _missing = coverage_detail(e.cmap, self.chars)
             if cov < self.cov_threshold:
                 return None
-            try:
-                tb = self._target()
-                if tb is None:
-                    return None     # 目标渲染失败：后续候选在顶部短路，不重试
-                r = compare(tb, self._bundle(e))
-            except Exception:
-                # spec §11：候选渲染失败无法证明达标 → 跳过，不中断搜索
-                return None
-            if r is not None:
-                self.cache.put_pair(self.target.fingerprint, e.fingerprint,
-                                    self._tver, r)
+        try:
+            r = score_pair(self.target, e, self.cache, self.sample_text,
+                           self._tver)
+        except TargetRenderError:
+            self.target_error = True
+            return None             # 目标渲染失败：后续候选在顶部短路，不重试
         if r is None:
             return None             # 交集为空，无法比较 → 跳过
         if r.score < self.min_sim:

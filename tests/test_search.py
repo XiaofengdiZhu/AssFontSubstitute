@@ -311,3 +311,59 @@ def test_resume_resets_batch_counter(tmp_path):
     second = _drain(s)
     assert [c.fingerprint for c in second] == [_by(lib, "C2").fingerprint]
     assert s.exhausted                          # 批计数已重置：不一命中就停
+
+
+def test_score_pair_shared_cache_semantics(tmp_path, monkeypatch):
+    """score_pair（搜索器与 GUI 手选评分共用缓存口径）：pair 命中零渲染；
+    未命中计算并回填；目标渲染失败抛 TargetRenderError（区别于候选失败
+    返 None）；候选渲染失败返 None 不落缓存。"""
+    lib = _lib(tmp_path, {"name": "c0", "chars": CHARS, "family": "圓體0"})
+    target = next(e for e in lib.entities() if e.psname == "TGT")
+    c0 = next(e for e in lib.entities() if e.psname == "C0")
+    real = search_mod.render_bundle
+    tpath = str(search_mod._entity_path(target))
+    bpath = str(search_mod._entity_path(c0))
+
+    # pair 命中：零渲染
+    cache = Cache(tmp_path / "cache.db")
+    cache.put_pair(target.fingerprint, c0.fingerprint, text_version(CHARS),
+                   CompareResult(0.9, 1.0, 3))
+
+    def explode(path, face_index, chars):
+        raise RuntimeError("缓存命中不应渲染")
+
+    monkeypatch.setattr(search_mod, "render_bundle", explode)
+    r = search_mod.score_pair(target, c0, cache, CHARS)
+    assert (r.score, r.size_ratio) == (0.9, 1.0)
+    monkeypatch.setattr(search_mod, "render_bundle", real)
+
+    # 未命中：真渲染一次并回填（第二次读命中，不再渲染）
+    cache2 = Cache(tmp_path / "c2.db")
+    r2 = search_mod.score_pair(target, c0, cache2, CHARS)
+    assert r2 is not None and cache2.pair_count == 1
+    r2b = search_mod.score_pair(target, c0, cache2, CHARS)
+    assert r2b is not None and cache2.pair_count == 1
+
+    # 目标渲染失败 → TargetRenderError
+    def tgt_explode(path, face_index, chars):
+        if str(path) == tpath:
+            raise RuntimeError("目标坏了")
+        return real(path, face_index, chars)
+
+    monkeypatch.setattr(search_mod, "render_bundle", tgt_explode)
+    try:
+        search_mod.score_pair(target, c0, Cache(tmp_path / "c3.db"), CHARS)
+        raise AssertionError("应抛 TargetRenderError")
+    except search_mod.TargetRenderError:
+        pass
+
+    # 候选渲染失败 → None，且不落 pair 缓存
+    def cand_explode(path, face_index, chars):
+        if str(path) == bpath:
+            raise RuntimeError("候选坏了")
+        return real(path, face_index, chars)
+
+    monkeypatch.setattr(search_mod, "render_bundle", cand_explode)
+    cache4 = Cache(tmp_path / "c4.db")
+    assert search_mod.score_pair(target, c0, cache4, CHARS) is None
+    assert cache4.pair_count == 0

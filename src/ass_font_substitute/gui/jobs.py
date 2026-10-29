@@ -210,31 +210,17 @@ def pull_chunk(searcher: FontSearcher, cancel: dict | None = None):
 
 
 def score_pick(ctx, target, entity):
-    """手动选择字体评分：相似率+相对大小（vs target，走 pair 缓存同
-    搜索器口径；compare 与方向无关）。target=None（库中没有卡）或渲染
-    失败/交集空 → None。覆盖率由 UI 侧现算。返回 (entity, sim, size)。"""
-    from ass_font_substitute.core.similarity.metrics import compare
-    from ass_font_substitute.core.similarity.render import render_bundle
-    from ass_font_substitute.core.similarity.search import text_version
+    """手动选择字体评分：相似率+相对大小（vs target，经 core score_pair
+    走 pair 缓存，口径与 FontSearcher 单一来源）。target=None（库中没有
+    卡）或渲染失败/交集空 → None。覆盖率由 UI 侧现算。返回 (entity, sim,
+    size)。"""
+    from ass_font_substitute.core.similarity.search import score_pair
 
     if target is None:
         return entity, None, None
-    cache = ctx.cache
-    sample = ctx.settings.get("sample_text")
-    ver = text_version(sample)
-
-    def bundle(e):
-        return cache.get_render(e.fingerprint, ver, lambda: render_bundle(
-            Path(e.dir_path) / e.rel_path, e.face_index, sample))
-
     try:
-        tb = bundle(target)
-        r = cache.get_pair(target.fingerprint, entity.fingerprint, ver)
-        if r is None:
-            r = compare(tb, bundle(entity))
-            if r is not None:
-                cache.put_pair(target.fingerprint, entity.fingerprint,
-                               ver, r)
+        r = score_pair(target, entity, ctx.cache,
+                       ctx.settings.get("sample_text"))
     except Exception:
         return entity, None, None
     if r is None:
@@ -242,11 +228,12 @@ def score_pick(ctx, target, entity):
     return entity, r.score, r.size_ratio
 
 
-def render_preview(entity, text: str, mono_cells: bool = True):
+def render_preview(entity, text: str, mono_cells: bool):
     """预览渲染条：真实排版高分辨率条带（render_text_strip），不走全局
     相似度缓存（键按 text_version），GUI 自带（指纹，文字，mono）LRU。
     mono_cells 强制等宽（全角 1em/半角 0.5em 统一格宽）逐字对位；缺字
-    一律留空占位。"""
+    一律留空占位。mono 不给默认：core render_text_strip 默认 True（比对
+    管线口径）与 GUI 开关默认 False 相反，显式传参防两口径漂移。"""
     return render_text_strip(Path(entity.dir_path) / entity.rel_path,
                              entity.face_index, text, mono_cells=mono_cells)
 

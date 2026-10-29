@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -60,6 +61,12 @@ def _app_version() -> str:
         return _pkg_version("ass-font-substitute")
     except PackageNotFoundError:
         return "dev"
+
+
+def _pct(v: float) -> int:
+    """0.805→81 半进位百分比。round() 是银行家舍入（90.5→90），存量
+    阈值恰在 .5 边界时滑杆/数值框初值会差 1。"""
+    return math.floor(v * 100 + 0.5)
 
 
 def _sample_brief(text: str) -> str:
@@ -265,15 +272,15 @@ class SettingsPage(ScrollArea):
         self.cov_card = _SliderSpinCard(
             FIF.FILTER, "覆盖率门槛",
             "在库字形对字幕用字的覆盖达到该值即直接采用，否则进入相似度搜索",
-            round(COV_BOUNDS[0] * 100), round(COV_BOUNDS[1] * 100), 1,
-            round(settings.get("cov_threshold") * 100),
+            _pct(COV_BOUNDS[0]), _pct(COV_BOUNDS[1]), 1,
+            _pct(settings.get("cov_threshold")),
             lambda x: self.settings.set("cov_threshold", x / 100),
             suffix="%")
         self.sim_card = _SliderSpinCard(
             FIF.SPEED_HIGH, "相似率门槛",
             "候选字体与原字体的相似率低于该值将不列出",
-            round(SIM_BOUNDS[0] * 100), round(SIM_BOUNDS[1] * 100), 5,
-            round(settings.get("min_sim") * 100),
+            _pct(SIM_BOUNDS[0]), _pct(SIM_BOUNDS[1]), 5,
+            _pct(settings.get("min_sim")),
             lambda x: self.settings.set("min_sim", x / 100),
             suffix="%")
         self.size_card = self._make_size_card()
@@ -373,14 +380,13 @@ class SettingsPage(ScrollArea):
         card = _WheelFreeCard(FIF.TILES, "相对大小区间",
                               "候选字形相对原字体的大小允许范围", self)
         self.range_slider = RangeSlider(
-            round(SIZE_BOUNDS[0] * 100), round(SIZE_BOUNDS[1] * 100),
-            round(self.settings.get("size_min") * 100),
-            round(self.settings.get("size_max") * 100), card)
+            _pct(SIZE_BOUNDS[0]), _pct(SIZE_BOUNDS[1]),
+            _pct(self.settings.get("size_min")),
+            _pct(self.settings.get("size_max")), card)
         self.range_slider.setFixedSize(180, 22)
         # 数值框取钳后值（存量越界时与滑块一致，构造不落盘）
         lo, hi = self.range_slider.values()
-        lo_pct, hi_pct = (round(SIZE_BOUNDS[0] * 100),
-                          round(SIZE_BOUNDS[1] * 100))
+        lo_pct, hi_pct = _pct(SIZE_BOUNDS[0]), _pct(SIZE_BOUNDS[1])
         self.spin = CompactSpinBox(card)          # 下限
         self.spin_max = CompactSpinBox(card)      # 上限
         for s, v in ((self.spin, lo), (self.spin_max, hi)):

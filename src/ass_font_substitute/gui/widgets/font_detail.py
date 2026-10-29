@@ -251,9 +251,7 @@ def _multi_lang_widget(rows: list[tuple[str, str]]) -> QWidget:
     for text, lang in rows:
         lab = BodyLabel(f"{text} ({lang})" if lang else text)
         lab.setWordWrap(True)
-        lab.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse)
-        lab.setCursor(Qt.CursorShape.IBeamCursor)
+        apply_selectable(lab, keyboard=False)   # 弹窗内不夺焦点，仅鼠标划选
         va.addWidget(lab)
     return w
 
@@ -263,9 +261,7 @@ def _simple_val(text: str, wrap: bool = False,
     lab = BodyLabel(text)
     lab.setWordWrap(wrap)
     if selectable:
-        lab.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse)
-        lab.setCursor(Qt.CursorShape.IBeamCursor)
+        apply_selectable(lab, keyboard=False)   # 弹窗内不夺焦点，仅鼠标划选
     return lab
 
 
@@ -346,9 +342,7 @@ class FontDetailDialog(MessageBoxBase):
         path = BodyLabel(f"{e.dir_path}/{e.rel_path}")
         path.setWordWrap(True)
         # 路径可选中复制：长路径手抄不现实；IBeam 提示可复制
-        path.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse)
-        path.setCursor(Qt.CursorShape.IBeamCursor)
+        apply_selectable(path, keyboard=False)  # 弹窗内不夺焦点，仅鼠标划选
         mtime = (datetime.fromtimestamp(e.mtime_ns / 1e9).strftime(
             "%Y-%m-%d %H:%M") if e.mtime_ns else "—")
         _form(fv, [

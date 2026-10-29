@@ -216,6 +216,8 @@ class SubsPage(QWidget):
         # 渐进回执刷新节流：回执只记账，突发合并成一次增量刷新（见
         # _schedule_refresh）
         self._refresh_pending: set[str] = set()
+        # 在途手选评分 norm → 实体：失败回执降级无分回填（保住用户选择）
+        self._pending_picks: dict[str, object] = {}
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.setInterval(300)
@@ -422,6 +424,7 @@ class SubsPage(QWidget):
                 self._update_summary()
         elif isinstance(tag, str) and tag.startswith("pickscore:"):
             norm = tag.split(":", 1)[1]
+            self._pending_picks.pop(norm, None)
             card = self._card(norm)
             if card is None:               # 评分期间整页重算：弃置
                 return
@@ -452,6 +455,18 @@ class SubsPage(QWidget):
             self._apply_total = 0
             self._apply_dispatching = False
             self._update_summary()         # 按当前状态恢复
+        # 手选评分失败：降级无分回填，保住用户选择（重算孤儿卡则无从回填）
+        if isinstance(tag, str) and tag.startswith("pickscore:"):
+            norm = tag.split(":", 1)[1]
+            entity = self._pending_picks.pop(norm, None)
+            card = self._card(norm) if entity is not None else None
+            if card is not None:
+                self.vm.attach_pick(card, entity, None, None)
+                self._apply_card(card)
+                self._update_summary()
+                InfoBar.warning("相似度评分失败",
+                                "已按无评分加入所选字体", parent=self)
+                return                 # 已降级回填：不再走白名单报错
         # 弹泡白名单：只报本页任务。其余 tag（cachestat/预览渲染
         # 失败等）别页自会提示或已自行降级——无差别弹泡只会刷屏且不可读
         if isinstance(tag, str) and (
@@ -641,6 +656,7 @@ class SubsPage(QWidget):
             # 行先不入列，评分回执一并 attach（免两帧重建）
             self.worker.submit(f"pickscore:{norm}", _pick_score_job,
                                vm_target(self.vm, card), dlg.selected)
+            self._pending_picks[norm] = dlg.selected
 
     # ---- 应用 ----
     def _apply(self):

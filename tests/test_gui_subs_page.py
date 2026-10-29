@@ -520,6 +520,26 @@ def test_pick_score_receipt_and_metrics_text(qapp, tmp_path, monkeypatch):
     page._on_result("pickscore:甲字体", (ent_b, 0.5, 1.0))
 
 
+    # 评分失败降级：无分回填保住用户选择（不弹「任务失败」改 warning 语义）
+    page2 = _make_page(qapp, tmp_path, monkeypatch)
+    page2._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    page2._on_result(f"classify:{page2._gen}:0",
+                     (usage, UsageClass(kind="replace", entities=[ent_a])))
+    page2._pending_picks["甲字体"] = ent_b
+    page2._on_failed("pickscore:甲字体", "boom")
+    card2 = page2.vm.cards[0]
+    o2 = card2.option("fp2")
+    assert o2 is not None and o2.source == "pick" and card2.checked_key == "fp2"
+    assert o2.similarity is None and o2.size_ratio is None
+    assert "甲字体" not in page2._pending_picks
+
+    # 无 pending（迟到失败）/卡已重算孤儿：无从回填，照白名单报错不炸
+    page2._on_failed("pickscore:甲字体", "boom")
+    page2.on_library_changed()
+    page2._pending_picks["甲字体"] = ent_b
+    page2._on_failed("pickscore:甲字体", "boom")
+
+
 def test_twin_metrics_lead_phrase(qapp, tmp_path, monkeypatch):
     # 孪生行次序（用户拍板 2026-10-29）：行首注明来由，后接覆盖/未覆盖；
     # 孪生行无相似率/相对大小
