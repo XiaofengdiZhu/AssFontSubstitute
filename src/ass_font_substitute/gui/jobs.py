@@ -242,12 +242,13 @@ def score_pick(ctx, target, entity):
     return entity, r.score, r.size_ratio
 
 
-def render_preview(entity, text: str):
+def render_preview(entity, text: str, mono_cells: bool = True):
     """预览渲染条：真实排版高分辨率条带（render_text_strip），不走全局
-    相似度缓存（键按 text_version），GUI 自带（指纹，文字）LRU。缺字
-    跳过，绝不渲染 tofu。"""
+    相似度缓存（键按 text_version），GUI 自带（指纹，文字，mono）LRU。
+    mono_cells 强制等宽（全角 1em/半角 0.5em 统一格宽）逐字对位；缺字
+    一律留空占位。"""
     return render_text_strip(Path(entity.dir_path) / entity.rel_path,
-                             entity.face_index, text)
+                             entity.face_index, text, mono_cells=mono_cells)
 
 
 @dataclass

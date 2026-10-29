@@ -31,6 +31,10 @@ class _FakeWorker(QObject):
 class _FakePVM:
     def __init__(self):
         self.cache = {}
+        self.mono = False
+
+    def mono_cells(self):
+        return self.mono
 
     def get_tiles(self, key):
         return self.cache.get(key)
@@ -61,7 +65,7 @@ def _make_bar(qapp, width_fn=None, fit_width=False):
 def test_render_failure_shows_fullwidth_text_and_tooltip(qapp):
     w, _pvm, bar = _make_bar(qapp)
     assert bar.text() == "…"                       # 初始占位
-    w.result.emit("t:fp1", ("永", None, "FontParseError: boom"))
+    w.result.emit("t:fp1", ("永", False, None, "FontParseError: boom"))
     assert bar.text() == "（渲染失败）"
     assert bar.toolTip() == "FontParseError: boom"
     assert not bar._inflight                       # 收尾复位，可再派发
@@ -69,11 +73,11 @@ def test_render_failure_shows_fullwidth_text_and_tooltip(qapp):
 
 def test_stale_failure_is_discarded(qapp):
     w, _pvm, bar = _make_bar(qapp)
-    w.result.emit("t:fp1", ("旧文字", None, "boom"))   # 文字不匹配：丢弃
+    w.result.emit("t:fp1", ("旧文字", False, None, "boom"))  # 文字不匹配：丢弃
     assert bar.text() == "…"
     assert bar._inflight                           # 未收尾
 
-    w.result.emit("t:fp1", ("永", None, None))     # 正常空 bundle 路径不受影响
+    w.result.emit("t:fp1", ("永", False, None, None))  # 正常空 bundle 路径不受影响
     assert bar.text() == "（无可渲染字形）"
 
 
@@ -131,3 +135,38 @@ def test_fit_width_auto_refits_on_resize(qapp):
     assert bar.pixmap().width() == 184              # resize 即自动重贴
     bar.resize(500, 28)
     assert bar.pixmap().width() == 484              # 无 360 上限
+
+
+def test_long_strip_truncated_not_shrunk(qapp):
+    # 过长截断不缩放（用户拍板 2026-10-29：字号恒定）：超预算裁右缘，
+    # 显示高保持满 28（旧 scaledToWidth 会把高也压到 ~13）
+    import numpy as np
+
+    budget = {"w": 184}
+    _w, _pvm, bar = _make_bar(qapp, width_fn=lambda: budget["w"])
+    bar.show()
+    qapp.processEvents()
+    bar._apply(np.full((48, 900), 255, dtype=np.uint8))
+    assert bar.pixmap().width() == 184              # 预算宽截断
+    assert bar.pixmap().height() == 28              # 高度不缩：字号恒定
+
+
+def test_mono_flag_keys_cache_and_dispatch(qapp):
+    # 强制等宽口径进缓存键与派发参数；在途翻转后旧口径回传丢弃、重派
+    # 走新口径（rerender 由页面广播触发）
+    import numpy as np
+
+    w, pvm, bar = _make_bar(qapp)
+    assert w.submits[-1][2] == (bar._entity, "永", False)   # 派发带口径
+    strip = np.full((4, 40), 255, dtype=np.uint8)
+    w.result.emit("t:fp1", ("永", False, strip, None))
+    assert pvm.cache[(bar._entity.fingerprint, "永", False)] is strip
+
+    pvm.mono = True
+    bar.rerender()
+    assert w.submits[-1][2] == (bar._entity, "永", True)    # 新口径重派
+    w.result.emit("t:fp1", ("永", False, strip, None))      # 旧口径回传：丢弃
+    assert bar.text() == "…"                                # 保持占位不贴错
+    new_strip = np.full((4, 60), 255, dtype=np.uint8)
+    w.result.emit("t:fp1", ("永", True, new_strip, None))
+    assert pvm.cache[(bar._entity.fingerprint, "永", True)] is new_strip

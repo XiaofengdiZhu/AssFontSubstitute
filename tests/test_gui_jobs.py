@@ -139,11 +139,12 @@ def test_render_preview_skips_missing(font_dir):
     snap = load_library([str(font_dir)])
     ctx.snapshot, ctx.lib, ctx.lib_key = snap, snap.lib, lib_key([str(font_dir)])
     e = snap.lib.entities()[0]
-    strip = render_preview(e, "永X")               # X 不在 cmap → 跳过
+    strip = render_preview(e, "永X")               # X 不在 cmap → 留空占位
     assert strip is not None and strip.ndim == 2
     assert strip.max() > 0                         # 永渲染成墨迹
-    # 缺字不前进：宽度与只渲染「永」一致（X 变 tofu 时这里会炸）
-    assert strip.shape[1] == render_preview(e, "永").shape[1]
+    # 缺字留空前进（半角 0.5em≈36px@72）：后续字符不错位，多行对比逐字
+    # 对得上（X 变 tofu 或被吞掉错位时这里会炸）
+    assert abs(strip.shape[1] - render_preview(e, "永").shape[1] - 36) <= 2
 
 
 def test_apply_to_file_suffix_and_overwrite(tmp_path, sub_file):

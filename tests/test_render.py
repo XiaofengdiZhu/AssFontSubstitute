@@ -64,23 +64,19 @@ def test_render_text_strip_basic(tmp_path):
 
 def test_render_text_strip_repeats_not_deduped(tmp_path):
     # 丢字回归钉：重复字符必须各自渲染归位（RenderBundle 的 dict 去重
-    # 曾让预览丢字，条带管线不允许）。工厂字体 advance = 500/1000×72 =
-    # 36.0px 精确，钉关系式而非魔法阈值
+    # 曾让预览丢字，条带管线不允许）。每字按统一格宽推进：全角 1em
+    # @72px = 72px，two−one 应恰好多一块格宽
     from ass_font_substitute.core.similarity.render import render_text_strip
 
     p = tmp_path / "f.ttf"
     build_font(p, chars="永", family="X體")
     one = render_text_strip(p, 0, "永")
     two = render_text_strip(p, 0, "永永")
-    # 每多一个字符宽一块 advance：two-one ≈ one-左右留白(2×pad)
-    assert abs((two.shape[1] - one.shape[1]) - (one.shape[1] - 8)) <= 1
+    assert abs((two.shape[1] - one.shape[1]) - 72) <= 2
 
 
 def test_strip_helpers():
-    # 画布超挂范围与度量兜底（纯函数，不依赖字体文件）
-    from types import SimpleNamespace
-
-    from ass_font_substitute.core.similarity.render import _baseline_metrics
+    # 画布超挂范围（纯函数，不依赖字体文件）
     from ass_font_substitute.core.similarity.render import _strip_extent
 
     arr = np.zeros((10, 3), np.uint8)
@@ -89,11 +85,6 @@ def test_strip_helpers():
     left, right = _strip_extent(slots, adv_right=20, pad=4)
     assert left == -5
     assert right == 40 + 3 + 4                      # 末字超挂 + pad，非 24
-    # 度量正常：26.6 定点换算
-    assert _baseline_metrics(SimpleNamespace(ascender=77 * 64,
-                                             descender=-18 * 64), 72) == (77, 18)
-    # 度量异常兜底
-    assert _baseline_metrics(SimpleNamespace(ascender=0, descender=0), 72) == (72, 18)
 
 
 def test_render_text_strip_space_and_missing(tmp_path):
@@ -106,8 +97,71 @@ def test_render_text_strip_space_and_missing(tmp_path):
     assert with_space.shape[1] > no_space.shape[1]  # 空格出词距
     ideographic = render_text_strip(p, 0, "永　中")
     assert ideographic.shape[1] > no_space.shape[1]  # U+3000 同样出词距
-    assert render_text_strip(p, 0, "XYZ") is None   # 全缺字
-    assert render_text_strip(p, 0, "永X中") is not None   # 缺字跳过不炸
+    assert render_text_strip(p, 0, "XYZ") is None   # 全缺字（无墨迹可画）
+    assert render_text_strip(p, 0, "永X中") is not None   # 缺字留空不炸
+
+
+def test_render_text_strip_missing_leaves_gap(tmp_path):
+    # 缺字留空占位前进（用户拍板 2026-10-29）：多字体条带对比需逐字对位，
+    # 跳过会让后续字符错位。占位宽按统一格宽（全角 1em / 半角 0.5em），
+    # @72px 全角占位 72、半角 36（±舍入）
+    from ass_font_substitute.core.similarity.render import render_text_strip
+
+    p = tmp_path / "f.ttf"
+    build_font(p, chars="永中", family="X體")
+    base = render_text_strip(p, 0, "永中")
+    wide = render_text_strip(p, 0, "永缺中")       # 全角缺字占 1em
+    latin = render_text_strip(p, 0, "永X中")       # 半角缺字占 0.5em
+    assert abs((wide.shape[1] - base.shape[1]) - 72) <= 2
+    assert abs((latin.shape[1] - base.shape[1]) - 36) <= 2
+
+
+def test_strip_cell_width_uniform_across_fonts(tmp_path):
+    # 统一格宽 + 统一画布（用户拍板 2026-10-29）：各字体自身 advance、
+    # hhea 度量、墨迹大小不同都不影响条带尺寸与逐字位置——否则
+    # PreviewBar 按显示高缩放时每行比例不同，对位漂移（真机宋/黑实锤）。
+    # 乙字体 advance 800/300、度量 1500/-500、墨迹缩到 0.7，同文本条带
+    # 必须同尺寸（墨迹内容自然不同，只钉几何）
+    from fontTools.ttLib import TTFont
+
+    from ass_font_substitute.core.similarity.render import render_text_strip
+
+    pa = tmp_path / "a.ttf"
+    pb = tmp_path / "b.ttf"
+    build_font(pa, chars="永中", family="甲")
+    build_font(pb, chars="永中", family="乙", scale=0.7)
+    f = TTFont(pb)
+    f["hmtx"]["g0"] = (800, 0)                     # 永的 advance 拉宽
+    f["hmtx"]["g1"] = (300, 0)                     # 中的 advance 压窄
+    f["hhea"].ascent, f["hhea"].descent = 1500, -500
+    f["OS/2"].sTypoAscender, f["OS/2"].sTypoDescender = 1500, -500
+    f.save(pb)
+    sa = render_text_strip(pa, 0, "永中永")
+    sb = render_text_strip(pb, 0, "永中永")
+    assert sa.shape == sb.shape
+    assert sa.any() and sb.any()
+
+
+def test_strip_natural_advance_mode(tmp_path):
+    # mono_cells=False（强制等宽开关关，默认）：走字体自身 advance，
+    # 宽度随字体变（乙的永 advance 800 > 甲 500）；同参数 mono 版仍等宽
+    from fontTools.ttLib import TTFont
+
+    from ass_font_substitute.core.similarity.render import render_text_strip
+
+    pa = tmp_path / "a.ttf"
+    pb = tmp_path / "b.ttf"
+    build_font(pa, chars="永", family="甲")
+    build_font(pb, chars="永", family="乙")
+    f = TTFont(pb)
+    f["hmtx"]["g0"] = (800, 0)
+    f.save(pb)
+    na = render_text_strip(pa, 0, "永", mono_cells=False)
+    nb = render_text_strip(pb, 0, "永", mono_cells=False)
+    assert nb.shape[1] > na.shape[1]               # 自然字距：宽 advance 更宽
+    ma = render_text_strip(pa, 0, "永", mono_cells=True)
+    mb = render_text_strip(pb, 0, "永", mono_cells=True)
+    assert ma.shape == mb.shape                    # 等宽口径不受 advance 影响
 
 
 def _save_format2_font(path, uni_text: str) -> None:
@@ -149,12 +203,12 @@ def test_render_legacy_big5_cmap(tmp_path):
 
 
 def test_render_legacy_missing_char_skipped(tmp_path):
-    # legacy 模式缺字（码页解不出/cmap 无条目）跳过不炸；全缺返回 None
+    # legacy 模式缺字（码页解不出/cmap 无条目）留空占位不炸；全缺返回 None
     from ass_font_substitute.core.similarity.render import render_text_strip
 
     p = tmp_path / "big5.ttf"
     _save_format2_font(p, "永字A")
-    assert render_text_strip(p, 0, "永?") is not None     # ? 兜底空白
+    assert render_text_strip(p, 0, "永?") is not None     # ? 留空占位
     assert render_text_strip(p, 0, "€¥") is None          # 全缺
 
 

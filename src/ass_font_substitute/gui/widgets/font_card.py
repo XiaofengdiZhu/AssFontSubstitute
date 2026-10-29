@@ -263,6 +263,13 @@ class FontCard(CardWidget):
             if o is not None:
                 bar.set_text(pt or o.display_name)
 
+    def rerender_previews(self):
+        """强制等宽开关翻转后由页面调用（settings.valueChanged 广播）：
+        各条按新口径清贴图重渲（缓存键含 mono）。文字未变 set_text 不动，
+        走 bar 专用 rerender。"""
+        for bar in self._bar_by_key.values():
+            bar.rerender()
+
     def teardown(self):
         """整卡销毁前由页面调用（仅 _reclassify 整页重算/页面关闭）：
         撤销所有预览条的在途渲染任务。不撤单则废任务塞死 worker 串行

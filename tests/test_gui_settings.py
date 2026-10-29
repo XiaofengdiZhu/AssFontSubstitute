@@ -37,6 +37,7 @@ def test_defaults_match_core_constants():
     assert DEFAULTS["n_pause"] == 5
     assert DEFAULTS["save_suffix"] == ".substituted.ass"
     assert DEFAULTS["overwrite_default"] is False
+    assert DEFAULTS["preview_mono"] is False        # 强制等宽默认关
     assert DEFAULTS["max_threads"] >= 1
     # 界面滑杆值域：覆盖率下限 80（2026-10 从 90 放开）、大小上限 150
     from ass_font_substitute.gui.settings_store import COV_BOUNDS
@@ -65,13 +66,15 @@ def test_corrupt_file_falls_back_to_defaults(tmp_path):
 def test_unknown_keys_and_bad_types_filtered(tmp_path):
     f = tmp_path / "s.json"
     f.write_text(json.dumps({"n_pause": "x", "future_key": 1,
-                             "overwrite_default": "yes", "cov_threshold": 0.9}),
+                             "overwrite_default": "yes", "cov_threshold": 0.9,
+                             "preview_mono": "on"}),
                  "utf-8")
     s = Settings(f)
     assert s.get("n_pause") == DEFAULTS["n_pause"]
     assert "future_key" not in json.loads(f.read_text("utf-8"))
     assert s.get("overwrite_default") is False
     assert s.get("cov_threshold") == 0.9
+    assert s.get("preview_mono") is False
 
 
 def test_empty_sample_text_rejected(tmp_path):

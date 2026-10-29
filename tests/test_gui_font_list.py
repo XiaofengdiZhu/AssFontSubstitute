@@ -174,7 +174,7 @@ def test_preview_bar_reapplies_tiles_on_theme_flip(qapp):
     from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 
     pvm = PreviewVM()
-    pvm.put_tiles(("fp1", "永"), _solid_strip())
+    pvm.put_tiles(("fp1", "永", False), _solid_strip())
     bar = None
     try:
         setTheme(Theme.DARK)
@@ -203,7 +203,7 @@ def test_preview_bar_theme_flip_at_zero_height_defers_to_show(qapp):
     from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 
     pvm = PreviewVM()
-    pvm.put_tiles(("fp1", "永"), _solid_strip())
+    pvm.put_tiles(("fp1", "永", False), _solid_strip())
     bar = None
     try:
         setTheme(Theme.DARK)
@@ -562,16 +562,19 @@ def test_preview_bar_set_entity_switches_face(qapp):
         assert bar._entity.fingerprint == "fp2"
         assert len(worker.submits) == n + 1
         assert worker.submits[-1][0] == "t:fp2"
+        # 占位「…」在：set_entity 曾反序 setText/setPixmap，setPixmap 清
+        # text 把占位吃成空白
+        assert bar.text() == "…"
         bar.set_entity(bar._entity, "t:fp2")        # 同 face：早退
         assert len(worker.submits) == n + 1
         # 换 face 断开旧结果槽：旧 tag 回传被丢弃（不写缓存、不再提交），
         # 新 tag 回传被消费且消费后断连（二次发射无重复处理）
-        worker.result.emit("t:fp1", ("永", None, None))
-        assert pvm.get_tiles(("fp2", "永")) is None
+        worker.result.emit("t:fp1", ("永", False, None, None))
+        assert pvm.get_tiles(("fp2", "永", False)) is None
         assert len(worker.submits) == n + 1
-        worker.result.emit("t:fp2", ("永", None, None))
+        worker.result.emit("t:fp2", ("永", False, None, None))
         assert not bar._connected and not bar._inflight
-        assert pvm.get_tiles(("fp2", "永")) is not None
+        assert pvm.get_tiles(("fp2", "永", False)) is not None
     finally:
         bar.deleteLater()
 

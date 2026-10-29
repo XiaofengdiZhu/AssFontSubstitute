@@ -65,6 +65,7 @@ class PreviewBar(CaptionLabel):
         self._strip = None                   # 最近一次贴上的条带，换肤重贴用
         self._stale_theme = False            # 不可见期换肤未贴上，showEvent 补
         self._applied_w = -1                 # 最近一次贴图用的宽度上限
+        self._mono = False                   # 在途任务的 mono 口径（回传校验）
         qconfig.themeChanged.connect(self._on_theme_changed)
         # 错误详情走 Fluent 气泡（过滤器装一次，set_row 换 tooltip 文本照常生效）
         install_tip(self)
@@ -120,7 +121,10 @@ class PreviewBar(CaptionLabel):
         if not self._text.strip() or self._entity is None:
             self.setText(self._entity.display_name if self._entity else "")
             return
-        key = (self._entity.fingerprint, self._text)
+        # 缓存键含 mono 口径：开关翻转后旧条带自然失配（LRU 慢慢挤掉），
+        # 无需显式失效
+        self._mono = self._pvm.mono_cells()
+        key = (self._entity.fingerprint, self._text, self._mono)
         cached = self._pvm.get_tiles(key)
         if cached is not None:
             self._apply(cached)
@@ -131,7 +135,24 @@ class PreviewBar(CaptionLabel):
         self._worker.result.connect(self._on_result)
         self._connected = True
         self._job = self._worker.submit(self._tag, _render_job,
-                                        self._entity, self._text)
+                                        self._entity, self._text, self._mono)
+
+    def rerender(self):
+        """强制等宽开关翻转后由页面调用：文字不变，清贴图按新口径重渲
+        （缓存键含 mono，命中旧口径不发生）。撤在途/断槽/清态同 set_text。"""
+        self.cancel()
+        if self._connected:              # 无连接时 disconnect 会刷 warning
+            self._worker.result.disconnect(self._on_result)
+            self._connected = False
+        self._strip = None
+        self._stale_theme = False
+        self._applied_w = -1
+        self.setToolTip("")               # 上一文字失败遗留的错误详情
+        # 先清贴图再置占位：setPixmap（含 null）会清 QLabel text，反序
+        # 则占位「…」被清成空白（真机表现为无占位）
+        self.setPixmap(QPixmap())
+        self.setText("…")
+        self._render()
 
     def set_text(self, text):
         """换预览文字（预览框输入变化）：撤在途任务、断旧结果槽、清贴图
@@ -139,37 +160,17 @@ class PreviewBar(CaptionLabel):
         双重匹配失配丢弃。文字没变直接返回（apply 高频调用防抖）。"""
         if text == self._text:
             return
-        self.cancel()
-        if self._connected:              # 无连接时 disconnect 会刷 warning
-            self._worker.result.disconnect(self._on_result)
-            self._connected = False
         self._text = text
-        self._strip = None
-        self._stale_theme = False
-        self._applied_w = -1
-        self.setToolTip("")               # 上一文字失败遗留的错误详情
-        self.setText("…")
-        self.setPixmap(QPixmap())
-        self._render()
+        self.rerender()
 
     def set_entity(self, entity, tag):
         """行内切换 face（字重/斜体分段）：撤在途任务、断旧结果槽、清贴
         图重渲。tag 随 fingerprint 换新——已开跑不可撤的旧任务回传时
-        tag 失配，_on_result 直接丢弃。"""
+        tag 失配，_on_result 直接丢弃。清态与重渲全部复用 rerender。"""
         if entity is self._entity:
             return
-        self.cancel()
-        if self._connected:              # 无连接时 disconnect 会刷 warning
-            self._worker.result.disconnect(self._on_result)
-            self._connected = False
         self._entity, self._tag = entity, tag
-        self._strip = None
-        self._stale_theme = False
-        self._applied_w = -1
-        self.setToolTip("")               # 上一 face 失败遗留的错误详情
-        self.setText("…")
-        self.setPixmap(QPixmap())
-        self._render()
+        self.rerender()
 
     def cancel(self):
         """行滚出物化窗口/列表重建时调用：未开始的渲染任务从队列除名，
@@ -182,13 +183,14 @@ class PreviewBar(CaptionLabel):
     def _on_result(self, tag, payload):
         if tag != self._tag:
             return
-        # 回传 text：结果按 (tag, text) 双重匹配，防换文字后旧在途结果错配
-        # 缓存键；渲染失败也折进本通路（err 字段）——failed 信号不带 text
-        # 无法做同样的护栏，同 tag 旧任务的失败会错标新行
-        text, strip, err = payload
-        if text != self._text:
-            # 同 tag（fp + 列表实例）的在途旧任务——行已随 set_rows 重建：
-            # 结果的文字与本行不符，直接丢弃，不清缓存不置位
+        # 回传 (text, mono)：结果按 tag+文字+口径 三重匹配，防换文字/翻转
+        # 等宽开关后旧在途结果错配缓存键；渲染失败也折进本通路（err 字段）
+        # ——failed 信号不带 text 无法做同样的护栏，同 tag 旧任务的失败会
+        # 错标新行
+        text, mono, strip, err = payload
+        if text != self._text or mono != self._pvm.mono_cells():
+            # 同 tag 在途旧任务（行已重建/开关已翻转）：口径不符直接丢弃，
+            # 不动连接与 _inflight——那是重派新一代（rerender）的账
             return
         # 同 tag 双任务（滚出重物化后孤儿任务被新行认领）会回传两次：
         # 第二次已无连接，disconnect 会刷 RuntimeWarning
@@ -204,7 +206,8 @@ class PreviewBar(CaptionLabel):
             # 全缺字也是事实，缓存住（空条带哨兵，_apply 显「无可渲染字形」）：
             # 存 None 等于无缓存，滚回可视区会每次重开字体文件重渲
             strip = np.zeros((0, 0), dtype=np.uint8)
-        self._pvm.put_tiles((self._entity.fingerprint, self._text), strip)
+        self._pvm.put_tiles(
+            (self._entity.fingerprint, self._text, self._mono), strip)
         self._apply(strip)
 
     def _apply(self, strip):
@@ -220,19 +223,19 @@ class PreviewBar(CaptionLabel):
                                Qt.SmoothTransformation)
         mw = self._max_w()
         if round(pm.width() / dpr) > mw:
-            pm = pm.scaledToWidth(max(1, round(mw * dpr)),
-                                  Qt.SmoothTransformation)
-            # Qt 6.12 的 scaled 家族已保留 DPR 标签，此行是防版本行为漂移
-            # 的防御——几何数学依赖「缩放后 DPR 仍为 dpr」，勿删
+            # 过长直接截断不缩放（用户拍板 2026-10-29：字号恒定，不再因
+            # 长文缩小）——按预算物理像素裁右缘（copy 设备像素坐标，DPR
+            # 标签随 copy 保留，防御性重标同上）
+            pm = pm.copy(0, 0, max(1, round(mw * dpr)), pm.height())
             pm.setDevicePixelRatio(dpr)
         self._applied_w = mw
         self.setPixmap(pm)
 
 
-def _render_job(ctx, entity, text):
+def _render_job(ctx, entity, text, mono_cells):
     from ass_font_substitute.gui.jobs import render_preview
     try:
-        strip = render_preview(entity, text)
+        strip = render_preview(entity, text, mono_cells)
     except Exception as e:
-        return text, None, f"{type(e).__name__}: {e}"
-    return text, strip, None
+        return text, mono_cells, None, f"{type(e).__name__}: {e}"
+    return text, mono_cells, strip, None

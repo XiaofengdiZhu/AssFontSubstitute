@@ -36,6 +36,7 @@ DEFAULTS: dict = {
     "cache_path": "",                              # 空 = paths.default_cache_path()
     "last_dirs": {},                               # 各对话框上次目录 {scope: 路径}
     "preview_history": [],                         # 预览文字历史（新→旧，最多 10 条；预览页/字幕页共享）
+    "preview_mono": False,                         # 预览强制等宽（全角 1em/半角 0.5em 统一格宽，多行逐字对位）
     "language": "zh-Hans",                         # 界面语言（国际化待接入，暂存储值）
     "theme": "auto",                               # auto/light/dark
     "theme_color": "",                             # 强调色 #rrggbb；空=跟随系统
@@ -43,7 +44,7 @@ DEFAULTS: dict = {
     "win_geometry": None,                          # 上次关闭窗口 {x,y,w,h:int, max:bool}；None=没记过
 }
 
-_BOOL_KEYS = {"overwrite_default"}
+_BOOL_KEYS = {"overwrite_default", "preview_mono"}
 _LIST_KEYS = {"font_dirs"}
 _INT_KEYS = {"n_pause", "max_threads"}
 _FLOAT_KEYS = {"cov_threshold", "min_sim", "size_min", "size_max"}

@@ -55,6 +55,13 @@ class PreviewVM:
     def set_entities(self, entities) -> None:
         self.entities = list(entities)
 
+    def mono_cells(self) -> bool:
+        """强制等宽（预览统一格宽，全角 1em/半角 0.5em 逐字对位）设置
+        现值。条带缓存键含它：开关翻转后旧口径条带自然失配（LRU 慢慢
+        挤掉），无需显式失效。"""
+        return bool(self._settings.get("preview_mono")) if self._settings \
+            else False
+
     def weight_buckets(self) -> list[int]:
         return sorted({e.weight // 100 * 100 for e in self.entities})
 
@@ -133,7 +140,7 @@ class PreviewVM:
         """face 列表 → 单 face 行（推荐区不合并，逐 face 显示）。"""
         return [FamilyRow(self._name(e), [e], e) for e in entities]
 
-    # ---- tile LRU：键 (fingerprint, 预览文字) ----
+    # ---- tile LRU：键 (fingerprint, 预览文字, mono 口径) ----
     def get_tiles(self, key):
         t = self._tiles.pop(key, None)
         if t is not None:

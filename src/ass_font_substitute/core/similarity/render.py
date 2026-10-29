@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -218,17 +219,8 @@ def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
 
 
 STRIP_PX = 72          # 预览条带渲染尺寸：显示高 28 逻辑 px 的 ~2.5x 超采样
-_SPACE_ADV = 0.28      # cmap 无空格字形时的空白 advance 占 px 比例（兜底）
-
-
-def _baseline_metrics(metrics, px: int) -> tuple[int, int]:
-    """ascender/descender（26.6 定点 → px）。度量异常（怪字体 asc+desc 近 0）
-    兜底成 px/px÷4，保证条带有可用行高。"""
-    asc = max(1, round(metrics.ascender / 64))
-    desc = max(1, round(-metrics.descender / 64))
-    if asc + desc < px // 2:
-        return px, px // 4
-    return asc, desc
+_ASC_EM = 0.95         # 统一画布基线上空（em 比例）：容 CJK ~0.88em 墨迹
+_DESC_EM = 0.20        # 统一画布基线下空：容 Latin 降部（g/y/p 尾部）
 
 
 def _strip_extent(slots: list, adv_right: float, pad: int) -> tuple[int, int]:
@@ -241,45 +233,65 @@ def _strip_extent(slots: list, adv_right: float, pad: int) -> tuple[int, int]:
     return left, right
 
 
-def render_text_strip(path: Path, face_index: int, text: str,
-                      px: int = STRIP_PX) -> np.ndarray | None:
-    """预览条带：真实排版渲染（统一 px 尺寸 + baseline + 字符 advance），
-    字形比例与字距保真——区别于相似度管线 render_bundle 的等高归一 tile
-    （那套为比对设计，逐字裁缩到 48px，放大即糊）。
+def _cell_advance(ch: str, px: int) -> float:
+    """统一格宽 advance：全角（east_asian_width W/F：CJK、全角标点、
+    U+3000）1em、半角 0.5em。不用字体自身 advance——各字体每字宽度
+    不同，多行对比要逐字对位就必须全字体统一格宽（用户拍板
+    2026-10-29）；缺字/坏字形（没有字形可取度量）两模式都用它留空占位，
+    有字无字位置一致。字形墨迹仍按自然 lsb 落格，超出格宽的超挂墨迹
+    （斜体 f/j、粗 Latin M/W 在 0.5em 格内）由 _strip_extent 墨迹画布
+    容纳、maximum 合成不互抹——字距不保真是对位优先的取舍。"""
+    return px * (1.0 if unicodedata.east_asian_width(ch) in ("W", "F")
+                 else 0.5)
 
-    缺字跳过（不前进），空白（含 U+3000/NBSP）cmap 有映射走真实 advance、
-    无映射按比例兜底；全缺字返回 None。重复字符各自渲染归位（RenderBundle
-    的 dict 会去重，预览不能丢字）。单个坏字形跳过不毁整条。
+
+def render_text_strip(path: Path, face_index: int, text: str,
+                      px: int = STRIP_PX,
+                      mono_cells: bool = True) -> np.ndarray | None:
+    """预览条带：真实排版渲染（统一 px 尺寸 + 统一画布），字形比例保真
+    ——区别于相似度管线 render_bundle 的等高归一 tile（那套为比对设计，
+    逐字裁缩到 48px，放大即糊）。
+
+    mono_cells=True（强制等宽，多字体行并排对比的前提，用户拍板
+    2026-10-29）：每字符按 _cell_advance 统一格宽前进（全角 1em /
+    半角 0.5em，不用字体自身 advance），逐字对位。False：走字体自身
+    advance（自然字距，排版观感优先）。
+    画布高与基线一律按 _ASC_EM/_DESC_EM 定空，不读字体 hhea 度量、
+    不做墨迹裁边——此前按字体度量定高，PreviewBar 按显示高缩放时每行
+    比例不同，对位漂移（真机宋/黑对拍实锤）；统一后两模式显示比例也
+    行间一致。
+    缺字/坏字形两模式都留空占位同档前进（不渲染 tofu，也不错位）；
+    全缺字返回 None。重复字符各自渲染归位（RenderBundle 的 dict 会
+    去重，预览不能丢字）。极端墨迹超挂（>上空/下空）裁边不毁条。
     以文件对象打开，理由同 render_bundle。
     """
     with open(path, "rb") as fh:
         face = freetype.Face(fh, face_index)
         enc = _encoder_for(face, fh, face_index)
         face.set_pixel_sizes(0, px)
-        asc, desc = _baseline_metrics(face.size, px)
         pad = 4
-        h = asc + desc + pad * 2
+        asc = round(px * _ASC_EM)
+        h = asc + round(px * _DESC_EM) + pad * 2
         slots: list[tuple[np.ndarray, int, int]] = []
         x = float(pad)
         for ch in text:
             idx = enc.index(face, ch)
             if idx == 0:
-                # 缺字跳过不前进；cmap 也没有的空白字符按比例兜底出词距
-                if ch.isspace():
-                    x += px * _SPACE_ADV
+                x += _cell_advance(ch, px)      # 缺字留空占位，不错位
                 continue
             try:
                 face.load_glyph(idx, freetype.FT_LOAD_RENDER
                                 | freetype.FT_LOAD_TARGET_NORMAL)
             except Exception:
-                continue                      # 坏字形：跳过不前进，不毁整条
+                x += _cell_advance(ch, px)      # 坏字形同样留空，不毁整条
+                continue
             g = face.glyph
             if g.bitmap.width and g.bitmap.rows:
                 arr = np.frombuffer(bytes(g.bitmap.buffer), dtype=np.uint8)
                 arr = arr.reshape(g.bitmap.rows, g.bitmap.width)
                 slots.append((arr, round(x) + g.bitmap_left,
                               pad + asc - g.bitmap_top))
-            x += g.advance.x / 64
+            x += _cell_advance(ch, px) if mono_cells else g.advance.x / 64
         if not slots:
             return None
         left, right = _strip_extent(slots, x, pad)
@@ -293,8 +305,4 @@ def render_text_strip(path: Path, face_index: int, text: str,
                 region = canvas[y0:y1, x0:x1]
                 np.maximum(region, arr[y0 - gy:y1 - gy, x0 - gx:x1 - gx],
                            out=region)
-        # 裁上下空白到墨迹 bbox（留 2px 余量）：显示按条高缩放，不裁则
-        # ascender/descender 空白让字形显示偏小；条内相对比例不受影响
-        rows = np.where(canvas.any(axis=1))[0]
-        canvas = canvas[max(0, rows[0] - 2):rows[-1] + 3, :]
         return canvas

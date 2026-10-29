@@ -23,6 +23,7 @@ from qfluentwidgets import PrimaryPushButton
 from qfluentwidgets import PushButton
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import SegmentedWidget
+from qfluentwidgets import SwitchButton
 from qfluentwidgets import TransparentToolButton
 from qfluentwidgets import setCustomStyleSheet
 from qfluentwidgets import setFont
@@ -132,6 +133,17 @@ class SubsPage(QWidget):
         self.seg_dir.setCurrentItem("t2s")
         pl.addWidget(_fld("孪生检测方向", self.seg_dir))
         ph.addWidget(flow_wrap, 1)
+        # 强制等宽（settings 键 preview_mono，两页同键互通）：预览统一格宽
+        # 渲染，多字体行逐字对位；默认关（自然字距）。qfw SwitchButton 的
+        # 自带文本是 On/Off 态字（toggle 即覆写 setText），说明文字用 _fld
+        # 标签对，开关只留指示器
+        self.sw_mono = SwitchButton(self)
+        self.sw_mono.setOnText("")
+        self.sw_mono.setOffText("")
+        self.sw_mono.setChecked(self.settings.get("preview_mono"))
+        install_tip(self.sw_mono, "统一格宽渲染预览（全角 1em/半角 0.5em），多字体行逐字对位")
+        self.sw_mono.checkedChanged.connect(self._on_mono_toggled)
+        ph.addWidget(_fld("强制等宽", self.sw_mono), 0, Qt.AlignVCenter)
         # 可键入 + 下拉最近 10 条历史（与字体库预览页共享，回车记一条）
         self.preview_edit = PreviewInput(self.settings)
         ph.addWidget(self.preview_edit, 0, Qt.AlignVCenter)
@@ -185,6 +197,7 @@ class SubsPage(QWidget):
         self.worker.result.connect(self._on_result)
         self.worker.failed.connect(self._on_failed)
         self.preview_edit.textChanged.connect(self._on_preview_text)
+        self.settings.valueChanged.connect(self._on_mono_setting)
         self._preview_debounce = QTimer(self)
         self._preview_debounce.setSingleShot(True)
         self._preview_debounce.setInterval(300)
@@ -526,6 +539,18 @@ class SubsPage(QWidget):
         # 预览文字变化：各卡预览条就地换文字重渲（tile 缓存键含文字，
         # 重渲走 LRU 命中）
         self._preview_debounce.start()
+
+    def _on_mono_toggled(self, on: bool):
+        # 只落设置；本页与他页的重渲统一走 valueChanged 广播
+        # （_on_mono_setting），两页口径一个来源
+        self.settings.set("preview_mono", bool(on))
+
+    def _on_mono_setting(self, key, value):
+        if key != "preview_mono":
+            return
+        self.sw_mono.setChecked(value)      # 他页翻转时本页开关跟上
+        for fc in self._cards_ui.values():
+            fc.rerender_previews()
 
     def _card(self, norm):
         return next((c for c in self.vm.cards if c.norm_name == norm), None)

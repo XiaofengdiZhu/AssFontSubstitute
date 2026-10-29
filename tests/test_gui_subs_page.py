@@ -967,7 +967,8 @@ def test_card_preview_no_shrink_loop(qapp, tmp_path, monkeypatch):
     page = _make_page(qapp, tmp_path, monkeypatch)
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
     for e in (ent_a, ent_b):                # 建卡前预置条带缓存：构造期
-        page._pvm.put_tiles((e.fingerprint, e.display_name), _solid_strip())
+        page._pvm.put_tiles((e.fingerprint, e.display_name, False),
+                            _solid_strip())
     _usage, _card, norm = _feed_replace_card(page, ent_a, ent_b)
     page.show()
     page.resize(1100, 800)
@@ -982,4 +983,24 @@ def test_card_preview_no_shrink_loop(qapp, tmp_path, monkeypatch):
             assert b.width() == ws[b._entity.fingerprint]
             assert not b.pixmap().isNull()
     page.hide()
+    page.deleteLater()
+
+
+def test_mono_switch_broadcast_rerenders_bars(qapp, tmp_path, monkeypatch):
+    """强制等宽开关（两页同键 preview_mono，默认关）：翻转落设置；设置
+    广播回页面 → 各卡预览条按新口径清贴图重派（派发参数带 mono）。"""
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, _card, norm = _feed_replace_card(page, ent_a, ent_b)
+    fc = page._cards_ui[norm]
+    assert not page.sw_mono.isChecked()             # 默认关（自然字距）
+    bar = next(iter(fc._bar_by_key.values()))
+    n = len(page.worker.submits)
+    page.sw_mono.setChecked(True)
+    assert page.settings.get("preview_mono") is True
+    assert bar._mono is True                        # 广播后按新口径重派
+    assert len(page.worker.submits) > n
+    assert page.worker.submits[-1][2][-1] is True   # 派发参数带 mono
+    page.sw_mono.setChecked(False)
+    assert page.settings.get("preview_mono") is False
     page.deleteLater()

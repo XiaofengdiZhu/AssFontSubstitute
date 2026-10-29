@@ -10,6 +10,7 @@ from qfluentwidgets import ComboBox
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import SearchLineEdit
+from qfluentwidgets import SwitchButton
 from qfluentwidgets import TransparentToggleToolButton
 from qfluentwidgets import setFont
 
@@ -47,6 +48,17 @@ class BrowsePage(ScrollArea):
         setFont(self.page_title, 20)   # qfw setFont：20px Normal 字重不变
         head.addWidget(self.page_title)
         head.addStretch(1)
+        # 强制等宽（settings 键 preview_mono，两页同键互通）：预览统一格宽
+        # 渲染，多字体行逐字对位；默认关（自然字距）。qfw SwitchButton 的
+        # 自带文本是 On/Off 态字（toggle 即覆写 setText），说明文字用 _fld
+        # 标签对，开关只留指示器
+        self.sw_mono = SwitchButton(self)
+        self.sw_mono.setOnText("")
+        self.sw_mono.setOffText("")
+        self.sw_mono.setChecked(self.settings.get("preview_mono"))
+        install_tip(self.sw_mono, "统一格宽渲染预览（全角 1em/半角 0.5em），多字体行逐字对位")
+        self.sw_mono.checkedChanged.connect(self._on_mono_toggled)
+        head.addWidget(_fld("强制等宽", self.sw_mono), 0, Qt.AlignVCenter)
         # 可键入 + 下拉最近 10 条历史（与字幕编辑页共享，回车记一条）
         self.preview_edit = PreviewInput(settings)
         self.preview_edit.setFixedWidth(340)
@@ -105,6 +117,7 @@ class BrowsePage(ScrollArea):
         self._debounce.timeout.connect(self._reload_list)
         self.name_edit.textChanged.connect(lambda _: self._debounce.start())
         self.preview_edit.textChanged.connect(self._on_preview_text)
+        self.settings.valueChanged.connect(self._on_mono_setting)
         self.worker.result.connect(self._on_result)
         self._lib_key: tuple | None = None  # 上次装载对应 快照失效键（jobs.lib_key）
         self.reload_library()
@@ -164,6 +177,17 @@ class BrowsePage(ScrollArea):
     def _on_cov_toggled(self, on: bool):
         self.pvm.require_text = self.preview_edit.text() if on else None
         self._reload_list()
+
+    def _on_mono_toggled(self, on: bool):
+        # 只落设置；本页与他页的预览重渲统一走 valueChanged 广播
+        # （_on_mono_setting），两页口径一个来源
+        self.settings.set("preview_mono", bool(on))
+
+    def _on_mono_setting(self, key, value):
+        if key != "preview_mono":
+            return
+        self.sw_mono.setChecked(value)     # 他页翻转时本页开关跟上
+        self._reload_list()                # 行重建=新 bar 按新口径渲染
 
     def reload_names(self):
         """界面语言变更：行展示名按语言链重挑（行模型即建即显，重建
