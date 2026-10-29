@@ -42,6 +42,7 @@ from ass_font_substitute.gui.subs_vm import SubsVM
 from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.widgets.font_card import FontCard
 from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+from ass_font_substitute.gui.widgets.pill import padded_badge
 from ass_font_substitute.gui.widgets.preview_input import PreviewInput
 from ass_font_substitute.gui.widgets.wheel_block import WheelBlock
 
@@ -266,7 +267,7 @@ class SubsPage(QWidget):
             rh.setSpacing(8)
             content = ""
             if f.error:
-                badge = InfoBadge.error("解析失败")
+                badge = padded_badge(InfoBadge.error, "解析失败")
                 rh.addWidget(badge, 0, Qt.AlignVCenter)
                 # tip 挂徽章本体：容器只吃自身窄缝 Enter，悬徽章不冒泡
                 install_tip(badge, f.error)
@@ -752,7 +753,7 @@ class _BadgeRow(QWidget):
                          (f"需替换 {c['replace']}", InfoBadge.warning),
                          (f"库中没有 {c['missing']}", InfoBadge.error),
                          (f"保留 {c['keep']}", InfoBadge.info)):
-            self._h.addWidget(mk(text))
+            self._h.addWidget(padded_badge(mk, text))
         self._h.addStretch(1)
 
 

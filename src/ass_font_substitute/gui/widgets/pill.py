@@ -8,8 +8,10 @@ from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QLabel
 from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtWidgets import QWidget
+from qfluentwidgets import InfoBadge
 from qfluentwidgets import isDarkTheme
 from qfluentwidgets import qconfig
+from qfluentwidgets import setCustomStyleSheet
 
 
 class PillLabel(QLabel):
@@ -45,6 +47,16 @@ class PillLabel(QLabel):
 
 def pill(text: str) -> PillLabel:
     return PillLabel(text)
+
+
+def padded_badge(mk, text: str) -> InfoBadge:
+    """彩色徽章（InfoBadge.success/warning/error/info）：出厂 QSS padding
+    1px 3px 偏紧，项目内统一放宽 2px（3px 5px，用户拍板 2026-10-29）。
+    setCustomStyleSheet 追加在基表后，同特异性后者胜。"""
+    b = mk(text)
+    qss = "InfoBadge{padding: 3px 5px;}"
+    setCustomStyleSheet(b, qss, qss)
+    return b
 
 
 class PillRow(QWidget):

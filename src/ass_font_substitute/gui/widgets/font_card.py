@@ -31,6 +31,7 @@ from qfluentwidgets import themeColor
 from ass_font_substitute.gui.subs_vm import KEEP
 from ass_font_substitute.gui.subs_vm import Card
 from ass_font_substitute.gui.widgets.pill import PillLabel
+from ass_font_substitute.gui.widgets.pill import padded_badge
 from ass_font_substitute.gui.widgets.pill import pill
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 
@@ -252,9 +253,9 @@ class FontCard(CardWidget):
             h.addWidget(_pill(_STATUS_TEXT["zero"]))
         elif kind == "twin":
             twin = "找到孪生简体" if self._direction == "t2s" else "找到孪生繁体"
-            h.addWidget(InfoBadge.success(twin))   # 好结果给绿（同页头徽章）
+            h.addWidget(padded_badge(InfoBadge.success, twin))   # 好结果给绿（同页头徽章）
         else:
-            h.addWidget(_BADGE_MAKER[kind](_STATUS_TEXT[kind]))
+            h.addWidget(padded_badge(_BADGE_MAKER[kind], _STATUS_TEXT[kind]))
         return head
 
     def _build_missing_strip(self) -> QFrame:
@@ -323,7 +324,7 @@ class FontCard(CardWidget):
         name_row.addWidget(BodyLabel(o.display_name))
         for b in o.badges:
             if b == "上次使用":                     # 记忆回放仍走主题徽章
-                name_row.addWidget(InfoBadge.info(b))
+                name_row.addWidget(padded_badge(InfoBadge.info, b))
         for m in o.meta:
             name_row.addWidget(_pill(m))            # 简繁/字重等：中性灰
         name_row.addStretch(1)
