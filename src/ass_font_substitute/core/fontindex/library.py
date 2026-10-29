@@ -149,14 +149,18 @@ class LibraryIndex:
             for (di, rel, fi, ps, ver, aliases, disp, family, nl, w, wd, it,
                  script, cat, cmap, fp, size, mtime)
             in best.values()]
+        # 别名查找索引：find_by_name 每调用全实体×全别名重跑 normalize 曾是
+        # 18k 实体库批量替换的秒级悬崖（matcher 每用量再触发多次全扫）
+        self._by_alias: dict[str, list[FontEntity]] = {}
+        for e in self._entities:
+            for a in e.aliases:
+                self._by_alias.setdefault(normalize_name(a), []).append(e)
 
     def entities(self) -> list[FontEntity]:
         return list(self._entities)
 
     def find_by_name(self, norm: str) -> list[FontEntity]:
-        n = normalize_name(norm)
-        return [e for e in self._entities
-                if any(normalize_name(a) == n for a in e.aliases)]
+        return list(self._by_alias.get(normalize_name(norm), ()))
 
     def stats(self) -> dict:
         sc = sum(1 for e in self._entities if e.script in ("简", "简繁"))
