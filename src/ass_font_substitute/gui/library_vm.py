@@ -49,15 +49,31 @@ class LibraryVM:
     def refresh(self, statuses: list[DirStatus], snapshot_stats: dict,
                 overlaps: list[str], offline_dirs: list[str],
                 dir_stats: dict | None = None) -> None:
-        by = {s.path: s for s in statuses}
+        """一次性全量灌入（测试用）；GUI 启动走 apply_snapshot→apply_detail
+        两段（探测不阻塞启动画面收幕）。"""
+        self.apply_snapshot(snapshot_stats, overlaps, offline_dirs)
+        self.apply_detail(statuses, dir_stats)
+
+    def apply_snapshot(self, snapshot_stats: dict, overlaps: list[str],
+                       offline_dirs: list[str]) -> None:
+        """聚合库快照就绪（启动画面收幕点）：总统计/重叠告警先上，打不
+        开的目录先定 offline；目录行 ok/stale 明细等 apply_detail 探测。"""
+        self.stats = snapshot_stats
+        self.overlaps = list(overlaps)
         offline_set = {str(Path(p)) for p in offline_dirs}
         for d in self.dirs:
-            if d.state == "indexing":
-                continue                        # 更新进行中不被探测结果覆盖
             if str(Path(d.path)) in offline_set:
                 d.state, d.added, d.changed = "offline", 0, 0
                 d.files, d.bad, d.skipped, d.fail = 0, 0, 0, 0
-                continue
+        self.failed_dirs = [d.path for d in self.dirs if d.state == "offline"]
+
+    def apply_detail(self, statuses: list[DirStatus],
+                     dir_stats: dict | None = None) -> None:
+        """逐目录探测结果 + 每目录库内统计：行状态/文件数/字体数落定。"""
+        by = {s.path: s for s in statuses}
+        for d in self.dirs:
+            if d.state == "indexing":
+                continue                        # 更新进行中不被探测结果覆盖
             s = by.get(d.path)
             if s is None or s.state in ("missing", "offline"):
                 d.state, d.added, d.changed = "offline", 0, 0
@@ -71,8 +87,6 @@ class LibraryVM:
                 d.fonts, d.sc, d.tc = st["fonts"], st["sc"], st["tc"]
                 d.skipped = st.get("skipped", 0)
             d.fail = d.bad + d.skipped
-        self.stats = snapshot_stats
-        self.overlaps = list(overlaps)
         self.failed_dirs = [d.path for d in self.dirs if d.state == "offline"]
 
     def mark_indexing(self, path: str) -> None:

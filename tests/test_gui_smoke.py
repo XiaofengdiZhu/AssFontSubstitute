@@ -96,10 +96,10 @@ def test_load_completed_signal_fires_once(qapp, tmp_path):
     got2 = []
     lp2.loadCompleted.connect(lambda: got2.append(1))
     assert got2 == []                        # 在途未就绪
-    w2.result.emit("lib", (_Snap, [], {}))
+    w2.result.emit("lib", _Snap)
     qapp.processEvents()
     assert got2 == [1]
-    w2.result.emit("lib", (_Snap, [], {}))
+    w2.result.emit("lib", _Snap)
     qapp.processEvents()
     assert got2 == [1]                       # 只发一次
 
@@ -402,8 +402,8 @@ def _update_dirs_job(ctx, dirs):
 
 
 def _ensure_lib_job(ctx, dirs):
-    # 复用页面真实任务：probe 已随 lib 在 worker 线程完成，载荷为
-    # (snapshot, [DirStatus...])（payload 形状与生产 _lib_job 保持一致）
+    # 复用页面真实任务：_lib_job 现只做聚合库快照，载荷为 snapshot
+    # （payload 形状与生产保持一致；目录行明细走收幕后补的 libdetail 任务）
     from ass_font_substitute.gui.pages.library_page import _lib_job
     return _lib_job(ctx, dirs)
 
@@ -449,7 +449,12 @@ def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
             break
     assert page.vm.stats.get("fonts") == 1
     row = page.vm.dirs[0]
-    # 目录行统计：文件=盘上全部支持后缀（含坏文件）；失败/重复=bad 表
+    # 目录行统计：文件=盘上全部支持后缀（含坏文件）；失败/重复=bad 表。
+    # 行明细在收幕后的 libdetail 任务里落定，再等它
+    for _ in range(150):
+        QTest.qWait(20)
+        if row.state == "ok":
+            break
     assert (row.files, row.fonts, row.fail) == (2, 1, 1)
     # 失败清单卡动态计数（PushSettingCard 无 content() 读口，走 contentLabel）
     assert "坏文件 1" in page.failures_card.contentLabel.text()

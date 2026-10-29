@@ -413,8 +413,8 @@ class LibraryPage(ScrollArea):
         # 实体集已变：订阅页（browse 清单 / subs 重分类）随之刷新
         self.libraryChanged.emit()
 
-    # ---- 状态刷新（lib 构建与逐目录探测在 worker 线程同一任务内串行完成，
-    #      UI 线程只消费纯数据，无先 probe 后 lib 的顺序竞态）----
+    # ---- 状态刷新（lib 快照任务收幕即返；目录行明细由 libdetail 任务
+    #      收幕后补。两任务同在 worker 串行队列，UI 线程只消费纯数据）----
     def refresh_status(self):
         dirs = [d.path for d in self.vm.dirs]
         self._rebuild_dir_rows()
@@ -433,14 +433,20 @@ class LibraryPage(ScrollArea):
 
     def _on_result(self, tag, payload):
         if tag == "lib":
-            snap, statuses, dir_stats = payload
-            self.vm.refresh(statuses, snap.lib.stats(),
-                            snap.lib.dir_overlaps(), snap.offline_dirs,
-                            dir_stats)
+            snap = payload
+            self.vm.apply_snapshot(snap.lib.stats(),
+                                   snap.lib.dir_overlaps(), snap.offline_dirs)
             self._apply_stats(snap.lib.stats())
             self._rebuild_dir_rows()
             self._warn_overlaps()
             self._report_loaded()
+            # 收幕后补目录行明细（探测含全盘 walk，大库 1s+，不挡启动画面）
+            self.worker.submit("libdetail", _libdetail_job,
+                               [d.path for d in self.vm.dirs])
+        elif tag == "libdetail":
+            statuses, dir_stats = payload
+            self.vm.apply_detail(statuses, dir_stats)
+            self._rebuild_dir_rows()        # 行状态/字体数落定，不重发告警
         elif tag == "failures":
             if self._pending_failures is not None:
                 show, self._pending_failures = self._pending_failures, None
@@ -455,6 +461,8 @@ class LibraryPage(ScrollArea):
         elif tag == "failures":
             self._pending_failures = None      # 允许再次点开失败清单
             InfoBar.error("失败清单读取失败", err, parent=self)
+        elif tag == "libdetail":
+            InfoBar.warning("目录状态探测失败", err, parent=self)
         elif isinstance(tag, str) and tag.startswith("retry:"):
             InfoBar.error("重试失败", err, parent=self)
 
@@ -725,10 +733,17 @@ def _dir_library_stats(snap, dirs: list[str]) -> dict:
 
 
 def _lib_job(ctx, dirs):
-    """worker 线程：聚合库快照 + 逐目录只读探测（probe 含逐文件 stat，
-    移出 UI 线程；与 lib 构建同任务串行，无顺序竞态）。"""
+    """worker 线程：只做聚合库快照（启动画面收幕只等它）。逐目录探测
+    拆到 _libdetail_job 收幕后补——probe 全盘 walk+逐文件 stat，大库
+    1s+，只喂目录行状态标记，不值得挡住收幕。"""
+    return ensure_library(ctx, dirs)
+
+
+def _libdetail_job(ctx, dirs):
+    """worker 线程：逐目录只读探测（probe 含逐文件 stat）+ 每目录库内
+    统计。ensure_library 命中 ctx 缓存（_lib_job 刚建好），零重复开销。"""
     snap = ensure_library(ctx, dirs)
-    return snap, [probe_dir_status(d) for d in dirs], _dir_library_stats(snap, dirs)
+    return [probe_dir_status(d) for d in dirs], _dir_library_stats(snap, dirs)
 
 
 def _failures_job(ctx, dirs):
