@@ -109,7 +109,12 @@ class PreviewVM:
         target = 400 if self.weight is None else self.weight
 
         def sel_key(e: FontEntity):
-            return abs(e.weight - target), e.italic, e.width
+            # 无字重筛选：非斜体优先、字重近锚点（Regular 口径拍板
+            # 2026-10-30，与 subs_vm._orig_face_key 同序——字幕场景斜体
+            # 必有正体可退）；有筛选（用户点名 W 桶）：字重优先，桶内
+            # 面全属目标字重，斜态才成区分项
+            it = e.italic if self.weight is None else False
+            return it, abs(e.weight - target), e.width
 
         rows: list[FamilyRow] = []
         for faces in groups.values():

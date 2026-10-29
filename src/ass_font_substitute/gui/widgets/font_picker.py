@@ -45,7 +45,8 @@ class FontPickerDialog(MessageBoxBase):
         # 选择对话框行名不可划选（用户拍板「除外」2026-10-29）：名是
         # picker 行宽最大的点击目标，可选化会吃掉单击选中/双击接受
         self.rec_list = FontListWidget(worker, self.pvm, self._preview,
-                                       name_selectable=False)
+                                       name_selectable=False,
+                                       face_controls=False)
         self.rec_list.entity_picked.connect(self._pick)
         self.rec_list.detail_requested.connect(self._accept_pick)
         self.rec_list.setFixedHeight(120)
@@ -55,7 +56,9 @@ class FontPickerDialog(MessageBoxBase):
         # 预览工具组 + 筛选行：字体库预览页同款共享控件（font_filter）；
         # 文字/搜索变化经 300ms 防抖重载（照预览页口径），开关与下拉即时
         self.tools = PreviewTools(settings, self.pvm)
-        self.bar = FontFilterBar(self.pvm)
+        # 字重筛选/行内字重斜体切换都不建（拍板 2026-10-30：工具不改
+        # 字重斜体，行面由 sel_key 定——非斜体+400 最近）
+        self.bar = FontFilterBar(self.pvm, weight_filter=False)
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
         self._debounce.setInterval(300)
@@ -68,7 +71,8 @@ class FontPickerDialog(MessageBoxBase):
         self.bar.filtersChanged.connect(self._reload_all)
 
         self.all_list = FontListWidget(worker, self.pvm, self._preview,
-                                       name_selectable=False)
+                                       name_selectable=False,
+                                       face_controls=False)
         self.all_list.entity_picked.connect(self._pick)
         self.all_list.detail_requested.connect(self._accept_pick)
         self.all_list.setMinimumHeight(120)

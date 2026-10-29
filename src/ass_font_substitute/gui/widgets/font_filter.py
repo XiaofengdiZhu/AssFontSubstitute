@@ -118,7 +118,7 @@ class FontFilterBar(QWidget):
 
     filtersChanged = Signal()
 
-    def __init__(self, pvm, parent=None):
+    def __init__(self, pvm, parent=None, weight_filter: bool = True):
         super().__init__(parent)
         self.pvm = pvm
         h = QHBoxLayout(self)
@@ -126,8 +126,8 @@ class FontFilterBar(QWidget):
         h.setSpacing(8)
         self.name_edit = SearchLineEdit()
         self.name_edit.setPlaceholderText("搜索字体名")
-        # 下限 160：对话框（720 定宽）里留给三个带标签下拉与计数的空间
-        # 比整页紧，200 会溢出；预览页宽到 400 封顶才生效，160 不可见
+        # 下限 160：对话框（720 定宽）里留给带标签下拉与计数的空间比整页
+        # 紧；预览页宽到 400 封顶才生效，160 不可见
         self.name_edit.setMinimumWidth(160)
         self.name_edit.setMaximumWidth(400)
         self.cb_cat, self.cb_weight = ComboBox(), ComboBox()
@@ -142,7 +142,10 @@ class FontFilterBar(QWidget):
         h.addWidget(self.name_edit, 1)
         h.addWidget(_fld("分类", self.cb_cat))
         h.addWidget(_fld("简繁", self.cb_script))
-        h.addWidget(_fld("字重", self.cb_weight))
+        # 字重下拉可选（拍板 2026-10-30：选择对话框不建——工具不改字重
+        # 斜体，库页照旧）；cb 仍创建并参与 fill，隐藏档恒「全部」
+        if weight_filter:
+            h.addWidget(_fld("字重", self.cb_weight))
         h.addStretch(1)
         h.addWidget(self.count_label, 0, Qt.AlignVCenter)
         self.fill()

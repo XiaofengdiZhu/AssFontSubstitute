@@ -500,6 +500,27 @@ def test_wheel_mid_jump_animation_continues_from_reality(qapp):
     assert v_mid > 0                        # 护栏：确已停在动画中段
 
 
+def test_face_controls_off_hides_switchers(qapp):
+    # face_controls=False（选择对话框档）：多 face 行也不建字重分段/
+    # 斜体钮，预览条用 row.selected（pvm sel_key 选出的面）
+    from ass_font_substitute.gui.preview_vm import FamilyRow
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+    fl = FontListWidget(_FakeWorker(), PreviewVM(), lambda: "永",
+                        face_controls=False)
+    fl.resize(400, 600)
+    fl.show()
+    qapp.processEvents()
+    faces = [_ent("400", "A"), _ent("700", "A", weight=700),
+             _ent("400i", "A", weight=400, italic=True)]
+    fl.set_rows([FamilyRow("A", faces, faces[0])])
+    qapp.processEvents()
+    w = fl.itemWidget(fl.item(0))
+    assert w._seg is None and w._it_btn is None
+    assert w.bar._entity.fingerprint == "400"
+
+
 def test_row_segmented_switches_selected_face(qapp):
     # 多 face 行：字重 SegmentedWidget / 斜体 ToggleToolButton 点击就地切
     # row.selected，预览条换 face 重渲（tag 随 fingerprint 换），元信息与

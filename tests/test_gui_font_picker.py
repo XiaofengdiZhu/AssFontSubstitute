@@ -28,12 +28,12 @@ class _FakeWorker(QObject):
         self.submits.append((tag, fn, args, kw))
 
 
-def _ent(fp, name, category="黑", chars="永宇"):
+def _ent(fp, name, category="黑", chars="永宇", weight=400, italic=False):
     from ass_font_substitute.core.fontindex.library import FontEntity
     from ass_font_substitute.core.models import CmapRanges
     return FontEntity(fingerprint=fp, display_name=name, aliases=(name,),
-                      psname=name, version=(1,), weight=400, width=5,
-                      italic=False, script="简", category=category,
+                      psname=name, version=(1,), weight=weight, width=5,
+                      italic=italic, script="简", category=category,
                       cmap=CmapRanges.from_chars([ord(c) for c in chars]),
                       dir_path="d", rel_path="r.ttf", face_index=0)
 
@@ -193,4 +193,38 @@ def test_picker_empty_library_hides_tools_and_bar(qapp, tmp_path):
     assert dlg.all_list.isHidden()
     assert dlg.hint.isHidden()
     assert not dlg.empty_label.isHidden()
+    dlg.deleteLater()
+
+
+def test_picker_hides_weight_filter_and_face_controls(qapp, tmp_path):
+    # 拍板 2026-10-30：工具不改字重斜体——筛选行不建字重下拉，行内不建
+    # 字重分段/斜体钮；多 face 行只看 sel_key 选出的面（非斜体+400 最近）
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+
+    s = Settings(tmp_path / "s.json")
+    w = _FakeWorker()
+    ents = [_ent("fp300", "甲字体", weight=300),
+            _ent("fp400", "甲字体"),
+            _ent("fp400i", "甲字体", italic=True),
+            _ent("fp2", "乙字体")]
+    host = QWidget()
+    host.resize(780, 560)
+    dlg = FontPickerDialog(s, w, ents, parent=host)
+    assert dlg.bar.cb_weight.parent() is None   # 字重下拉未建 _fld
+    assert dlg.all_list._face_controls is False
+    assert dlg.rec_list._face_controls is False
+    # 甲字体行：3 face 合一行，selected = 非斜体 400
+    row = next(r for r in dlg.all_list._rows if r.display_name == "甲字体")
+    assert row.selected.fingerprint == "fp400"
+    assert len(row.faces) == 3
+    # 钉序：无筛选档斜体优先于字重（正体 300 胜斜体 400，与 subs_vm
+    # _orig_face_key 同序）——pvm 层直接验证，不起第二个对话框
+    # （同进程双对话框会弄脏后续测试的 SVG 绘制态，offscreen 必崩）
+    dlg.pvm.set_entities([_ent("up300", "丙字体", weight=300),
+                          _ent("it400", "丙字体", italic=True)])
+    rows = dlg.pvm.filtered()
+    assert len(rows) == 1 and rows[0].selected.fingerprint == "up300"
     dlg.deleteLater()

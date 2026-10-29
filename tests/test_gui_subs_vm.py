@@ -59,10 +59,11 @@ def test_error_file_excluded_from_merge(vm):
 
 # ---- 分类层（Task 12）----
 
-def _ent(fp, name, chars, category="黑", script="简", weight=400):
+def _ent(fp, name, chars, category="黑", script="简", weight=400,
+         italic=False):
     return FontEntity(fingerprint=fp, display_name=name, aliases=(name,),
                       psname=name, version=(1,), weight=weight, width=5,
-                      italic=False, script=script, category=category,
+                      italic=italic, script=script, category=category,
                       cmap=CmapRanges.from_chars([ord(c) for c in chars]),
                       dir_path="d", rel_path=f"{fp}.ttf", face_index=0)
 
@@ -117,6 +118,13 @@ def test_make_card_dedupes_original_rows(vm_full):
     assert "原字体" not in demoted.badges
     vm.apply_default_check(card)
     assert card.checked_key == "fp-hei" and card.replaced is False
+    # 非斜体优先（同覆盖同字重，斜体版让位）
+    ent_ital = _ent("fp-hei-ital", "黑体", FULL, italic=True)
+    vm.set_entities([ent_ital, ents[0]])
+    card3 = vm.make_card(_usage("黑体", FULL),
+                         UsageClass("keep", [ent_ital, ents[0]], 1.0, []))
+    assert [o.key for o in card3.options
+            if "原字体" in o.badges] == ["fp-hei"]
     # 覆盖率最高者持徽标（非先入序）
     ent_low = _ent("fp-low", "黑体", "永")
     vm.set_entities([ent_low, ents[0]])

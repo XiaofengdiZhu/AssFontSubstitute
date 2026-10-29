@@ -184,12 +184,12 @@ class SubsVM:
         if len(origs) > 1:
             # 同名多实体（库中同族多文件，如 W300/W400 两版本别名同名）：
             # 「原」行只留一个——覆盖率最高者持徽标与 original 语义
-            # （勾=不改写名），其余降为普通推荐行（仍可选）。覆盖率平局
-            # 取 |weight−400| 最小者：ASS 未设字重时渲染器按 400 选面
-            # （libass ass_parse.c / VSFilter GDI FW_NORMAL），预览与
-            # 相似度基准该跟实际渲染用面一致；再平局取先
-            best = max(origs, key=lambda o: (o.coverage or 0.0,
-                                             -abs(o.entity.weight - 400)))
+            # （勾=不改写名），其余降为普通推荐行（仍可选）。平局取
+            # 非斜体 + |weight−400| 最小：工具不改字重斜体（拍板
+            # 2026-10-30，有斜体必有正体），预览/缺字条/相似度基准统一
+            # 按 Regular 口径取面；再平局取先
+            best = max(origs, key=lambda o: self._orig_face_key(
+                o.entity, usage.chars, cov=o.coverage))
             for o in origs:
                 if o is not best:
                     o.badges.remove("原字体")
@@ -224,16 +224,27 @@ class SubsVM:
         elif cls.kind == "twin":
             # 缺字条=**原字体**未覆盖的字（用户纠偏 2026-10-29：这行历来
             # 是原字体缺字口径，孪生体的未覆盖在指标行另说）。cls.missing_chars
-            # 是孪生体的，此处不用；原字体实体按名取（孪生卡「原字体」行
-            # 同源 _by_norm），原字体不在库（不在库→孪生路径）则无原字体
-            # 覆盖可言，不显缺字条
-            origs = self._by_norm.get(usage.norm_name) or []
-            if origs:
-                _cov, missing = coverage_detail(origs[0].cmap, usage.chars)
+            # 是孪生体的，此处不用；原字体实体按名取，取面口径与「原」行
+            # 去重一致（_orig_face_key），原字体不在库（不在库→孪生路径）
+            # 则无原字体覆盖可言，不显缺字条
+            orig_ents = self._by_norm.get(usage.norm_name) or []
+            if orig_ents:
+                ent = max(orig_ents,
+                          key=lambda e: self._orig_face_key(e, usage.chars))
+                _cov, missing = coverage_detail(ent.cmap, usage.chars)
                 card.n_missing = len(missing)
                 card.missing = list(missing)
         card.min_sim = float(self._settings.get("min_sim"))
         return card
+
+    def _orig_face_key(self, e: FontEntity, chars: set[str], cov=None):
+        """同名多实体取面键：覆盖率 > 非斜体 > 字重近 400 > 先入序。
+        工具不改字重斜体（拍板 2026-10-30），预览与缺字条统一 Regular
+        口径（preview_vm.sel_key 无筛选档同序）。cov 传预计算覆盖率
+        （make_card 去重路径 OptionItem 上现成）。"""
+        if cov is None:
+            cov, _ = coverage_detail(e.cmap, chars)
+        return cov, not e.italic, -abs(e.weight - 400)
 
     def _dname(self, e: FontEntity) -> str:
         """选项展示名：按界面语言链从 name 表语言记录现挑。"""

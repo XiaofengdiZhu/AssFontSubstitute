@@ -144,13 +144,16 @@ class FontListWidget(QListWidget):
     #                                         对话框转作快捷接受（选定+关窗）
 
     def __init__(self, worker, pvm, preview_text_fn, parent=None,
-                 name_selectable: bool = True):
+                 name_selectable: bool = True, face_controls: bool = True):
         super().__init__(parent)
         self._worker, self._pvm = worker, pvm
         self._preview_text_fn = preview_text_fn   # () -> str；返回空串则用字体名
         # 行名可划选（用户需求 2026-10-29）；选择对话框除外——名是
         # picker 行宽最大的点击目标，可选化会吃掉单击选中/双击接受
         self._name_selectable = name_selectable
+        # 字重分段/斜体钮（拍板 2026-10-30 选择对话框关闭：工具不改
+        # 字重斜体，行面由 sel_key 定——非斜体+400 最近）
+        self._face_controls = face_controls
         self._rows: list[FontEntity] = []
         self._materialized: set[int] = set()      # 已物化行号（控件所有权在 Qt）
         self._row_h = ROW_H                       # 物化首行后按内容校准
@@ -261,7 +264,8 @@ class FontListWidget(QListWidget):
         return _RowWidget(self._worker, self._pvm, row,
                           self._preview_text_fn() or row.display_name,
                           lambda e: f"plist:{e.fingerprint}:{id(self)}",
-                          name_selectable=self._name_selectable)
+                          name_selectable=self._name_selectable,
+                          face_controls=self._face_controls)
 
     def _visible_range(self) -> tuple[int, int]:
         """可视首末行（闭区间）：滚动条 value 按实测行距换算。
@@ -342,10 +346,12 @@ class _RowWidget(QWidget):
     与斜体钮自行消费鼠标，不会触发列表点击。"""
 
     def __init__(self, worker, pvm, row: FamilyRow, text,
-                 tag_for, name_selectable: bool = True):
+                 tag_for, name_selectable: bool = True,
+                 face_controls: bool = True):
         super().__init__()
         self._worker, self._pvm, self._row = worker, pvm, row
         self._text, self._tag_for = text, tag_for
+        self._face_controls = face_controls
         self._seg: SegmentedWidget | None = None
         self._it_btn: TransparentToggleToolButton | None = None
         v = QVBoxLayout(self)
@@ -372,7 +378,9 @@ class _RowWidget(QWidget):
 
     def _build_controls(self, top: QHBoxLayout):
         row = self._row
-        if len(row.faces) < 2:
+        # face_controls=False（选择对话框）：不建字重分段/斜体钮，多 face
+        # 行只看 sel_key 选出的面（非斜体+400 最近）
+        if not self._face_controls or len(row.faces) < 2:
             return
         # 分段键 = 精确字重（不取整）：Semilight 350 折进 W300 曾把
         # Light/Semilight 两 face 折成一段（真库微软雅黑实测）。

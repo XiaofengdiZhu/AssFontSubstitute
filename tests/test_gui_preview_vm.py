@@ -143,12 +143,14 @@ def test_filter_drives_selected_face():
     assert vm.filtered()[0].selected.fingerprint == "1"
 
 
-def test_selected_prefers_nearest_400_even_italic():
-    # 无 400 直立 face 时斜体 400 胜 700 直立（字重距离优先于斜态）
+def test_selected_prefers_upright_over_closer_weight():
+    # 拍板 2026-10-30（无筛选档非斜体优先，字重其次——预览统一
+    # Regular 口径，正体比近字重斜面更贴 Regular 观感）：
+    # 斜体 400 输 700 直立
     vm = PreviewVM()
     vm.set_entities([_ent("1", "A", weight=400, italic=True),
                      _ent("2", "A", weight=700)])
-    assert vm.filtered()[0].selected.fingerprint == "1"
+    assert vm.filtered()[0].selected.fingerprint == "2"
 
 
 def test_as_rows_keeps_faces_separate():
