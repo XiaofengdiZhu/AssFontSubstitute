@@ -135,6 +135,21 @@ class RenderBundle:
     available: frozenset[str]
 
 
+def _gray_bitmap(bm) -> np.ndarray | None:
+    """位图→灰度数组；仅收 8-bit gray（MONO 1bpp 的 buffer 按 pitch 对齐
+    密排，reshape rows×width 必越界——嵌入点阵 strike 的字体曾在 render
+    侧整字体/整条失败）。异常形状一律 None=该字留空降级。"""
+    if bm.width == 0 or bm.rows == 0:
+        return None
+    arr = np.frombuffer(bytes(bm.buffer), dtype=np.uint8)
+    if arr.size != bm.rows * bm.width:
+        return None
+    try:
+        return arr.reshape(bm.rows, bm.width)
+    except ValueError:
+        return None
+
+
 def _render_char(face, enc: _Encoder, ch: str, px: int) -> np.ndarray | None:
     face.set_pixel_sizes(0, px)
     idx = enc.index(face, ch)
@@ -145,11 +160,8 @@ def _render_char(face, enc: _Encoder, ch: str, px: int) -> np.ndarray | None:
                         | freetype.FT_LOAD_TARGET_NORMAL)
     except Exception:
         return None
-    bm = face.glyph.bitmap
-    if bm.width == 0 or bm.rows == 0:
-        return None
-    arr = np.frombuffer(bytes(bm.buffer), dtype=np.uint8).reshape(bm.rows, bm.width)
-    if not arr.any():
+    arr = _gray_bitmap(face.glyph.bitmap)
+    if arr is None or not arr.any():
         return None
     return arr
 
@@ -288,9 +300,9 @@ def render_text_strip(path: Path, face_index: int, text: str,
                 x += _cell_advance(ch, px)      # 坏字形同样留空，不毁整条
                 continue
             g = face.glyph
-            if g.bitmap.width and g.bitmap.rows:
-                arr = np.frombuffer(bytes(g.bitmap.buffer), dtype=np.uint8)
-                arr = arr.reshape(g.bitmap.rows, g.bitmap.width)
+            arr = _gray_bitmap(g.bitmap) if (g.bitmap.width and g.bitmap.rows) \
+                else None
+            if arr is not None:
                 slots.append((arr, round(x) + g.bitmap_left,
                               pad + asc - g.bitmap_top))
             x += _cell_advance(ch, px) if mono_cells else g.advance.x / 64
