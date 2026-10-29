@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,13 +33,10 @@ def _expand_at(mapping: dict[str, str]) -> dict[str, str]:
     return m
 
 
-def _fn_pattern(name: str) -> re.Pattern:
-    return re.compile(r"(\\fn" + re.escape(name) + r")(?=[\\}])")
-
-
 def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
                  overwrite_src: bool = False) -> RewriteResult:
-    assert not (out and overwrite_src), "out 与 overwrite_src 互斥"
+    if out and overwrite_src:
+        raise ValueError("out 与 overwrite_src 互斥")
     src = Path(src)
     data = src.read_bytes()
     enc = detect_encoding(data)
@@ -49,6 +47,10 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
     section = ""
     formats: dict[str, list[str]] = {}
     changed: list[int] = []
+    # 预编译到行循环外（大文件 × 几百映射项时每 block×每项 re.compile
+    # 缓存查询百万级）
+    fn_res = [(re.compile(r"(\\fn" + re.escape(old) + r")(?=[\\}])"), new)
+              for old, new in m.items()]
 
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -75,12 +77,11 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
             continue
         if stripped.startswith(("Dialogue:", "Comment:")) and "events" in section:
             # 只在 {...} 块内替换 \fn（Comment 行的 \fn 也改写）
-            def fix_block(match: re.Match) -> str:
+            def fix_block(match: re.Match, _res=fn_res) -> str:
                 block = match.group(0)
-                new_block = block
-                for old, new in m.items():
-                    new_block = _fn_pattern(old).sub(r"\\fn" + new, new_block)
-                return new_block
+                for pat, new in _res:
+                    block = pat.sub(r"\\fn" + new, block)
+                return block
             new_line = re.sub(r"\{[^{}]*\}", fix_block, line)
             if new_line != line:
                 lines[i] = new_line
@@ -89,7 +90,8 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
     result_text = "".join(lines)
     result_bytes = result_text.encode(enc)
     if overwrite_src:
-        tmp = src.with_name(src.name + f".tmp{os.getpid()}")
+        tmp = src.with_name(src.name
+                            + f".tmp{os.getpid()}-{threading.get_ident()}")
         tmp.write_bytes(result_bytes)
         os.replace(tmp, src)
         return RewriteResult(src, changed)

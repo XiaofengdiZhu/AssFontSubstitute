@@ -172,8 +172,13 @@ class Settings(QObject):
     def save(self) -> None:
         with self._lock:
             f = self._file()
-            f.parent.mkdir(parents=True, exist_ok=True)
-            tmp = f.with_name(f.name + ".tmp")
-            tmp.write_text(json.dumps(self._data, ensure_ascii=False, indent=2),
-                           "utf-8")
-            os.replace(tmp, f)
+            try:
+                f.parent.mkdir(parents=True, exist_ok=True)
+                # tmp 带 pid：绿色软件无单实例守卫，双开实例互写同名 tmp
+                # 会交错产出损坏 JSON（下次启动回落默认=设置全丢）
+                tmp = f.with_name(f.name + f".tmp{os.getpid()}")
+                tmp.write_text(json.dumps(self._data, ensure_ascii=False,
+                                          indent=2), "utf-8")
+                os.replace(tmp, f)
+            except OSError:
+                return   # Data 只读/盘满：绝不冒进 GUI 槽（关窗路径无接手）

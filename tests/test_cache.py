@@ -42,6 +42,7 @@ def test_trim_and_clear(tmp_path):
         c.get_render(f"fp{i}", "v1", _bundle)
     assert c.render_bytes > 0
     c.trim(max_bytes=1)   # 强制淘汰
+    assert c.render_bytes == 0   # renders 真被清（pair_count 恒 0 无验证力）
     assert c.pair_count == 0
     c.clear_all()
 

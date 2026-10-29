@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 
 DDL = """
@@ -22,7 +23,7 @@ def _connect(db_path: Path) -> sqlite3.Connection:
 def record_decision(db_path: Path, norm_name: str, direction: str,
                     fingerprint: str | None, keep: bool = False):
     """记录/覆盖一条决定；键 = 规范化字体名 + 方向，只保留最近一次。"""
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn, conn:
         conn.execute("INSERT OR REPLACE INTO decisions VALUES (?,?,?,?,?)",
                      (norm_name, direction, fingerprint, int(keep), time.time()))
 

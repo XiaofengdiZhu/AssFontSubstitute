@@ -197,8 +197,10 @@ def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
     with open(path, "rb") as fh:
         face = freetype.Face(fh, face_index)
         enc = _encoder_for(face, fh, face_index)
-        # 反 tofu：cmap 缺字先剔除（F3），避免渲染落到 .notdef 方块
-        wanted = [ch for ch in chars if enc.index(face, ch) != 0]
+        # 反 tofu：cmap 缺字先剔除（F3），避免渲染落到 .notdef 方块；
+        # 重复字符去重（样例文本用户可编辑，重复字两遍全量重渲纯浪费）
+        wanted = list(dict.fromkeys(ch for ch in chars
+                                    if enc.index(face, ch) != 0))
         # pass 1: 基准尺寸墨迹高度中位数
         heights = {}
         for ch in wanted:

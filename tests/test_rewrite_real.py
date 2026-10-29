@@ -2,7 +2,7 @@ from pathlib import Path
 
 from ass_font_substitute.core.assparse.rewrite import rewrite_file
 
-REAL = next(Path("temp").glob("*.ass"), None)
+REAL = next((Path(__file__).resolve().parents[1] / "temp").glob("*.ass"), None)
 
 
 def test_real_subtitle_surgical(tmp_path):

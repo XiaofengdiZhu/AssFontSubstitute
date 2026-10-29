@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from dataclasses import dataclass
 from dataclasses import field
@@ -40,22 +41,29 @@ def probe_dir_status(dir_path: str) -> DirStatus:
         st = DirStatus(dir_path, "stale")
         st.total = st.added = len(disk)
         return st
+    conn = None
     try:
         conn = sqlite3.connect(dbf.resolve().as_uri() + "?mode=ro", uri=True)
         known = {r[0]: (r[1], r[2]) for r in
                  conn.execute("SELECT rel_path, size, mtime_ns FROM files")}
         bad = {r[0]: (r[1], r[2]) for r in
                conn.execute("SELECT rel_path, size, mtime_ns FROM bad")}
-        conn.close()
     except sqlite3.Error:
         return DirStatus(dir_path, "offline")
+    finally:
+        if conn is not None:
+            with contextlib.suppress(sqlite3.Error):
+                conn.close()
     st = DirStatus(dir_path, "ok", indexed_files=len(known))
     st.bad = len(bad)
     disk = scan_dir(d)
     st.total = len(disk)
     for p in disk:
         rel = p.relative_to(d).as_posix()
-        s = p.stat()
+        try:
+            s = p.stat()
+        except OSError:
+            continue   # 扫描与 stat 之间被删/盘掉线：跳过，别整任务失败卡「检查中」
         cur = (s.st_size, s.st_mtime_ns)
         if rel in known:
             if known[rel] != cur:

@@ -68,8 +68,7 @@ def tune(widget: QWidget) -> bool:
     sel = _selector(widget)
     if sel is None:
         return False
-    c = themeColor()
-    luma = 0.299 * c.redF() + 0.587 * c.greenF() + 0.114 * c.blueF()
+    luma = accent_luma()
     if luma >= _LUMA_DARK_TEXT:
         light = _qss(sel, "rgba(0, 0, 0, 0.87)", "rgba(0, 0, 0, 0.55)")
         dark = _qss(sel, "rgba(0, 0, 0, 0.9)", "rgba(0, 0, 0, 0.6)")

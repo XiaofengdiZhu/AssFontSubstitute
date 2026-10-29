@@ -89,7 +89,10 @@ class CmapRanges:
                 else:
                     # 单双字节都经码页解出：cp932 单字节 0xA1-0xDF 是半角
                     # 片假名（U+FF61 起），直取会错记成 U+00A1-U+00DF 拉丁
-                    # 区；cp950/gbk ≥0x80 单字节解不出 → 丢弃（造字区同）
+                    # 区；cp950/gbk ≥0x80 单字节解不出 → 丢弃（造字区同）；
+                    # 0x00-0x1F 控制码解出来也只虚增 total_chars，滤掉
+                    if code < 0x20:
+                        continue
                     b = bytes([code]) if code < 0x100 else code.to_bytes(2, "big")
                     with contextlib.suppress(UnicodeDecodeError):
                         cps.add(ord(b.decode(codec)))

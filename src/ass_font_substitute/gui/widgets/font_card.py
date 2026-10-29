@@ -36,6 +36,7 @@ from qfluentwidgets import InfoBar
 from qfluentwidgets import StrongBodyLabel
 from qfluentwidgets import TransparentPushButton
 from qfluentwidgets import TransparentToolButton
+from qfluentwidgets import isDarkTheme
 from qfluentwidgets import qconfig
 from qfluentwidgets import setCustomStyleSheet
 from qfluentwidgets import themeColor
@@ -140,7 +141,10 @@ class _TofuFrame(QFrame):
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
                             6, 6)
-        pen = QPen(QColor(198, 43, 28, 140), 1)
+        # 亮暗现取（paint 时取色免 retheme 钩子）：亮主题红在暗卡面对比塌
+        red = QColor("#ff99a4" if isDarkTheme() else "#c62b1c")
+        red.setAlpha(140)
+        pen = QPen(red, 1)
         pen.setDashPattern([4, 3])
         p.setPen(pen)
         p.drawPath(path)
@@ -156,6 +160,12 @@ class _ElideMixin:
     hint 与显示宽一致，布局零反馈。"""
 
     _full = ""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        # tooltip 统一 Fluent 泡：_relayout 动态 setToolTip 照常生效
+        # （过滤器装一次）；否则弹原生灰底泡
+        install_tip(self)
 
     def setFullText(self, t: str):
         if t == self._full:
@@ -442,7 +452,7 @@ class FontCard(CardWidget):
         name, light, dark = _KIND_STYLE.get(kind, _KIND_STYLE["zero"])
         if name is None:
             dot = BodyLabel("●")
-            dot.setStyleSheet(f"color: {light};")
+            dot.setStyleSheet(f"color: {dark if isDarkTheme() else light};")
             h.addWidget(dot)
         else:
             h.addWidget(IconWidget(getattr(FIF, name).colored(

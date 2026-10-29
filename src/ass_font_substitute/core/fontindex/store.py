@@ -347,7 +347,11 @@ def update_index(dir_path: Path, conn: sqlite3.Connection,
                 rel = p.relative_to(dir_path).as_posix()
                 # 解析前取 stat：若解析窗口内文件被外部覆写，记下的是旧 mtime，
                 # 下次必重检；解析后取会记到新 mtime，门误判「未变」→ 静默陈旧
-                st = p.stat()
+                try:
+                    st = p.stat()
+                except OSError:
+                    done -= 1   # 扫描与 stat 之间被删（清理/杀毒）：跳过，下轮 removed 收敛
+                    continue
                 try:
                     recs = parse_font_file(p)
                 except FontParseError as e:

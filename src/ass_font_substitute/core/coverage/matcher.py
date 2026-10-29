@@ -66,25 +66,26 @@ def classify_usage(usage: FontUsage, lib: LibraryIndex, threshold: float = COV_T
         twin = _first_adequate_twin(lib, usage, threshold, direction,
                                     entities=entities)
         if twin is not None:
-            tratio, tmissing = coverage_detail(twin.cmap, usage.chars)
-            return UsageClass("twin", [twin], tratio, tmissing, twin_hit=twin)
+            t, tratio, tmissing = twin
+            return UsageClass("twin", [t], tratio, tmissing, twin_hit=t)
         return UsageClass("replace", entities, ratio, missing)
     # 不在库 → 孪生检测
     twin = _first_adequate_twin(lib, usage, threshold, direction)
     if twin is not None:
-        tratio, tmissing = coverage_detail(twin.cmap, usage.chars)
-        return UsageClass("twin", [twin], tratio, tmissing, twin_hit=twin)
+        t, tratio, tmissing = twin
+        return UsageClass("twin", [t], tratio, tmissing, twin_hit=t)
     return UsageClass("missing")
 
 
 def _first_adequate_twin(lib: LibraryIndex, usage: FontUsage, threshold: float,
                          direction: str,
-                         entities: list[FontEntity] | None = None) -> FontEntity | None:
+                         entities: list[FontEntity] | None = None,
+                         ) -> tuple[FontEntity, float, list[str]] | None:
     """孪生查找名 = 字幕名转换优先，其后在库实体自身别名逐个转换。
     PostScript 名（纯 ASCII）OpenCC 转不动，但同实体别名常带中文名——
     如字幕写 DFHuaZongW5-B5，其别名 華康華綜體W5 转换后命中简版 华康华综体W5。
     entities 非空时排除这些自身指纹（别名原样查回自己不算孪生，自身覆盖
-    必然同样不达标）。"""
+    必然同样不达标）。返回 (实体, 覆盖率, 缺字)——classify 侧免二次全扫。"""
     exclude = {e.fingerprint for e in entities} if entities else set()
     seen: set[str] = set()
     names = [usage.norm_name]
@@ -98,7 +99,7 @@ def _first_adequate_twin(lib: LibraryIndex, usage: FontUsage, threshold: float,
         for t in lib.find_by_name(converted):
             if t.fingerprint in exclude:
                 continue
-            ratio, _ = coverage_detail(t.cmap, usage.chars)
+            ratio, missing = coverage_detail(t.cmap, usage.chars)
             if ratio >= threshold:
-                return t
+                return t, ratio, missing
     return None

@@ -172,8 +172,11 @@ class LibraryIndex:
         """嵌套/重叠目录告警：返回被其他目录包含的目录路径。"""
         out = []
         norm = [str(d.resolve()) for d in self.dirs]
-        for i, d in enumerate(norm):
-            for j, other in enumerate(norm):
-                if i != j and other != d and d.startswith(other.rstrip("\\/") + "\\"):
+        # casefold：传入不存在/异大小写路径时 resolve() 归一不了盘上大小写
+        low = [d.casefold() for d in norm]
+        for i, d in enumerate(low):
+            for j, other in enumerate(low):
+                if i != j and other != d \
+                        and d.startswith(other.rstrip("\\/") + "\\"):
                     out.append(f"{self.dirs[i]} 嵌套于 {self.dirs[j]}")
         return out

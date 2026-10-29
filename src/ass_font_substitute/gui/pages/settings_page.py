@@ -539,8 +539,11 @@ class SettingsPage(ScrollArea):
         self.suffix_edit.setText(text)
 
     def _save_suffix(self):
+        text = self.suffix_edit.text().strip()
+        if text == self.settings.get("save_suffix"):
+            return   # 未变不落盘（对齐 subs_page：focus-out 不重写全量设置）
         try:
-            self.settings.set("save_suffix", self.suffix_edit.text().strip())
+            self.settings.set("save_suffix", text)
         except ValueError:
             InfoBar.error("后缀无效", "必须以点开头且非空，如 .substituted.ass",
                           parent=self)
