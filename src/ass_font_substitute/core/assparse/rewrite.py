@@ -52,10 +52,12 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
     section = ""
     formats: dict[str, list[str]] = {}
     changed: list[int] = []
-    # 预编译到行循环外（大文件 × 几百映射项时每 block×每项 re.compile
-    # 缓存查询百万级）
-    fn_res = [(re.compile(r"(\\fn" + re.escape(old) + r")(?=[\\}])"), new)
-              for old, new in m.items()]
+    # 单遍交替正则（查表替换）：串行逐项 sub 会在「某映射值恰是另一映射
+    # 键」时链式误替（{SimSun→宋体, 宋体→思源} 把 {\fnSimSun} 写成思源）。
+    # 长键优先——正则交替取先中，短键是长键前缀时会截胡
+    alt = "|".join(re.escape(old)
+                   for old in sorted(m, key=len, reverse=True))
+    fn_re = re.compile(r"\\fn(" + alt + r")(?=[\\}])") if alt else None
 
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -81,13 +83,16 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
                     changed.append(i)
             continue
         if stripped.startswith(("Dialogue:", "Comment:")) and "events" in section:
-            # 只在 {...} 块内替换 \fn（Comment 行的 \fn 也改写）
-            def fix_block(match: re.Match, _res=fn_res) -> str:
-                block = match.group(0)
-                for pat, new in _res:
-                    block = pat.sub(r"\\fn" + new, block)
-                return block
-            new_line = re.sub(r"\{[^{}]*\}", fix_block, line)
+            # 只在 {...} 块内替换 \fn（Comment 行的 \fn 也改写）——外壳
+            # 限定块级，正文里的字面 \fn 片段不动
+            if fn_re is not None:
+                new_line = re.sub(
+                    r"\{[^{}]*\}",
+                    lambda b: fn_re.sub(lambda mo: r"\fn" + m[mo.group(1)],
+                                        b.group(0)),
+                    line)
+            else:
+                new_line = line
             if new_line != line:
                 lines[i] = new_line
                 changed.append(i)

@@ -48,6 +48,30 @@ def test_encoding_preserved(tmp_path):
         assert "\r\n" in text
 
 
+def test_no_chain_substitution_when_values_overlap_keys(tmp_path):
+    # 终审 🔴：映射值与键相交时逐项 sub 链式误替——
+    # {華康主體W5→SimSun, SimSun→思源黑体} 曾把 {\fn華康主體W5} 先替成
+    # SimSun 再被第二条吞成思源黑体
+    p = _mk(tmp_path)
+    out = tmp_path / "out.ass"
+    rewrite_file(p, {"華康主體W5": "SimSun", "SimSun": "思源黑体"}, out=out)
+    text = out.read_text("utf-8-sig")
+    assert "{\\fnSimSun}甲" in text            # 一步到位，不再被第二条吞
+    assert "Style: Main,SimSun,52" in text
+    assert "{\\fn思源黑体}丙" not in text
+
+
+def test_inline_fn_outside_block_untouched(tmp_path):
+    # 替换作用域=花括号块内：正文里的字面 \fn 片段（不在块内）不动
+    p = tmp_path / "in.ass"
+    p.write_bytes(ASS.encode("utf-8-sig").replace(
+        "不誤傷的中文字幕".encode(), "正文 \\fn華康主體W5} 片段的中文字幕".encode()))
+    out = tmp_path / "out.ass"
+    rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out)
+    text = out.read_text("utf-8-sig")
+    assert "正文 \\fn華康主體W5} 片段" in text
+
+
 def test_at_variant(tmp_path):
     _mk(tmp_path)
     out = tmp_path / "out.ass"
