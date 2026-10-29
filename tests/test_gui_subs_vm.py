@@ -208,6 +208,20 @@ def test_make_card_missing_and_zero(vm_full):
     assert c2.kind == "zero" and c2.status_text == "无对白用字"
 
 
+def test_record_all_skips_zero_cards(vm_full, tmp_path):
+    # 拍板（2026-10-30）：零用字卡不落决策记录——0 字必然 keep，记录
+    # 是无信息 no-op
+    vm, _ents = _vm_full(vm_full)
+    zero = vm.make_card(_usage("空用字体", ""), UsageClass("zero"))
+    zero.checked_key = KEEP
+    keep = vm.make_card(_usage("不存在体", FULL), UsageClass("missing"))
+    keep.checked_key = KEEP
+    vm.cards = [zero, keep]
+    vm.record_all()
+    assert latest_decision(vm.decisions_db, "空用字体", "t2s") is None
+    assert latest_decision(vm.decisions_db, "不存在体", "t2s") == (None, True)
+
+
 def test_candidate_rows_resorted_by_score(vm_full):
     # 行序（2026-10-28）：原字体恒第一；搜索候选按相似率+覆盖率综合分
     # 插位（add_candidates 不再尾缀，重排中段）

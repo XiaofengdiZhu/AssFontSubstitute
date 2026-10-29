@@ -441,8 +441,11 @@ class SubsVM:
 
     def record_all(self) -> None:
         """决定记忆：勾选实体 → fingerprint；KEEP → keep=True。
-        键 = norm_name + 当前方向。"""
+        键 = norm_name + 当前方向。零用字卡（n_chars==0）跳过——0 字
+        必然 keep，记录是无信息 no-op，只徒增 decisions.db 行数。"""
         for c in self.cards:
+            if not c.n_chars:
+                continue
             if c.checked_key == KEEP:
                 record_decision(self.decisions_db, c.norm_name, self.direction,
                                 None, keep=True)
