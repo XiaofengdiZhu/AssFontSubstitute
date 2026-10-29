@@ -91,6 +91,18 @@ def test_inline_fn_outside_block_untouched(tmp_path):
     assert "正文 \\fn華康主體W5} 片段" in text
 
 
+def test_fn_with_surrounding_spaces_replaced(tmp_path):
+    # 终审 P1：extract 把「\fn名字 」strip 后建桶而 libass trim 尾随空格，
+    # 不宽容则提得到改不掉；替换后原样保留两侧空白
+    p = tmp_path / "in.ass"
+    p.write_bytes(ASS.encode("utf-8-sig").replace(
+        "{\\fn華康主體W5}甲".encode(), "{\\fn 華康主體W5 }甲".encode()))
+    out = tmp_path / "out.ass"
+    rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out)
+    text = out.read_text("utf-8-sig")
+    assert "{\\fn 思源黑体 }甲" in text
+
+
 def test_at_variant(tmp_path):
     _mk(tmp_path)
     out = tmp_path / "out.ass"

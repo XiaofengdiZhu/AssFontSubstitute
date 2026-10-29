@@ -59,10 +59,13 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
     changed: list[int] = []
     # 单遍交替正则（查表替换）：串行逐项 sub 会在「某映射值恰是另一映射
     # 键」时链式误替（{SimSun→宋体, 宋体→思源} 把 {\fnSimSun} 写成思源）。
-    # 长键优先——正则交替取先中，短键是长键前缀时会截胡
+    # 长键优先——正则交替取先中，短键是长键前缀时会截胡。
+    # 两侧空白容忍（\s→pad 原样保留）：extract 把「\fn名字 」strip 后建桶
+    # 而 libass 对尾随空格 trim，不宽容则「提得到、改不掉」静默漏替
     alt = "|".join(re.escape(old)
                    for old in sorted(m, key=len, reverse=True))
-    fn_re = re.compile(r"\\fn(" + alt + r")(?=[\\}])") if alt else None
+    fn_re = (re.compile(r"\\fn([ \t]*)(" + alt + r")([ \t]*)(?=[\\}])")
+             if alt else None)
 
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -91,10 +94,12 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
             # 只在 {...} 块内替换 \fn（Comment 行的 \fn 也改写）——外壳
             # 限定块级，正文里的字面 \fn 片段不动
             if fn_re is not None:
+                def _sub_fn(mo: re.Match) -> str:
+                    return (r"\fn" + mo.group(1) + m[mo.group(2)]
+                            + mo.group(3))
                 new_line = re.sub(
                     r"\{[^{}]*\}",
-                    lambda b: fn_re.sub(lambda mo: r"\fn" + m[mo.group(1)],
-                                        b.group(0)),
+                    lambda b: fn_re.sub(_sub_fn, b.group(0)),
                     line)
             else:
                 new_line = line
