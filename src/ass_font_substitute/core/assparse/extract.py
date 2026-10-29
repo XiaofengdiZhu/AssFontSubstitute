@@ -9,6 +9,7 @@ from light_ass.curly.parsed_line import TextNode
 from light_ass.curly.tags import FontNameTag
 from light_ass.curly.tags import ResetStyleTag
 
+from ass_font_substitute.core.assparse.encoding import ALIAS_BOM
 from ass_font_substitute.core.assparse.encoding import EncodingDetectError
 from ass_font_substitute.core.assparse.encoding import detect_encoding
 from ass_font_substitute.core.fontindex.library import normalize_name
@@ -47,7 +48,8 @@ def extract_usages(path: Path) -> ExtractResult:
         return ExtractResult(parse_error=str(e))
     try:
         # 畸形的 Style/Event 行在 strict=False 下仍可能抛错，记录而非中断（批量场景）
-        doc = Document.load(str(path), encoding=enc, strict=False)
+        doc = Document.load(str(path), encoding=ALIAS_BOM.get(enc, enc),
+                            strict=False)
     except Exception as e:
         return ExtractResult(parse_error=f"{type(e).__name__}: {e}")
     return _extract(doc)

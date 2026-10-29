@@ -46,6 +46,11 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
     data = src.read_bytes()
     enc = detect_encoding(data)
     text = data.decode(enc)
+    # "-le"/"-be" 编解码器不剥 BOM：剥出文本外，写回补回（"utf-16"/
+    # "utf-8-sig" 自管 BOM，bom=False 不受影响）
+    bom = text.startswith("\ufeff")
+    if bom:
+        text = text[1:]
     lines = text.splitlines(keepends=True)
     m = _expand_at(mapping)
 
@@ -97,7 +102,7 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
                 lines[i] = new_line
                 changed.append(i)
 
-    result_text = "".join(lines)
+    result_text = ("\ufeff" if bom else "") + "".join(lines)
     result_bytes = result_text.encode(enc)
     if overwrite_src:
         tmp = src.with_name(src.name

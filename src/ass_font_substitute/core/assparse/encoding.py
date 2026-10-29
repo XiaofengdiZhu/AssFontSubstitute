@@ -11,8 +11,12 @@ BOMS = (
     (b"\xff\xfe\x00\x00", "utf-32-le"),
     (b"\x00\x00\xfe\xff", "utf-32-be"),
     (b"\xff\xfe", "utf-16"),
-    (b"\xfe\xff", "utf-16"),
+    (b"\xfe\xff", "utf-16-be"),   # 端序显式：rewrite 写回需按原端序
 )
+
+# "-le"/"-be" 显式编解码器不剥/补 BOM（通用 "utf-16"/"utf-32" 才自管）。
+# 需要通用 codec 名的调用方（pysubs2）经 ALIAS_BOM 归一。
+ALIAS_BOM = {"utf-16-be": "utf-16", "utf-32-le": "utf-32", "utf-32-be": "utf-32"}
 
 TRY_ORDER = ("utf-8", "gb18030", "big5", "shift_jis", "euc-kr")
 

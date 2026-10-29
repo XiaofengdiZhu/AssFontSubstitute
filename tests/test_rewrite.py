@@ -48,6 +48,25 @@ def test_encoding_preserved(tmp_path):
         assert "\r\n" in text
 
 
+def test_bom_endian_roundtrip(tmp_path):
+    # 终审 P0：BE 文件曾被恒写回 LE（"utf-16-be" 检出后 encode("utf-16")
+    # 恒出 LE+BOM），字节级往返破坏。-be/-le 检出须按原端序写回，BOM 保留
+    for bom, enc in ((b"\xfe\xff", "utf-16-be"),
+                     (b"\xff\xfe\x00\x00", "utf-32-le"),
+                     (b"\x00\x00\xfe\xff", "utf-32-be")):
+        p = tmp_path / f"in_{enc}.ass"
+        p.write_bytes(bom + ASS.encode(enc))
+        out = tmp_path / f"out_{enc}.ass"
+        r = rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out)
+        data = out.read_bytes()
+        assert data.startswith(bom)                 # BOM 原样保留、端序不变
+        text = data.decode(enc)
+        assert "Style: Main,思源黑体,52" in text
+        assert "華康主體W5(P)" in text               # 前缀不误伤
+        assert "{\\fn思源黑体}甲" in text
+        assert len(r.changed_lines) == 3
+
+
 def test_no_chain_substitution_when_values_overlap_keys(tmp_path):
     # 终审 🔴：映射值与键相交时逐项 sub 链式误替——
     # {華康主體W5→SimSun, SimSun→思源黑体} 曾把 {\fn華康主體W5} 先替成
