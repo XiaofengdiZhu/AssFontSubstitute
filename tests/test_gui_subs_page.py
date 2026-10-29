@@ -1311,3 +1311,46 @@ def test_font_name_labels_selectable(qapp, tmp_path, monkeypatch):
     assert heads[0].cursor().shape() == ibeam
     assert all(x.cursor().shape() == ibeam for x in names)
     page.deleteLater()
+
+
+def test_add_dir_scans_and_parses(qapp, tmp_path, monkeypatch):
+    import ass_font_substitute.gui.pages.subs_page as m
+
+    d = tmp_path / "subs"
+    (d / "nested").mkdir(parents=True)
+    (d / "a.ass").write_text("", encoding="utf-8")
+    (d / "b.SSA").write_text("", encoding="utf-8")
+    (d / "nested" / "c.ass").write_text("", encoding="utf-8")
+    (d / "skip.txt").write_text("", encoding="utf-8")
+    monkeypatch.setattr(m, "pick_existing_dir", lambda *a, **k: str(d))
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    page._add_dir()
+    assert len(page.worker.submits) == 1
+    tag, fn, args, _ = page.worker.submits[0]
+    assert tag == f"scandir:{d}" and fn is m._scan_dir_job
+    paths = fn(None, *args)          # 假 worker：手动执行扫描任务
+    assert set(paths) == {str(d / "a.ass"), str(d / "b.SSA"),
+                          str(d / "nested" / "c.ass")}   # 递归+剔除非字幕
+    page._on_result(tag, paths)
+    parse_tags = [t.split(":", 1)[1] for t, *_ in page.worker.submits[1:]
+                  if t.startswith("parse:")]
+    assert set(parse_tags) == set(paths)
+    assert page._parsing == set(paths)
+    page.deleteLater()
+
+
+def test_add_dir_empty_warning(qapp, tmp_path, monkeypatch):
+    import ass_font_substitute.gui.pages.subs_page as m
+
+    d = tmp_path / "empty"
+    d.mkdir()
+    monkeypatch.setattr(m, "pick_existing_dir", lambda *a, **k: str(d))
+    warned = []
+    monkeypatch.setattr(m.InfoBar, "warning",
+                        lambda title, content, **k: warned.append(content))
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    page._add_dir()
+    tag, fn, args, _ = page.worker.submits[0]
+    page._on_result(tag, fn(None, *args))
+    assert warned == [str(d)]
+    page.deleteLater()

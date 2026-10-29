@@ -101,6 +101,31 @@ def test_make_card_keep_with_original_badge(vm_full):
     assert card.checked_key == "fp-hei" and card.replaced is False
 
 
+def test_make_card_dedupes_original_rows(vm_full):
+    # 库中同族多文件（别名规范名相同）：「原」行只留一个，其余降推荐行；
+    # 覆盖平局取 |weight−400| 最小者（ASS 未设字重渲染按 400 选面），
+    # 不看库序
+    vm, ents = _vm_full(vm_full)
+    ent_w300 = _ent("fp-hei-w300", "黑体", FULL, weight=300)
+    vm.set_entities([ent_w300, ents[0]])          # 300 版库序在前
+    card = vm.make_card(_usage("黑体", FULL),
+                        UsageClass("keep", [ent_w300, ents[0]], 1.0, []))
+    origs = [o for o in card.options if "原字体" in o.badges]
+    assert len(origs) == 1 and origs[0].key == "fp-hei"   # 400 更近，非先入序
+    demoted = card.option("fp-hei-w300")
+    assert demoted.source == "recommend"
+    assert "原字体" not in demoted.badges
+    vm.apply_default_check(card)
+    assert card.checked_key == "fp-hei" and card.replaced is False
+    # 覆盖率最高者持徽标（非先入序）
+    ent_low = _ent("fp-low", "黑体", "永")
+    vm.set_entities([ent_low, ents[0]])
+    card2 = vm.make_card(_usage("黑体", FULL),
+                         UsageClass("keep", [ent_low, ents[0]], 1.0, []))
+    assert [o.key for o in card2.options
+            if "原字体" in o.badges] == ["fp-hei"]
+
+
 def test_make_card_twin_lists_originals(vm_full):
     vm, ents = _vm_full(vm_full)
     usage = _usage("黑体", "永宇好字之外的字")            # 在库但覆盖不足

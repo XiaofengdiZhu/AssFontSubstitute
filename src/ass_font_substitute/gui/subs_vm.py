@@ -181,6 +181,21 @@ class SubsVM:
         # 相似率+覆盖率综合分降序——在库推荐行无相似率，覆盖率单项计分
         origs = [o for o in opts if "原字体" in o.badges]
         rest = [o for o in opts if "原字体" not in o.badges]
+        if len(origs) > 1:
+            # 同名多实体（库中同族多文件，如 W300/W400 两版本别名同名）：
+            # 「原」行只留一个——覆盖率最高者持徽标与 original 语义
+            # （勾=不改写名），其余降为普通推荐行（仍可选）。覆盖率平局
+            # 取 |weight−400| 最小者：ASS 未设字重时渲染器按 400 选面
+            # （libass ass_parse.c / VSFilter GDI FW_NORMAL），预览与
+            # 相似度基准该跟实际渲染用面一致；再平局取先
+            best = max(origs, key=lambda o: (o.coverage or 0.0,
+                                             -abs(o.entity.weight - 400)))
+            for o in origs:
+                if o is not best:
+                    o.badges.remove("原字体")
+                    o.source = "recommend"
+                    rest.append(o)
+            origs = [best]
         rest.sort(key=lambda o: -_opt_score(o))
         if cls.kind == "twin" and cls.twin_hit is not None:
             twin = cls.twin_hit

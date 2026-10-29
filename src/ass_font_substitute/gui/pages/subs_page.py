@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
+from qfluentwidgets import Action
 from qfluentwidgets import BodyLabel
 from qfluentwidgets import CaptionLabel
 from qfluentwidgets import CheckBox
@@ -20,7 +21,9 @@ from qfluentwidgets import InfoBadge
 from qfluentwidgets import InfoBar
 from qfluentwidgets import LineEdit
 from qfluentwidgets import PrimaryPushButton
+from qfluentwidgets import PrimarySplitPushButton
 from qfluentwidgets import PushButton
+from qfluentwidgets import RoundMenu
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import SegmentedWidget
 from qfluentwidgets import SwitchButton
@@ -35,6 +38,7 @@ from ass_font_substitute.gui.jobs import make_searcher
 from ass_font_substitute.gui.jobs import parse_subtitle
 from ass_font_substitute.gui.jobs import pull_chunk
 from ass_font_substitute.gui.jobs import score_pick
+from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.lastdir import pick_open_files
 from ass_font_substitute.gui.paths import decisions_path
 from ass_font_substitute.gui.preview_vm import PreviewVM
@@ -112,7 +116,8 @@ class SubsPage(QWidget):
         # 汇总/两钮是常驻控件，重建时重挂进新卡标题栏
         self.files_summary = CaptionLabel("0 / 0 个文件 · 0 种字体")
         self.btn_reload = PushButton(FIF.SYNC, "重新载入")
-        self.btn_add = PrimaryPushButton(FIF.ADD, "添加文件")
+        # 主钮加文件，箭头 flyout 加目录（2026-10-29 用户要求）
+        self.btn_add = PrimarySplitPushButton(FIF.ADD, "添加文件")
         self.files_box = QVBoxLayout()
         self.files_box.setContentsMargins(0, 0, 0, 0)
         v.addLayout(self.files_box)
@@ -193,6 +198,12 @@ class SubsPage(QWidget):
 
         # ---- connect 段（控件就绪后统一接线）----
         self.btn_add.clicked.connect(self._add_files)
+        menu = RoundMenu(parent=self.btn_add)
+        act_dir = Action(FIF.FOLDER_ADD, "添加目录",
+                         triggered=self._add_dir)
+        act_dir.setToolTip("")   # qfw 菜单项悬停默认弹 text 同文 tooltip
+        menu.addAction(act_dir)
+        self.btn_add.setFlyout(menu)
         self.btn_reload.clicked.connect(self._reload_files)
         self.worker.result.connect(self._on_result)
         self.worker.failed.connect(self._on_failed)
@@ -220,6 +231,14 @@ class SubsPage(QWidget):
     def _add_files(self):
         paths = pick_open_files(self, self.settings, "添加字幕文件",
                                 "ASS 字幕 (*.ass *.ssa)", "subs")
+        self._add_paths(paths)
+
+    def _add_dir(self):
+        d = pick_existing_dir(self, self.settings, "添加字幕目录", "subs")
+        if d:
+            self.worker.submit(f"scandir:{d}", _scan_dir_job, d)
+
+    def _add_paths(self, paths):
         if not paths:
             return
         self._removed.difference_update(paths)   # 重加同一文件：解除弃置
@@ -345,6 +364,13 @@ class SubsPage(QWidget):
 
     # ---- 结果分发（UI 线程；vm 一切变更都在此）----
     def _on_result(self, tag, payload):
+        if isinstance(tag, str) and tag.startswith("scandir:"):
+            d = tag.split(":", 1)[1]
+            if payload:
+                self._add_paths(payload)
+            else:
+                InfoBar.warning("目录里没有字幕", d, parent=self)
+            return
         if isinstance(tag, str) and tag.startswith("parse:"):
             if payload.path in self._removed:   # 移除后迟到的回执：弃置
                 return
@@ -431,7 +457,8 @@ class SubsPage(QWidget):
         if isinstance(tag, str) and (
                 tag in ("slib", "apply")
                 or tag.startswith(("parse:", "classify:", "pull:",
-                                   "newsearcher:", "pickscore:"))):
+                                   "newsearcher:", "pickscore:",
+                                   "scandir:"))):
             InfoBar.error("任务失败", f"{tag}: {err}", parent=self)
 
     # ---- 分类 ----
@@ -786,6 +813,12 @@ class _BadgeRow(QWidget):
 
 def _parse_job(ctx, p):
     return parse_subtitle(p)
+
+
+def _scan_dir_job(ctx, d):
+    """递归列目录下的 .ass/.ssa（工作线程做，大目录不卡 UI）。"""
+    return sorted(str(p) for p in Path(d).rglob("*")
+                  if p.suffix.lower() in (".ass", ".ssa"))
 
 
 def _lib_job(ctx, dirs):
