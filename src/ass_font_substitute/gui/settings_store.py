@@ -147,6 +147,22 @@ class Settings(QObject):
         return self._data[key]
 
     def set(self, key: str, value) -> None:
+        # 类型校验与 reload 同一套口径前置：错型曾先落盘、重启后被 reload
+        # 静默蒸发
+        if key in _BOOL_KEYS and not isinstance(value, bool):
+            raise ValueError(f"{key} 必须是布尔")
+        if key in _INT_KEYS and (not isinstance(value, int)
+                                 or isinstance(value, bool)):
+            raise ValueError(f"{key} 必须是整数")
+        if key in _FLOAT_KEYS and (not isinstance(value, (int, float))
+                                   or isinstance(value, bool)):
+            raise ValueError(f"{key} 必须是数值")
+        if key in _LIST_KEYS and not isinstance(value, list):
+            raise ValueError(f"{key} 必须是列表")
+        if key == "preview_history" and not isinstance(value, list):
+            raise ValueError("preview_history 必须是列表")
+        if key == "last_dirs" and not isinstance(value, dict):
+            raise ValueError("last_dirs 必须是字典")
         if key == "sample_text" and (not isinstance(value, str) or not value.strip()):
             raise ValueError("对比文字不能为空")
         if key == "save_suffix" and not (isinstance(value, str) and _SUFFIX_RE.match(value)):

@@ -18,7 +18,13 @@ BOMS = (
 # 需要通用 codec 名的调用方（pysubs2）经 ALIAS_BOM 归一。
 ALIAS_BOM = {"utf-16-be": "utf-16", "utf-32-le": "utf-32", "utf-32-be": "utf-32"}
 
-TRY_ORDER = ("utf-8", "gb18030", "big5", "shift_jis", "euc-kr")
+# 探测范围截断：MB 级文件逐候选编码全文解码+逐字符扫描曾秒级卡顿——
+# 编码判定看分布，64KB 足够
+_SNIFF_BYTES = 64 * 1024
+
+TRY_ORDER = ("utf-8", "gb18030", "big5", "shift_jis")
+# 不收 euc-kr：FREQ_NEUTRAL 无谚文，纯韩文 _plausible 永假=假支持；
+# 中文字幕工具的编码面就到 shift_jis 为止
 
 
 class EncodingDetectError(Exception):
@@ -37,14 +43,31 @@ def _plausible(text: str) -> bool:
     return sum(c in FREQ_NEUTRAL for c in text) >= 5
 
 
+def _try_decode(sample: bytes, codec: str) -> str | None:
+    """sample 末尾可能截半多字节字符（截断点不看边界）：逐字节回退重试，
+    最多 3 字节（utf-8 CJK/utf-16 半字/utf-32 半字）；中段非法序列仍
+    strict 拒绝（合理性判定不因截断放水）。LookupError=未知 codec。"""
+    for trim in range(4):
+        s = sample[:len(sample) - trim] if trim else sample
+        if not s:
+            return None
+        try:
+            return s.decode(codec)
+        except UnicodeDecodeError:
+            continue
+        except LookupError:
+            return None
+    return None
+
+
 def detect_encoding(data: bytes) -> str:
     for bom, codec in BOMS:
         if data.startswith(bom):
             return codec
+    sample = data[:_SNIFF_BYTES]
     for codec in TRY_ORDER:
-        try:
-            text = data.decode(codec)
-        except (UnicodeDecodeError, LookupError):
+        text = _try_decode(sample, codec)
+        if text is None:
             continue
         # 纯 ASCII（utf-8 全文解出且无 U+FFFD、无 CJK）：各候选解码结果相同，
         # 接受无歧义，直判 utf-8（否则纯 ASCII 字幕会被高频字校验误拒）。
@@ -53,4 +76,4 @@ def detect_encoding(data: bytes) -> str:
             return codec
         if _plausible(text):
             return codec
-    raise EncodingDetectError("无法识别编码（utf-8/gb18030/big5/shift_jis/euc-kr 均不合理）")
+    raise EncodingDetectError("无法识别编码（utf-8/gb18030/big5/shift_jis 均不合理）")

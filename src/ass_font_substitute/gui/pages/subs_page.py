@@ -257,9 +257,12 @@ class SubsPage(QWidget):
 
     def _parse_arrived(self, path: str):
         """批内一份结果到达：先记账，整批收齐才重算——逐份重算会把
-        N 个文件放大成 1+2+…+N 次分类（全卡拆除重建 N-1 次，白算）。"""
+        N 个文件放大成 1+2+…+N 次分类（全卡拆除重建 N-1 次，白算）。
+        文件行卡同拍批末重建一次（原逐回执整卡重建，50 文件目录重建
+        50 次）。"""
         self._parsing.discard(path)
         if not self._parsing:
+            self._rebuild_file_rows()
             self._reclassify()
 
     def _rebuild_file_rows(self):
@@ -380,7 +383,6 @@ class SubsPage(QWidget):
             if payload.path in self._removed:   # 移除后迟到的回执：弃置
                 return
             self.vm.add_files([payload])
-            self._rebuild_file_rows()
             self._parse_arrived(payload.path)
         elif isinstance(tag, str) and tag.startswith("classify:"):
             if not tag.startswith(f"classify:{self._gen}:"):

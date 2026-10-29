@@ -25,7 +25,7 @@ _LINE_RE_B = re.compile(rb"\r\n|\r|\n")
 # 范围均不含控制符，utf-8 续字节 ≥0x80），逐行锁原字节。utf-16/32 单元
 # 流里 0A/00 相邻可能是字符内容（U+xx0A 等），只能文本级整编
 BYTE_LINE_CODECS = frozenset(
-    {"utf-8", "utf-8-sig", "gb18030", "big5", "shift_jis", "euc-kr"})
+    {"utf-8", "utf-8-sig", "gb18030", "big5", "shift_jis"})
 
 
 def _split_lines(s) -> list:
@@ -131,7 +131,11 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
             if fi < len(parts):
                 cur = parts[fi].strip()
                 if cur in m:
-                    parts[fi] = m[cur]
+                    # 域内格式空格保留（"Style: Main, 舊字體 ," 的对齐空格
+                    # 是作者的排版，整域替换曾抹掉）
+                    pad_l = parts[fi][:len(parts[fi]) - len(parts[fi].lstrip())]
+                    pad_r = parts[fi][len(parts[fi].rstrip()):]
+                    parts[fi] = pad_l + m[cur] + pad_r
                     # 关键字原样写回（小写文件不改写成 Style:）
                     newline = stripped[:len("Style:")] + ",".join(parts)
                     lines[i] = line.replace(stripped, newline, 1)

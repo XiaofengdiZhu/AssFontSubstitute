@@ -33,6 +33,7 @@ class RangeSlider(QWidget):
         self._min, self._max = minimum, maximum
         self._low, self._high = int(low), int(high)
         self._drag = None                  # None / "low" / "high"
+        self._last_knob = "low"            # 键盘步进作用钮（最后拖动侧）
         self._grab_dx = 0                  # 抓取点相对钮心的 x 偏移
         self.lo_handle = SliderHandle(self)
         self.hi_handle = SliderHandle(self)
@@ -42,6 +43,7 @@ class RangeSlider(QWidget):
             h.installEventFilter(self)
         self.setMinimumHeight(22)
         self.setMinimumWidth(120)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)   # 键盘步进入口
         self.setValues(low, high)          # 钳界/排序统一走 setValues
         self._adjust_handles()
 
@@ -54,6 +56,7 @@ class RangeSlider(QWidget):
                 # move 按偏移回算——否则首笔 move 从按点取值，一滑就
                 # 向右瞬移（按点偏右半钮+内缩=22px）
                 self._drag = "low" if watched is self.lo_handle else "high"
+                self._last_knob = self._drag
                 self._grab_dx = self._handle_x(watched, event) - self._value_x(
                     self._low if self._drag == "low" else self._high)
                 self.sliderPressed.emit()
@@ -146,6 +149,7 @@ class RangeSlider(QWidget):
             mid = (self.lo_handle.pos().x()
                    + self.hi_handle.pos().x()) // 2
             self._drag = "low" if x < mid else "high"
+            self._last_knob = self._drag
             self._apply_drag(x)
             self._grab_dx = 0
         self.sliderPressed.emit()
@@ -172,6 +176,30 @@ class RangeSlider(QWidget):
             self.setValues(v, self._high)
         else:
             self.setValues(self._low, v)
+
+    def keyPressEvent(self, e):
+        # 键盘步进：作用于最后拖动的钮（_last_knob 记忆；键盘首用默认
+        # low）。←→ 步 1、PageUp/Down 步 10、Home/End 端点。
+        # 拖拽中不落值（松手才提交，与鼠标口径一致）
+        if self._drag is not None:
+            e.ignore()
+            return
+        k = e.key()
+        step = {Qt.Key.Key_Left: -1, Qt.Key.Key_Right: 1,
+                Qt.Key.Key_PageDown: -10, Qt.Key.Key_PageUp: 10}.get(k)
+        if step is not None:
+            if self._last_knob == "high":
+                self.setValues(self._low, self._high + step)
+            else:
+                self.setValues(self._low + step, self._high)
+        elif k == Qt.Key.Key_Home:
+            self.setValues(self._min, self._high)
+        elif k == Qt.Key.Key_End:
+            self.setValues(self._low, self._max)
+        else:
+            e.ignore()
+            return
+        e.accept()
 
     def wheelEvent(self, e):
         # 滚轮不改值（防滚动设置页误改）；ignore 让事件冒泡给设置页滚动
