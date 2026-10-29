@@ -35,6 +35,11 @@ def _expand_at(mapping: dict[str, str]) -> dict[str, str]:
 
 def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
                  overwrite_src: bool = False) -> RewriteResult:
+    """按 mapping 重写字幕文件里的字体名。
+
+    错误契约与 extract（折成 parse_error 字段）不同：本函数是落盘入口，
+    编码识别失败抛 EncodingDetectError，由调用方（jobs.apply_to_file 宽
+    except）兜底——有意为之，勿对齐。"""
     if out and overwrite_src:
         raise ValueError("out 与 overwrite_src 互斥")
     src = Path(src)
