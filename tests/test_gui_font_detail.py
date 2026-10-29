@@ -488,3 +488,28 @@ def test_dialog_title_uses_lang_chain(qapp):
     assert dlg2.titleLabel.text() == "合併繁"
     dlg.reject()
     dlg2.reject()
+
+
+def test_dialog_name_labels_selectable(qapp):
+    # 字体名可划选（用户需求 2026-10-29，选择对话框除外）：详情标题 +
+    # 列表行名（命名卡多语言行先前已可选）；指针 IBeam
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QLabel
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_detail import FontDetailDialog
+    from ass_font_substitute.gui.widgets.selectable import SELECT_FLAGS
+
+    host = QWidget()
+    dlg = FontDetailDialog(_pool()[0], _pool(), _FakeWorker(), PreviewVM(),
+                           parent=host)
+    assert dlg.titleLabel.textInteractionFlags() & SELECT_FLAGS
+    ibeam = Qt.CursorShape.IBeamCursor
+    assert dlg.titleLabel.cursor().shape() == ibeam
+    row = dlg._sections[0].itemWidget(dlg._sections[0].item(0))
+    name_labs = [x for x in row.findChildren(QLabel)
+                 if x.textInteractionFlags() & SELECT_FLAGS]
+    assert [x.text() for x in name_labs] == ["合并体"]   # 行名=展示名
+    assert name_labs[0].cursor().shape() == ibeam
+    dlg.reject()                                # 同文件卫生惯例：关窗走清理链

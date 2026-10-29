@@ -686,3 +686,22 @@ def test_italic_icon_ink_refreshes_on_accent_change(qapp):
     finally:
         setThemeColor("#009faa", save=False)
         qapp.processEvents()
+
+
+def test_row_widget_name_selectable(qapp):
+    # 预览卡家族名可划选（用户需求 2026-10-29）；选择对话框不在此列
+    from PySide6.QtCore import Qt
+    from qfluentwidgets import StrongBodyLabel
+
+    from ass_font_substitute.gui.preview_vm import FamilyRow
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_list import _RowWidget
+    from ass_font_substitute.gui.widgets.selectable import SELECT_FLAGS
+
+    row = FamilyRow("甲字体", [_ent("1", "甲字体")], _ent("1", "甲字体"))
+    w = _RowWidget(_FakeWorker(), PreviewVM(), row, "永", lambda e: "t")
+    labs = [x for x in w.findChildren(StrongBodyLabel)
+            if x.text() == "甲字体"]
+    assert len(labs) == 1
+    assert labs[0].textInteractionFlags() & SELECT_FLAGS
+    assert labs[0].cursor().shape() == Qt.CursorShape.IBeamCursor

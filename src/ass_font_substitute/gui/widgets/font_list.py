@@ -33,6 +33,7 @@ from ass_font_substitute.gui.widgets.pill import PillRow
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
 from ass_font_substitute.gui.widgets.primary_text import _LUMA_DARK_TEXT
 from ass_font_substitute.gui.widgets.primary_text import accent_luma
+from ass_font_substitute.gui.widgets.selectable import apply_selectable
 
 ROW_H = 82                 # 行高初值：控制行 + 32px 预览条；物化首行后
 ROW_SPACING = 0            # 按内容实测校准（见 _calibrate_row_height）。
@@ -142,10 +143,14 @@ class FontListWidget(QListWidget):
     detail_requested = Signal(FontEntity)   # 双击行：浏览页开详情；选择
     #                                         对话框转作快捷接受（选定+关窗）
 
-    def __init__(self, worker, pvm, preview_text_fn, parent=None):
+    def __init__(self, worker, pvm, preview_text_fn, parent=None,
+                 name_selectable: bool = True):
         super().__init__(parent)
         self._worker, self._pvm = worker, pvm
         self._preview_text_fn = preview_text_fn   # () -> str；返回空串则用字体名
+        # 行名可划选（用户需求 2026-10-29）；选择对话框除外——名是
+        # picker 行宽最大的点击目标，可选化会吃掉单击选中/双击接受
+        self._name_selectable = name_selectable
         self._rows: list[FontEntity] = []
         self._materialized: set[int] = set()      # 已物化行号（控件所有权在 Qt）
         self._row_h = ROW_H                       # 物化首行后按内容校准
@@ -255,7 +260,8 @@ class FontListWidget(QListWidget):
         row = self._rows[i]
         return _RowWidget(self._worker, self._pvm, row,
                           self._preview_text_fn() or row.display_name,
-                          lambda e: f"plist:{e.fingerprint}:{id(self)}")
+                          lambda e: f"plist:{e.fingerprint}:{id(self)}",
+                          name_selectable=self._name_selectable)
 
     def _visible_range(self) -> tuple[int, int]:
         """可视首末行（闭区间）：滚动条 value 按实测行距换算。
@@ -336,7 +342,7 @@ class _RowWidget(QWidget):
     与斜体钮自行消费鼠标，不会触发列表点击。"""
 
     def __init__(self, worker, pvm, row: FamilyRow, text,
-                 tag_for):            # tag_for: (FontEntity) -> str
+                 tag_for, name_selectable: bool = True):
         super().__init__()
         self._worker, self._pvm, self._row = worker, pvm, row
         self._text, self._tag_for = text, tag_for
@@ -347,7 +353,13 @@ class _RowWidget(QWidget):
         v.setSpacing(4)               # 显式钉死：默认 spacing 随平台样式漂
         top = QHBoxLayout()
         top.setSpacing(8)
-        top.addWidget(StrongBodyLabel(row.display_name))
+        # 家族名可划选（用户需求 2026-10-29），选择对话框除外（picker
+        # 传 name_selectable=False）：名区 press 被 QLabel 消费——名区
+        # 双击变选词，嵌套/detail 入口走行的其余区域
+        name_lab = StrongBodyLabel(row.display_name)
+        if name_selectable:
+            apply_selectable(name_lab)
+        top.addWidget(name_lab)
         self._meta = PillRow()
         self._meta.set_items(meta_items(row.selected))
         top.addWidget(self._meta)

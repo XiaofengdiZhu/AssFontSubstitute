@@ -84,3 +84,36 @@ def test_double_click_accepts_and_closes(qapp, tmp_path, monkeypatch):
     dlg.all_list.detail_requested.emit(ents[1])
     assert dlg.selected.fingerprint == "fp2"
     assert calls == [1]
+
+
+def test_picker_row_names_not_selectable(qapp, tmp_path):
+    # 守卫（审查 P0-1）：选择对话框明确除外划选——共享 _RowWidget 曾把
+    # 可选化击穿进 picker，名是行宽最大的点击目标，可选化吃掉单击选中/
+    # 双击接受。行名标签必须无 Mouse 可选位、无 IBeam
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QLabel
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+
+    s = Settings(tmp_path / "s.json")
+    w = _FakeWorker()
+    ents = [_ent("fp1", "甲字体"), _ent("fp2", "乙字体")]
+    host = QWidget()
+    dlg = FontPickerDialog(s, w, ents, parent=host)
+    assert dlg.all_list._rows                     # 构造即填行
+    dlg.all_list.resize(300, 200)
+    qapp.processEvents()
+    # 物化首行探针
+    item = dlg.all_list.item(0)
+    assert item is not None
+    wid = dlg.all_list.itemWidget(item)
+    assert wid is not None, "首行未物化（可视区外）"
+    sel = Qt.TextInteractionFlag.TextSelectableByMouse
+    name_labs = [x for x in wid.findChildren(QLabel)
+                 if x.text() in {"甲字体", "乙字体"}]
+    assert name_labs, "行名标签未找到"
+    for lab in name_labs:
+        assert not lab.textInteractionFlags() & sel
+        assert lab.cursor().shape() != Qt.CursorShape.IBeamCursor

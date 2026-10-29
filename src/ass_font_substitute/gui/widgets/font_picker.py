@@ -35,7 +35,10 @@ class FontPickerDialog(MessageBoxBase):
         self.titleLabel = SubtitleLabel("从字体库选择")
 
         self.rec_title = SubtitleLabel("推荐（覆盖达标）")
-        self.rec_list = FontListWidget(worker, self.pvm, lambda: self._preview())
+        # 选择对话框行名不可划选（用户拍板「除外」2026-10-29）：名是
+        # picker 行宽最大的点击目标，可选化会吃掉单击选中/双击接受
+        self.rec_list = FontListWidget(worker, self.pvm, lambda: self._preview(),
+                                       name_selectable=False)
         self.rec_list.entity_picked.connect(self._pick)
         self.rec_list.detail_requested.connect(self._accept_pick)
         self.rec_list.setFixedHeight(120)
@@ -57,7 +60,8 @@ class FontPickerDialog(MessageBoxBase):
         self.filter_bar = QWidget()
         self.filter_bar.setLayout(filters)
 
-        self.all_list = FontListWidget(worker, self.pvm, lambda: self._preview())
+        self.all_list = FontListWidget(worker, self.pvm, lambda: self._preview(),
+                                       name_selectable=False)
         self.all_list.entity_picked.connect(self._pick)
         self.all_list.detail_requested.connect(self._accept_pick)
         self.all_list.setMinimumHeight(120)

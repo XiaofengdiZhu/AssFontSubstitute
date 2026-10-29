@@ -524,6 +524,7 @@ def test_twin_metrics_lead_phrase(qapp, tmp_path, monkeypatch):
     # 孪生行次序（用户拍板 2026-10-29）：行首注明来由，后接覆盖/未覆盖；
     # 孪生行无相似率/相对大小
     page = _make_page(qapp, tmp_path, monkeypatch)
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QLabel
     from qfluentwidgets import TransparentToolButton
 
@@ -551,13 +552,19 @@ def test_twin_metrics_lead_phrase(qapp, tmp_path, monkeypatch):
                for t in fulls), fulls
     # 孪生卡也带缺字条（用户纠偏 2026-10-29：这行=**原字体**未覆盖，
     # 非孪生体——孪生体的未覆盖在指标行另说）。原字体甲字体 cmap 永宇，
-    # 用字 永宇好我在 → 缺 好我在 3 字
+    # 用字 永宇好我在 → 缺 好我在 3 字。前缀+字符标签已拆（划选用）
     strips = [b for b in fc.findChildren(QLabel)
               if b.text().startswith("未覆盖 ")]
     assert len(strips) == 1
-    # missing 集合无序：只钉字集不钉序
-    assert strips[0].text().startswith("未覆盖 3 字：")
-    assert set(strips[0].text()[len("未覆盖 3 字："):]) == set("好我在")
+    assert strips[0].text() == "未覆盖 3 字："
+    # missing 集合无序：只钉字集不钉序；字符标签定位收进 tofu 框
+    # （字体名标签现在也可划选）
+    from PySide6.QtWidgets import QFrame
+    tofu = next(f for f in fc.findChildren(QFrame, "tofu"))
+    chars_labs = [b for b in tofu.findChildren(QLabel)
+                  if b.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse]
+    assert len(chars_labs) == 1
+    assert set(chars_labs[0].text()) == set("好我在")
     copy_btns = [b for b in fc.findChildren(TransparentToolButton)
                  if b.toolTip() == "复制未覆盖字符"]
     assert len(copy_btns) == 1
@@ -1054,8 +1061,11 @@ def test_mono_switch_broadcast_rerenders_bars(qapp, tmp_path, monkeypatch):
 
 
 def test_missing_strip_30_cap_and_copy_button(qapp, tmp_path, monkeypatch):
-    """缺字条预览截 30 字（用户拍板 2026-10-29，原 12）；行尾复制钮拷贝
-    展示字符、InfoBar 回执。未超 30 无省略号，超 30 补「……」。"""
+    """缺字条：前缀+可划选字符标签+省略号分离；复制钮载荷=全部未覆盖；
+    划选+Ctrl+C 只拷选中段；点字符标签不触发行切换。"""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QLabel
     from qfluentwidgets import TransparentToolButton
 
@@ -1073,26 +1083,62 @@ def test_missing_strip_30_cap_and_copy_button(qapp, tmp_path, monkeypatch):
         kind="replace", entities=[ent], coverage=0.02,
         missing_chars=list(chars[1:]))))
     fc = page._cards_ui["甲字体"]
+    card = page.vm.cards[0]
 
     def strip_label():
         return next(b for b in fc.findChildren(QLabel)
                     if b.text().startswith("未覆盖 "))
 
     lab = strip_label()
-    assert lab.text().startswith("未覆盖 43 字：") and lab.text().endswith("…")
-    shown = lab.text()[len("未覆盖 43 字："):-len("…")]
-    assert len(shown) == 30                     # 预览截 30 字
+    assert lab.text() == "未覆盖 43 字："
+    sel_flags = (Qt.TextInteractionFlag.TextSelectableByMouse
+                 | Qt.TextInteractionFlag.TextSelectableByKeyboard)
+    # 字符标签定位收进 tofu 框——字体名标签现在也可划选
+    from PySide6.QtWidgets import QFrame
+    tofu = next(f for f in fc.findChildren(QFrame, "tofu"))
+    chars_labs = [b for b in tofu.findChildren(QLabel)
+                  if b.textInteractionFlags() & sel_flags]
+    assert len(chars_labs) == 1                  # 可划选的字符标签独一份
+    chars_lab = chars_labs[0]
+    assert chars_lab.cursor().shape() == Qt.CursorShape.IBeamCursor
+    # Keyboard 位的真机 Ctrl+C 靠 focusPolicy=ClickFocus（QTest.keyClick
+    # 绕焦点路由，须独立钉住——审查 P2-1）
+    assert chars_lab.focusPolicy() == Qt.FocusPolicy.ClickFocus
+    shown = chars_lab.text()
+    assert len(shown) == 30                      # 预览截 30 字
+    assert "…" in [b.text() for b in tofu.findChildren(QLabel)]
     btns = [b for b in fc.findChildren(TransparentToolButton)
             if b.toolTip() == "复制未覆盖字符"]
     assert len(btns) == 1
     assert btns[0].width() == 22                # 小号钮
-    # 钮紧跟文本尾（不钉行尾）：钮左缘 − 标签右缘 ≤ 间距
-    assert btns[0].x() - (lab.x() + lab.width()) <= 12
+    # 钮紧跟文本尾（不钉行尾）：钮左缘 − 字符标签右缘 ≤ 间距
+    assert btns[0].x() - (chars_lab.x() + chars_lab.width()) <= 16
     qapp.clipboard().clear()
     btns[0].click()
     # 拷贝载荷=**全部**未覆盖 43 字（用户纠偏 2026-10-29：展示截 30 只
     # 管显示）；cls.missing_chars 列表序直通 card.missing
     assert qapp.clipboard().text() == chars[1:]
+
+    # 划选只复制一段（用户需求 2026-10-29）：拖选 + Ctrl+C
+    page.show()
+    page.resize(1100, 800)
+    qapp.processEvents()
+    QTest.mousePress(chars_lab, Qt.MouseButton.LeftButton, pos=QPoint(2, 8))
+    QTest.mouseMove(chars_lab, QPoint(34, 8))
+    QTest.mouseRelease(chars_lab, Qt.MouseButton.LeftButton, pos=QPoint(34, 8))
+    qapp.processEvents()
+    assert chars_lab.hasSelectedText()
+    qapp.clipboard().clear()
+    QTest.keyClick(chars_lab, Qt.Key_C, Qt.ControlModifier)
+    qapp.processEvents()
+    assert qapp.clipboard().text() == chars_lab.selectedText()
+    assert 0 < len(qapp.clipboard().text()) < 30   # 部分，非全列
+
+    # 点字符标签划选不触发行点击切换（QLabel 吃掉 press 不落行）
+    before = card.checked_key
+    QTest.mouseClick(chars_lab, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+    assert card.checked_key == before
     page.deleteLater()
 
 
@@ -1102,6 +1148,7 @@ def test_missing_hover_popup_chars_and_copy(qapp, tmp_path, monkeypatch):
     （轮询光标）；复制/行移除也收；原生 tooltip 事件被吃不双弹。"""
     from PySide6.QtCore import QEvent
     from PySide6.QtCore import QPoint
+    from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
     from qfluentwidgets import Flyout
     from qfluentwidgets import TransparentToolButton
@@ -1136,7 +1183,13 @@ def test_missing_hover_popup_chars_and_copy(qapp, tmp_path, monkeypatch):
     QTest.qWait(SHOW_DELAY + 300)               # 真定时器走完延时出泡
     fly = page.findChildren(Flyout)[0]
     assert fly.isVisible() and filt._tick.isActive()
-    assert fly.view.label.text().endswith("…") and len(fly.view.label.text()) == 31
+    sel_flags = (Qt.TextInteractionFlag.TextSelectableByMouse
+                 | Qt.TextInteractionFlag.TextSelectableByKeyboard)
+    assert fly.view.label.textInteractionFlags() & sel_flags
+    assert (fly.view.label.cursor().shape()
+            == Qt.CursorShape.IBeamCursor)
+    assert len(fly.view.label.text()) == 30      # 展示截 30，省略号另拆
+    assert fly.view.em_label is not None and fly.view.em_label.text() == "…"
     # 锚点：x=光标在浮层中轴（复刻 qfw 屏缘钳制公式，含阴影余量 5——
     # qfw 1.11.3 flyout.py FlyoutAnimationManager._adjustPosition，
     # qfw 升级若挂先查此处）、y 贴指标行下缘
@@ -1162,23 +1215,38 @@ def test_missing_hover_popup_chars_and_copy(qapp, tmp_path, monkeypatch):
     # 在 qWait 内落地），非 _on_tick 早退路径
     assert not filt._tick.isActive()
 
-    # 复制收：拷展示字符（同缺字条），浮层引用随析构清掉
+    # 复制收：载荷=**全部**未覆盖（用户纠偏 2026-10-29：截 30 只管
+    # 显示）；o.missing 经 coverage_detail 集合来，无序
     qapp.sendEvent(m_lab, QEvent(QEvent.Type.Enter))
     QTest.qWait(SHOW_DELAY + 300)
     fly2 = page.findChildren(Flyout)[0]
     assert fly2.isVisible()
-    shown = fly2.view.label.text()[:-1]
-    assert len(shown) == 30
     btn = fly2.view.findChild(TransparentToolButton)
     qapp.clipboard().clear()
     btn.click()
-    # 拷贝载荷=**全部**未覆盖（用户纠偏 2026-10-29：截 30 只管显示）；
-    # o.missing 经 coverage_detail 集合来，无序
     copied = qapp.clipboard().text()
     assert len(copied) == 43 and set(copied) == set(chars[1:])
     assert not fly2.isVisible()
     QTest.qWait(50)                             # deleteOnClose 析构落地
     assert filt._flyout is None
+
+    # 划选部分拷贝：拖选 + Ctrl+C（Popup 激活态下键盘直达标签）
+    qapp.sendEvent(m_lab, QEvent(QEvent.Type.Enter))
+    QTest.qWait(SHOW_DELAY + 300)
+    fly_sel = page.findChildren(Flyout)[0]
+    lab3 = fly_sel.view.label
+    QTest.mousePress(lab3, Qt.MouseButton.LeftButton, pos=QPoint(2, 8))
+    QTest.mouseMove(lab3, QPoint(30, 8))
+    QTest.mouseRelease(lab3, Qt.MouseButton.LeftButton, pos=QPoint(30, 8))
+    qapp.processEvents()
+    assert lab3.hasSelectedText()
+    qapp.clipboard().clear()
+    QTest.keyClick(lab3, Qt.Key_C, Qt.ControlModifier)
+    qapp.processEvents()
+    assert qapp.clipboard().text() == lab3.selectedText()
+    assert 0 < len(qapp.clipboard().text()) < 30
+    fly_sel.close()
+    QTest.qWait(50)
 
     # 行被移除（Hide）→ 浮层立收不留孤窗
     qapp.sendEvent(m_lab, QEvent(QEvent.Type.Enter))
@@ -1215,4 +1283,31 @@ def test_full_coverage_row_has_no_popup_filter(qapp, tmp_path, monkeypatch):
     fc = page._cards_ui["甲字体"]
     assert fc._metrics["fp1"].findChildren(_MissingFlyoutFilter) == []
     assert fc._metrics["fp2"].findChildren(_MissingFlyoutFilter) == []
+    page.deleteLater()
+
+
+def test_font_name_labels_selectable(qapp, tmp_path, monkeypatch):
+    # 字体名可划选（用户需求 2026-10-29，选择对话框除外）：卡头原字体
+    # 名 + 候选行名（_NameLabel）
+    from qfluentwidgets import StrongBodyLabel
+
+    from ass_font_substitute.gui.widgets.font_card import _NameLabel
+    from ass_font_substitute.gui.widgets.selectable import SELECT_FLAGS
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _feed_replace_card(page, ent_a, ent_b)
+    fc = page._cards_ui["甲字体"]
+    from PySide6.QtCore import Qt
+    heads = [x for x in fc.findChildren(StrongBodyLabel)
+             if x.text() == "甲字体"]
+    assert len(heads) == 1
+    assert heads[0].textInteractionFlags() & SELECT_FLAGS
+    names = fc.findChildren(_NameLabel)
+    assert {x.fullText() for x in names} == {"甲字体", "乙字体"}
+    assert all(x.textInteractionFlags() & SELECT_FLAGS for x in names)
+    # 可选处指针变 IBeam（用户拍板 2026-10-29）
+    ibeam = Qt.CursorShape.IBeamCursor
+    assert heads[0].cursor().shape() == ibeam
+    assert all(x.cursor().shape() == ibeam for x in names)
     page.deleteLater()

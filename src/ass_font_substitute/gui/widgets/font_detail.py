@@ -37,6 +37,7 @@ from ass_font_substitute.gui.widgets.font_list import meta_items
 from ass_font_substitute.gui.widgets.pill import PillRow
 from ass_font_substitute.gui.widgets.pill import pill
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
+from ass_font_substitute.gui.widgets.selectable import apply_selectable
 
 BAR_H = 48                 # 详情预览条高（列表行内条是 32，这里给大号）
 LIST_BAR_H = 32            # 列表行内预览条高（与预览页行内条一致）
@@ -181,7 +182,8 @@ def _face_order(e: FontEntity):
 class _FaceRow(QWidget):
     """详情列表行 = 名 + 元信息 + 行内预览条。容器不画底：悬停/选中
     反馈交给列表样式透出（QLabel 不消费鼠标，双击自然传播到视口——
-    预览页 _RowWidget 同构验证过）。只读导航行，无分段/斜体钮。"""
+    预览页 _RowWidget 同构验证过；名标签例外，划选可拷——名区双击
+    变选词，嵌套入口走行的其余区域）。只读导航行，无分段/斜体钮。"""
 
     def __init__(self, worker, pvm, f: FontEntity, text, tag,
                  show_face: bool, name: str):
@@ -191,7 +193,9 @@ class _FaceRow(QWidget):
         v.setSpacing(3)
         top = QHBoxLayout()
         top.setSpacing(6)
-        top.addWidget(StrongBodyLabel(name))
+        name_lab = StrongBodyLabel(name)
+        apply_selectable(name_lab)
+        top.addWidget(name_lab)
         # meta 药丸对齐预览页（script · 字重 · 斜体 · 分类），斜体仅斜体
         # 时显；同文件节附 face 序号区分 TTC 内位置，家族节不再缀文件（太长）
         items = meta_items(f)
@@ -288,6 +292,7 @@ class FontDetailDialog(MessageBoxBase):
         self._name = pick_display_name(e, ui_lang(settings))
 
         self.titleLabel = SubtitleLabel(self._name)
+        apply_selectable(self.titleLabel)
         bar = PreviewBar(worker, pvm, e, self._name,
                          f"detail:{e.fingerprint}:{id(self)}", height=BAR_H)
 

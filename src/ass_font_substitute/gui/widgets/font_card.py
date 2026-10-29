@@ -48,6 +48,7 @@ from ass_font_substitute.gui.widgets.pill import PillLabel
 from ass_font_substitute.gui.widgets.pill import padded_badge
 from ass_font_substitute.gui.widgets.pill import pill
 from ass_font_substitute.gui.widgets.preview_bar import PreviewBar
+from ass_font_substitute.gui.widgets.selectable import apply_selectable
 
 
 def _pill(text: str) -> PillLabel:
@@ -187,10 +188,10 @@ class _MetricsLabel(_ElideMixin, CaptionLabel):
 
 
 class _MissingFlyoutView(FlyoutViewBase):
-    """未覆盖字符浮层视图：单行 HBox——字列（截 30，超出尾加「…」）+
-    复制钮。不走 FlyoutView（竖排，容纳不了行内钮）；圆角底/描边承
-    基类 paintEvent 亮暗自适应。复制走卡级回执（同缺字条），拷贝载荷
-    是**全部**未覆盖字符——展示截 30 只管显示（用户纠偏 2026-10-29）。"""
+    """未覆盖字符浮层视图：单行 HBox——字符（划选可只拷一段，同缺字
+    条）+省略号（另拆不入选）+复制钮（载荷=全部未覆盖，展示截 30 只管
+    显示）。不走 FlyoutView（竖排，容纳不了行内钮）；圆角底/描边承基类
+    paintEvent 亮暗自适应。复制走卡级回执。"""
 
     closed = Signal()
 
@@ -201,8 +202,13 @@ class _MissingFlyoutView(FlyoutViewBase):
         h = QHBoxLayout(self)
         h.setContentsMargins(12, 8, 8, 8)
         h.setSpacing(4)
-        self.label = CaptionLabel(shown + ("…" if more else ""))
+        # 字符划选（同缺字条）：可选区纯字符，省略号另拆不入选
+        self.label = CaptionLabel(shown)
+        apply_selectable(self.label)
         h.addWidget(self.label, 0, Qt.AlignVCenter)
+        self.em_label = CaptionLabel("…") if more else None
+        if self.em_label is not None:
+            h.addWidget(self.em_label, 0, Qt.AlignVCenter)
         btn = TransparentToolButton(FIF.COPY.icon(), self)
         btn.setIconSize(QSize(14, 14))
         btn.setFixedSize(22, 22)
@@ -288,8 +294,12 @@ class _MissingFlyoutFilter(QObject):
         self._close_if_out(self._pos_fn())
 
     def _close_if_out(self, pos):
-        """光标同时在指标行与浮层之外 → 收。浮层贴行下缘零缝，途经无死区。"""
+        """光标同时在指标行与浮层之外 → 收。浮层贴行下缘零缝，途经无死区。
+        左键按住（划选拖拽中）跳过：拖选赶超末字符/出边距时光标瞬时出
+        浮层几何，轮询即刻收窗会丢选中段（审查 P1-1），松开下一拍照常判。"""
         if self._flyout is None or not self._flyout.isVisible():
+            return
+        if QApplication.mouseButtons() & Qt.MouseButton.LeftButton:
             return
         in_lab = self._lab.rect().contains(self._lab.mapFromGlobal(pos))
         in_fly = self._flyout.geometry().contains(pos)
@@ -429,7 +439,12 @@ class FontCard(CardWidget):
         else:
             h.addWidget(IconWidget(getattr(FIF, name).colored(
                 QColor(light), QColor(dark))))
-        h.addWidget(StrongBodyLabel(self.card.raw_name))
+        # 字体名可划选（用户需求 2026-10-29：名可只拷一段）——卡头无
+        # 点击语义，直挂交互 flags；keyboard 位顺带 focusPolicy 变
+        # ClickFocus，划选后 Ctrl+C 直达
+        raw_lab = StrongBodyLabel(self.card.raw_name)
+        apply_selectable(raw_lab)
+        h.addWidget(raw_lab)
         h.addWidget(CaptionLabel(self.card.header))
         h.addStretch(1)
         if kind == "zero":
@@ -446,13 +461,19 @@ class FontCard(CardWidget):
         h = QHBoxLayout(box)
         h.setContentsMargins(10, 6, 10, 6)
         h.setSpacing(4)
-        shown = "".join(self.card.missing[:30])
-        lab = CaptionLabel(
-            f"未覆盖 {self.card.n_missing} 字："
-            + shown
-            + ("…" if len(self.card.missing) > 30 else ""))
-        lab.setWordWrap(False)               # 单行条：30 字封顶后宽有界
-        h.addWidget(lab, 0, Qt.AlignVCenter)
+        h.addWidget(CaptionLabel(f"未覆盖 {self.card.n_missing} 字："),
+                    0, Qt.AlignVCenter)
+        # 字符划选（用户需求 2026-10-29：只复制一部分）：独立标签装
+        # 交互 flags，省略号另拆不入选区；前缀标签不吃交互，点它无动作
+        # （缺字条在选项行外，无行点击语义可传播）。
+        # TextSelectableByKeyboard 顺带把 focusPolicy 变 ClickFocus，
+        # 划选后 Ctrl+C 直达本标签
+        chars_lab = CaptionLabel("".join(self.card.missing[:30]))
+        apply_selectable(chars_lab)
+        chars_lab.setWordWrap(False)         # 单行条：30 字封顶后宽有界
+        h.addWidget(chars_lab, 0, Qt.AlignVCenter)
+        if len(self.card.missing) > 30:
+            h.addWidget(CaptionLabel("…"), 0, Qt.AlignVCenter)
         # 复制钮紧跟最后一个字/省略号右边（不钉行尾，用户拍板
         # 2026-10-29）：拷贝**全部**未覆盖字符（展示截 30 只管显示，
         # 用户纠偏 2026-10-29：截断的是预览不是载荷）。小号 22×22/icon
@@ -526,8 +547,10 @@ class FontCard(CardWidget):
         # 回本构造（同 PreviewBar 坑），且 mixin _full 需经 setFullText 立账
         name_lab = _NameLabel()
         # 封顶不锁死：短名贴身、药丸紧跟（锁死 200 曾在短名后留死空白），
-        # 长名 200 截断省略
+        # 长名 200 截断省略；划选可只拷一段（用户需求 2026-10-29）——
+        # 名区 press 被 QLabel 消费不再触发行切换（同字符标签区）
         name_lab.setMaximumWidth(_NAME_W)
+        apply_selectable(name_lab)
         name_lab.setFullText(o.display_name)
         name_row.addWidget(name_lab)
         for b in o.badges:
