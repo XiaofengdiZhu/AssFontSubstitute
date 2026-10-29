@@ -48,10 +48,11 @@ from ass_font_substitute.gui.widgets.wheel_block import WheelBlock
 _REMOVE_RED = QColor("#e04343")   # 移除钮图标：亮暗主题下都醒目的危险红
 
 
-class SubsPage(ScrollArea):
+class SubsPage(QWidget):
     """处理字幕页：文件卡列表 → 参数行 → 字体卡渐进填充 → 底部应用条。
-    跨线程约定：worker 任务收纯数据、回纯数据；vm 的全部变更都发生在
-    UI 线程的 _on_result / 信号槽里。"""
+    页面骨架 = 外层竖排（内层 ScrollArea 吃余量 + 底栏钉死视口下缘，
+    不随内容滚动）。跨线程约定：worker 任务收纯数据、回纯数据；vm 的
+    全部变更都发生在 UI 线程的 _on_result / 信号槽里。"""
 
     searchActiveChanged = Signal(bool)   # 有无进行中的相似搜索（设置页提示用）
     saveModeChanged = Signal(bool)       # 覆盖原文件？（设置页同步）
@@ -77,15 +78,23 @@ class SubsPage(ScrollArea):
         self._search_active = False
         self._removed: set[str] = set()    # 已移除文件：迟到解析回执弃置
 
-        self.view = QWidget(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self._scroll = ScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        outer.addWidget(self._scroll, 1)
+
+        self.view = QWidget(self._scroll)
         v = QVBoxLayout(self.view)
-        v.setContentsMargins(36, 24, 36, 24)   # 页边距对齐其他页
+        v.setContentsMargins(36, 24, 36, 12)   # 页边距对齐其他页（底边距归底栏）
         v.setSpacing(12)
-        self.setWidget(self.view)
-        self.setWidgetResizable(True)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.enableTransparentBackground()   # 默认画调色板底，深色主题下亮块
         self.view.setMinimumWidth(420)
+        self._scroll.setWidget(self.view)
+        # 先 setWidget 再透明化：qfw enableTransparentBackground 只对已挂
+        # 的 widget() 补 transparent QSS，次序颠倒视口留浅色底（真机实锤）
+        self._scroll.enableTransparentBackground()
 
         head = QHBoxLayout()
         # BodyLabel 而非裸 QLabel：LABEL qss 黑/白随主题（裸 QLabel 黑字死调色板）
@@ -131,7 +140,13 @@ class SubsPage(ScrollArea):
         v.addLayout(self.cards_box)
         v.addStretch(1)
 
-        bottom = QHBoxLayout()
+        # 底栏钉死视口下缘（用户拍板 2026-10-29：保存方式/替换保存常驻
+        # 可见，不随内容滚走）——在外层布局、滚动区之外
+        foot = QWidget(self)
+        bottom = QHBoxLayout(foot)
+        # 上下对称且收紧：内容垂直居中、栏体矮（控件 hint ~33px + 20 边距）
+        bottom.setContentsMargins(36, 15, 36, 15)
+        bottom.setSpacing(12)
         bottom.addWidget(CaptionLabel("保存方式:"))
         self.save_mode = ComboBox()
         self.save_mode.addItems(["另存为新文件", "覆盖原文件"])
@@ -159,7 +174,7 @@ class SubsPage(ScrollArea):
         self.btn_apply.setEnabled(False)
         self.btn_apply.clicked.connect(self._apply)
         bottom.addWidget(self.btn_apply)
-        v.addLayout(bottom)
+        outer.addWidget(foot)
         self._set_suffix_row_visible(
             not self.settings.get("overwrite_default"))
 
@@ -182,6 +197,10 @@ class SubsPage(ScrollArea):
         self._refresh_timer.timeout.connect(self._flush_refresh)
         self._rebuild_file_rows()   # 启动空态也建卡：添加文件钮在卡标题栏
         self._reclassify()
+
+    def verticalScrollBar(self):
+        """兼容旧 ScrollArea 接口（测试/调用方按页取滚动条）。"""
+        return self._scroll.verticalScrollBar()
 
     # ---- 文件层 ----
     def _add_files(self):

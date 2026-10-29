@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QObject
+from PySide6.QtCore import QPoint
 from PySide6.QtCore import Signal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -570,7 +571,34 @@ def test_continue_search_keeps_scroll_focus_and_identity(qapp, tmp_path, monkeyp
     assert sb.value() == before           # 瞬移即回归
     assert page._cards_ui[norm] is fc     # 整卡不重建
     assert QApplication.focusWidget() is btn   # 焦点原地不动
-    assert btn.text() == "寻找中…"
+    assert btn.text() == "寻找中…"          # 钮态已翻：寻找中
+
+
+def test_bottom_bar_pinned_to_viewport(qapp, tmp_path, monkeypatch):
+    # 底栏（保存方式/替换并保存）钉死视口下缘：在滚动区外、滚动前后
+    # 位置不动（用户拍板 2026-10-29：常驻可见，不随内容滚走）。
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    from PySide6.QtWidgets import QApplication
+
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, _card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    page.show()
+    page.resize(1100, 500)                # 压小视口：内容必溢出
+    for _ in range(10):
+        QApplication.processEvents()
+    foot = page.btn_apply.parentWidget()
+    assert foot.parent() is page          # 挂页面本体，不在滚动区里
+    sb = page.verticalScrollBar()
+    sb.setValue(sb.maximum())
+    for _ in range(5):
+        QApplication.processEvents()
+    assert page.btn_apply.isVisible()
+    y = foot.mapTo(page, QPoint(0, 0)).y()
+    assert y + foot.height() == page.height()   # 贴视口底缘
+    sb.setValue(0)
+    for _ in range(5):
+        QApplication.processEvents()
+    assert foot.mapTo(page, QPoint(0, 0)).y() == y      # 滚动不挪底栏
 
 
 def test_option_row_retheme_tracks_accent_and_theme(qapp, tmp_path, monkeypatch):
