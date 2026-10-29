@@ -165,22 +165,19 @@ def test_apply_error_folded(tmp_path):
     assert r.error is not None and r.out_path is None
 
 
-def test_cache_ops(ctx_stub, tmp_path):
+def test_cache_ops(ctx_stub):
+    # 缓存位置不可迁移后（绿色软件定死 Data/cache.db），jobs 侧只剩统计/清除
     from ass_font_substitute.gui.jobs import cache_clear
-    from ass_font_substitute.gui.jobs import cache_move
     from ass_font_substitute.gui.jobs import cache_stats
     st = cache_stats(ctx_stub)
     assert st["pair_count"] == 0
-    new = tmp_path / "moved" / "cache.db"
-    cache_move(ctx_stub, str(new), migrate=True)
-    assert ctx_stub.cache.path == new
     cache_clear(ctx_stub)
 
 
 @pytest.fixture()
 def ctx_stub(tmp_path, monkeypatch):
     """CoreWorker ctx 等价物（非 Qt）：真实 Cache，真实设置。"""
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
     from types import SimpleNamespace
 
     from ass_font_substitute.core.similarity.cache import Cache

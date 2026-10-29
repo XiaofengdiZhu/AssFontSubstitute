@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import queue
-from pathlib import Path
 from types import SimpleNamespace
 
 from PySide6.QtCore import QThread
@@ -39,11 +38,10 @@ class CoreWorker(QThread):
     def run(self):
         from ass_font_substitute.core.similarity.cache import Cache
         from ass_font_substitute.gui.paths import default_cache_path
-        p = self._settings.get("cache_path") or str(default_cache_path())
+        cache = None
         try:
-            cache = Cache(Path(p))
+            cache = Cache(default_cache_path())
         except Exception as e:
-            cache = None
             self.failed.emit("worker:init", f"{type(e).__name__}: {e}")
         ctx = SimpleNamespace(settings=self._settings, cache=cache,
                               snapshot=None, lib=None, lib_key=None)

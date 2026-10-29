@@ -7,8 +7,10 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent
 from PySide6.QtCore import Qt
+from PySide6.QtCore import QUrl
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
@@ -23,6 +25,7 @@ from qfluentwidgets import InfoBar
 from qfluentwidgets import LineEdit
 from qfluentwidgets import MessageBoxBase
 from qfluentwidgets import PrimaryPushSettingCard
+from qfluentwidgets import PushButton
 from qfluentwidgets import PushSettingCard
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import SettingCard
@@ -30,11 +33,9 @@ from qfluentwidgets import SettingCardGroup
 from qfluentwidgets import Slider
 from qfluentwidgets import SubtitleLabel
 from qfluentwidgets import TextEdit
-from qfluentwidgets import ToolButton
 from qfluentwidgets import qconfig
 from qfluentwidgets import setFont
 
-from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.paths import default_cache_path
 from ass_font_substitute.gui.settings_store import COV_BOUNDS
 from ass_font_substitute.gui.settings_store import SIM_BOUNDS
@@ -332,26 +333,21 @@ class SettingsPage(ScrollArea):
 
         # ── 相似度缓存 ────────────────────────────────────────
         g3 = SettingCardGroup("相似度缓存", self.view)
+        self._cache_path = str(default_cache_path())   # cachestat 回执更新
         self.cache_card = SettingCard(FIF.ALBUM, "缓存状态", "…", self)
-        self.path_card = SettingCard(FIF.FOLDER, "缓存位置",
-                                     "字形预览与相似度记录存放位置", self)
-        self.path_combo = ComboBox(self.path_card)
-        self.path_combo.addItem("…")
-        self.path_combo.setMinimumWidth(240)
-        self.path_pick = ToolButton(FIF.FOLDER, self.path_card)
-        self.path_pick.clicked.connect(self._move_cache)
-        self.path_card.hBoxLayout.addWidget(self.path_combo, 0,
-                                            Qt.AlignmentFlag.AlignRight)
-        self.path_card.hBoxLayout.addSpacing(8)
-        self.path_card.hBoxLayout.addWidget(self.path_pick, 0,
-                                            Qt.AlignmentFlag.AlignRight)
-        self.path_card.hBoxLayout.addSpacing(_SPACING)
+        # 缓存位置不可再选（绿色软件定死 <运行目录>/Data/cache.db，2026-10-29）：
+        # 卡右只剩打开所在位置，看文件/手动备份用
+        self.btn_open_cache = PushButton(FIF.FOLDER, "打开所在位置",
+                                         self.cache_card)
+        self.btn_open_cache.clicked.connect(self._open_cache_dir)
+        self.cache_card.hBoxLayout.addWidget(self.btn_open_cache, 0,
+                                             Qt.AlignmentFlag.AlignRight)
+        self.cache_card.hBoxLayout.addSpacing(_SPACING)
         self.clear_card = PrimaryPushSettingCard(
             "清除", FIF.DELETE, "清除缓存",
             "删除全部字形预览与相似度记录，下次搜索重新计算", self)
         self.clear_card.clicked.connect(self._clear_cache)
         g3.addSettingCard(self.cache_card)
-        g3.addSettingCard(self.path_card)
         g3.addSettingCard(self.clear_card)
         v.addWidget(g3)
 
@@ -563,25 +559,21 @@ class SettingsPage(ScrollArea):
             mb = payload["render_bytes"] / 1024 / 1024
             self.cache_card.setContent(
                 f"字形预览 {mb:.1f} MB · 相似度记录 {payload['pair_count']} 条")
-            self._sync_path(payload["path"])
+            self._cache_path = payload["path"]
         elif tag == "cacheclear":
             InfoBar.success("缓存已清除", "", parent=self)
             self._refresh_cache_stats()
-        elif tag == "cachemove":
-            InfoBar.success("缓存位置已更改", payload, parent=self)
-            self._refresh_cache_stats()
 
-    def _sync_path(self, path: str):
-        self.path_combo.blockSignals(True)
-        if self.path_combo.count():
-            self.path_combo.clear()
-        self.path_combo.addItem(path)
-        self.path_combo.blockSignals(False)
+    def _open_cache_dir(self):
+        # 打开缓存所在目录（Data）：未建库时目录可能尚不存在，先补建再开
+        d = Path(self._cache_path).parent
+        d.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(d)))
 
     def _on_failed(self, tag, err):
-        # 缓存类任务失败浮泡（初始化/统计/清除/迁移）；其它页签的任务由
+        # 缓存类任务失败浮泡（初始化/统计/清除）；其它页签的任务由
         # 各自页面的 failed 处理器负责，这里不重复弹
-        if tag in ("worker:init", "cachestat", "cacheclear", "cachemove"):
+        if tag in ("worker:init", "cachestat", "cacheclear"):
             InfoBar.error("缓存操作失败", f"{tag}: {err}", parent=self)
 
     def _clear_cache(self):
@@ -589,24 +581,6 @@ class SettingsPage(ScrollArea):
                    self)
         if w.exec():
             self.worker.submit("cacheclear", _clear_job)
-
-    def _move_cache(self):
-        d = pick_existing_dir(self, self.settings, "选择新缓存位置", "cache")
-        if not d:
-            return
-        new = Path(d) / "cache.db"
-        current = self.settings.get("cache_path") or default_cache_path()
-        if new == Path(current):
-            # 选中的就是现役缓存目录：迁移会先删现役 db 再 rename 自身，
-            # 结果缓存被删且连接悬空——直接拒绝
-            InfoBar.warning("位置未变", "选择的目录与当前缓存位置相同", parent=self)
-            return
-        migrate = True
-        if new.exists():
-            w = Dialog("目标已有缓存文件",
-                       "迁移将覆盖它；选「否」则丢弃现有缓存从空开始。", self)
-            migrate = bool(w.exec())
-        self.worker.submit("cachemove", _move_job, str(new), migrate)
 
 
 def _stat_job(ctx):
@@ -617,8 +591,3 @@ def _stat_job(ctx):
 def _clear_job(ctx):
     from ass_font_substitute.gui.jobs import cache_clear
     cache_clear(ctx)
-
-
-def _move_job(ctx, new_path, migrate):
-    from ass_font_substitute.gui.jobs import cache_move
-    return cache_move(ctx, new_path, migrate)

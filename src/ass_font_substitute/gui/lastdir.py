@@ -1,7 +1,8 @@
 """文件/目录对话框统一入口：按 scope 各自记忆上次目录（settings.last_dirs）。
 
-scope 是调用点自定义字符串：字幕文件 "subs"、字体目录 "library"、缓存位置
-"cache"——互不串扰，选字幕不该把字体目录对话框带到字幕文件夹去。
+scope 是调用点自定义字符串：字幕文件 "subs"、字体目录 "library"——
+互不串扰，选字幕不该把字体目录对话框带到字幕文件夹去。（缓存位置
+"cache" 随绿色软件化删除）
 """
 from __future__ import annotations
 

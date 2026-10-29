@@ -49,7 +49,7 @@ class _FakeWorker(QObject):
 
 
 def _make_page(qapp, tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))    # 决策库/设置隔离到 tmp
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))  # 决策库/设置隔离到 tmp
     from ass_font_substitute.gui.pages.subs_page import SubsPage
     from ass_font_substitute.gui.settings_store import Settings
     s = Settings(tmp_path / "settings.json")        # cov .95 / sim .85 / size .9–1.1

@@ -100,6 +100,8 @@ class Cache:
             self.conn.execute("DELETE FROM pairs")
 
     def move_to(self, new_path: Path, migrate: bool = True):
+        # GUI 已绿色软件化（缓存定死 Data/cache.db 不可迁移）：核心层保留，
+        # 现仅核心测试使用
         self.conn.close()
         if migrate:
             new_path.parent.mkdir(parents=True, exist_ok=True)

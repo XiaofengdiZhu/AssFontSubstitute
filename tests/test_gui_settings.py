@@ -21,12 +21,14 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def test_paths_under_appdata(monkeypatch, tmp_path):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    assert appdata_dir() == tmp_path / "afs"
-    assert settings_path() == tmp_path / "afs" / "settings.json"
-    assert default_cache_path() == tmp_path / "afs" / "cache.db"
-    assert decisions_path() == tmp_path / "afs" / "decisions.db"
+def test_paths_under_data_dir(monkeypatch, tmp_path):
+    # 绿色软件：数据目录随程序走（<运行目录>/Data），AFS_DATA_DIR 覆盖
+    # 全部分辨（测试隔离用）
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    assert appdata_dir() == tmp_path
+    assert settings_path() == tmp_path / "settings.json"
+    assert default_cache_path() == tmp_path / "cache.db"
+    assert decisions_path() == tmp_path / "decisions.db"
 
 
 def test_defaults_match_core_constants():
@@ -423,7 +425,7 @@ def test_size_card_range_slider(qapp, tmp_path):
 
 def test_general_group_language_theme_bg(qapp, tmp_path, monkeypatch):
     # 常规组三卡：初值、改动落盘并发信号、繁体模式选项名换正體中文
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     from PySide6.QtCore import QObject
     from PySide6.QtCore import Signal
 
@@ -515,21 +517,21 @@ def test_value_changed_signal_semantics(qapp, tmp_path):
 
 
 def test_value_changed_cross_thread_queued(qapp, tmp_path):
-    # worker 线程 set（cache_move 通路）：接收者在主线程，经 Qt 队列投递，
+    # worker 线程 set：接收者在主线程，经 Qt 队列投递，
     # processEvents 后可见——绝不直接在发射线程执行槽
     import threading
 
     s = Settings(tmp_path / "s.json")
     got = []
     s.valueChanged.connect(lambda k, v: got.append((k, v, threading.current_thread())))
-    t = threading.Thread(target=lambda: s.set("cache_path", str(tmp_path / "c")))
+    t = threading.Thread(target=lambda: s.set("n_pause", 7))
     t.start()
     t.join()
     assert not got                                # 发射线程≠接收线程：未直接执行
     qapp.processEvents()
     assert len(got) == 1
     k, v, th = got[0]
-    assert (k, v) == ("cache_path", str(tmp_path / "c"))
+    assert (k, v) == ("n_pause", 7)
     assert th is threading.main_thread()          # 槽跑在接收者线程
 
 

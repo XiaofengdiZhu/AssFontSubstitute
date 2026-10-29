@@ -26,7 +26,7 @@ class _FakeWorker(QObject):
 
 
 def _make_page(qapp, tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     from ass_font_substitute.gui.pages.browse_page import BrowsePage
     from ass_font_substitute.gui.settings_store import Settings
     return BrowsePage(Settings(tmp_path / "settings.json"), _FakeWorker())

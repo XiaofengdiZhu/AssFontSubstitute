@@ -33,7 +33,6 @@ DEFAULTS: dict = {
     "save_suffix": ".substituted.ass",
     "overwrite_default": False,
     "sample_text": SAMPLE_TEXT,
-    "cache_path": "",                              # 空 = paths.default_cache_path()
     "last_dirs": {},                               # 各对话框上次目录 {scope: 路径}
     "preview_history": [],                         # 预览文字历史（新→旧，最多 10 条；预览页/字幕页共享）
     "preview_mono": False,                         # 预览强制等宽（全角 1em/半角 0.5em 统一格宽，多行逐字对位）
@@ -79,13 +78,13 @@ class Settings(QObject):
     损坏/含未知键/类型不符的存量数据按默认处理，绝不崩 GUI。"""
 
     #: (key, value) 落盘后、且值有变才发；reload/启动装载不发。
-    #: worker 线程 set（cache_move）时 Qt 自动按接收者线程排队投递
+    #: worker 线程 set 时 Qt 自动按接收者线程排队投递
     valueChanged = Signal(str, object)
 
     def __init__(self, path: Path | None = None):
         super().__init__()
         self.path = Path(path) if path is not None else None
-        # worker 线程（cache_move 落 cache_path）与 UI 线程并发 set：
+        # worker 线程与 UI 线程并发 set：
         # 互斥保住「tmp 固定名原子写」与 dumps 期间字典不被改
         self._lock = threading.RLock()          # set→save 嵌套，须可重入
         self.reload()
@@ -128,7 +127,7 @@ class Settings(QObject):
                 elif k == "theme_color" and isinstance(v, str) \
                         and (v == "" or _THEME_COLOR_RE.match(v)):
                     self._data[k] = v           # 空串=跟随系统，存量复验同规则
-                elif (k in ("cache_path",) and isinstance(v, str)) or (k in _ENUM_KEYS and v in _ENUM_KEYS[k]):
+                elif k in _ENUM_KEYS and v in _ENUM_KEYS[k]:
                     self._data[k] = v
                 elif k == "last_dirs" and isinstance(v, dict) \
                         and all(isinstance(kk, str) and isinstance(vv, str)

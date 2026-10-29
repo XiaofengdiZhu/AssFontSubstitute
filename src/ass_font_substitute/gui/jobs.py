@@ -280,12 +280,3 @@ def cache_stats(ctx) -> dict:
 
 def cache_clear(ctx) -> None:
     ctx.cache.clear_all()
-
-
-def cache_move(ctx, new_path: str, migrate: bool) -> str:
-    p = Path(new_path)
-    if migrate and p.exists():
-        p.unlink()                  # 覆盖既有文件：页面已弹确认框
-    ctx.cache.move_to(p, migrate=migrate)
-    ctx.settings.set("cache_path", str(p))
-    return str(p)

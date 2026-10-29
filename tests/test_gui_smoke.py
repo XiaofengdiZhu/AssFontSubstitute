@@ -15,8 +15,8 @@ def qapp():
 
 
 def test_main_window_boots(qapp, tmp_path, monkeypatch):
-    # 隔离 APPDATA：Cache/设置不落真实用户目录
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    # 隔离数据目录：Cache/设置不落真实目录（含仓库根 Data/）
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     from ass_font_substitute.gui.app import AFSWindow
     from ass_font_substitute.gui.settings_store import Settings
 
@@ -38,7 +38,7 @@ def test_main_window_boots(qapp, tmp_path, monkeypatch):
 def test_resize_border_band_widened(qapp, tmp_path, monkeypatch):
     # qframelesswindow WM_NCHITTEST 命中带出厂 5 物理px，高 DPI 难抓住；
     # 主窗口实例覆写成原生同级 ≥8 逻辑px（offscreen DPR=1）
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     from ass_font_substitute.gui.app import AFSWindow
     from ass_font_substitute.gui.settings_store import Settings
 
@@ -123,11 +123,11 @@ def test_worker_init_failure_is_observable(qapp, tmp_path, monkeypatch):
     from ass_font_substitute.gui.settings_store import Settings
     from ass_font_substitute.gui.workers import CoreWorker
 
-    monkeypatch.setenv("APPDATA", str(tmp_path))
     blocker = tmp_path / "blocker"
     blocker.write_text("", "utf-8")
+    # 缓存位置不可选后造败改走数据目录：Data 父级是文件 → Cache 建目录必败
+    monkeypatch.setenv("AFS_DATA_DIR", str(blocker / "inner" / "data"))
     s = Settings(tmp_path / "s.json")
-    s.set("cache_path", str(blocker / "inner" / "cache.db"))   # 父级是文件 → Cache 必败
     errors = []
     w = CoreWorker(s)
     w.failed.connect(lambda tag, msg: errors.append((tag, msg)))
@@ -154,7 +154,7 @@ def test_worker_skips_cancelled_jobs(qapp, tmp_path, monkeypatch):
     from ass_font_substitute.gui.settings_store import Settings
     from ass_font_substitute.gui.workers import CoreWorker
 
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     s = Settings(tmp_path / "s.json")
     w = CoreWorker(s)
     results = []
@@ -221,7 +221,7 @@ def test_index_worker_cancel_dir(qapp, tmp_path, monkeypatch):
 def test_window_geometry_restore(qapp, tmp_path, monkeypatch):
     # 位置/大小记忆：屏内存档按档恢复；屏外存档弃用回默认；max 标记
     # 独立恢复；关闭时把当前几何落盘
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
     from PySide6.QtCore import QSize
     from PySide6.QtGui import QGuiApplication
 
@@ -298,7 +298,7 @@ def test_dir_row_no_top_level_flash(qapp, tmp_path, monkeypatch):
     # 回归：重排行时「新增/修改」提示曾先 setVisible(True) 后入父——
     # 无父 setVisible 即顶层窗口上屏（取消更新后行回 stale 重排时
     # 闪现带标题栏小窗），修复后必须先 addWidget 再 setVisible
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
     from PySide6.QtCore import QEvent
     from PySide6.QtCore import QObject
     from PySide6.QtWidgets import QWidget
@@ -337,7 +337,7 @@ def test_dir_row_no_top_level_flash(qapp, tmp_path, monkeypatch):
 def test_dir_row_progress_strip(qapp, tmp_path, monkeypatch):
     # 行内进度：indexing 行挂行底细条+行中文本；逐文件回执只原地推进
     # （不重排行），中途回排行从缓存恢复；脱 indexing 后进度区移除
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
     from tests.fonts import build_font
     d = tmp_path / "fonts"
     d.mkdir()
@@ -411,7 +411,7 @@ def _ensure_lib_job(ctx, dirs):
 def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
     # load_library 只建空库骨架（不自动索引），先经 worker 跑一次索引
     # 再拉 lib 快照，统计卡才有字体数
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
     from tests.fonts import build_font
     d = tmp_path / "fonts"
     d.mkdir()
@@ -459,7 +459,7 @@ def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
 def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
     # 删目录广播：browse 页真清数据（不是只挂 hint），subs 页换代重分类；
     # 更新在途时目录行按钮（更新/删除）禁用
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
     from tests.fonts import build_font
     d = tmp_path / "fonts"
     d.mkdir()
@@ -591,7 +591,7 @@ def test_dir_library_stats_maps_normalized_paths(qapp, tmp_path, monkeypatch):
 
 
 def test_window_applies_stored_theme_and_effect(qapp, tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     from qfluentwidgets import Theme
     from qfluentwidgets import qconfig
     from qfluentwidgets import setTheme
@@ -616,7 +616,7 @@ def test_window_applies_stored_theme_and_effect(qapp, tmp_path, monkeypatch):
 def test_theme_color_custom_follow_and_fallback(qapp, tmp_path, monkeypatch):
     # 强调色三态：自定义 #rrggbb 直接生效；跟随系统取 monkeypatch 的系统色；
     # 系统色取不到回落 qfw 出厂色 #009faa。setThemeColor 全局，finally 复位
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     from PySide6.QtGui import QColor
     from qfluentwidgets import Theme
     from qfluentwidgets import qconfig
@@ -667,7 +667,7 @@ def test_dark_theme_pages_are_dark(qapp, tmp_path, monkeypatch):
     # 回归：subs/library/browse 三页 ScrollArea 默认画调色板底（浅色），
     # 深色主题下整页亮块；enableTransparentBackground 后页面底透出窗口
     # 实色（none 材质下 = 深色）
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     from PySide6.QtGui import QImage
     from qfluentwidgets import Theme
     from qfluentwidgets import setTheme
@@ -712,7 +712,7 @@ def test_dark_theme_pages_are_dark(qapp, tmp_path, monkeypatch):
 def test_page_and_group_titles_follow_theme(qapp, tmp_path, monkeypatch):
     # 回归：页标题/设置组标题原为裸 QLabel（黑字死调色板），深色下不可读；
     # 换 BodyLabel 后 LABEL qss 黑/白随主题
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     from qfluentwidgets import Theme
     from qfluentwidgets import setTheme
 
@@ -740,7 +740,7 @@ def test_failures_dialog_constructs(qapp, tmp_path, monkeypatch):
     # 回归：library_page 收编 import 时误删 SubtitleLabel，失败清单一点就崩。
     # 挂宿主窗构造两种载荷的对话框（不 exec，exec 走模态循环会挂测试）；
     # MaskDialogBase 要有窗才有几何，裸 parent=None 会 AttributeError
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     from PySide6.QtWidgets import QWidget
 
     from ass_font_substitute.gui.pages.library_page import _FailuresDialog
@@ -760,7 +760,7 @@ def test_failures_dialog_constructs(qapp, tmp_path, monkeypatch):
 def test_language_change_triggers_browse_name_reload(qapp, tmp_path, monkeypatch):
     # 展示名随界面语言链重挑的接线：valueChanged("language") →
     # browse_page.reload_names（browse 列表重建）；断线即名称滞留旧语言
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     from ass_font_substitute.gui.app import AFSWindow
     from ass_font_substitute.gui.settings_store import Settings
 

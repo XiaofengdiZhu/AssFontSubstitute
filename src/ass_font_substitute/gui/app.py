@@ -194,8 +194,8 @@ class AFSWindow(FluentWindow):
             self.settings_page.set_save_suffix)
         self.settings_page.suffixChanged.connect(
             self.subs_page.set_save_suffix)
-        # store 级变更通知驱动窗口应用：任何来源的 set（含 worker 线程
-        # cache_move 同款通路）都能触发，页面不再当信号转发器
+        # store 级变更通知驱动窗口应用：任何来源的 set（含 worker 线程）
+        # 都能触发，页面不再当信号转发器
         self.settings.valueChanged.connect(self._on_setting_changed)
         # 主题切换（含跟随系统翻转）后重贴窗口材质（Mica 明暗/Acrylic 底色随
         # 主题变）；自绘控件（统计分隔线/药丸）paintEvent 现取主题色，免刷

@@ -426,7 +426,7 @@ class SubsPage(QWidget):
             self._apply_total = 0
             self._apply_dispatching = False
             self._update_summary()         # 按当前状态恢复
-        # 弹泡白名单：只报本页任务。其余 tag（cachestat/cachemove/预览渲染
+        # 弹泡白名单：只报本页任务。其余 tag（cachestat/预览渲染
         # 失败等）别页自会提示或已自行降级——无差别弹泡只会刷屏且不可读
         if isinstance(tag, str) and (
                 tag in ("slib", "apply")
