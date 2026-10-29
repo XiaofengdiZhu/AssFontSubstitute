@@ -177,6 +177,7 @@ class LibraryPage(ScrollArea):
         self.setObjectName("libraryPage")
         self.vm = LibraryVM(settings)
         self._index_worker: IndexWorker | None = None
+        self._retry_outstanding = 0        # 在途重试笔数：收尾去抖用
         self._index_progress: dict[str, tuple[int, int]] = {}
         """path → 最近一次 (done, total)：重排行后进度条原地恢复值"""
         self._progress_widgets: dict[str, tuple] = {}
@@ -452,6 +453,24 @@ class LibraryPage(ScrollArea):
                 show, self._pending_failures = self._pending_failures, None
                 show(payload)
         elif isinstance(tag, str) and tag.startswith("retry:"):
+            self._retry_settled()
+
+    def _submit_retry(self, dr: str, rel: str):
+        """失败清单的重试回调：索引更新在途时拒绝（retry_bad rw 开库
+        DELETE+重解析，与 IndexWorker 并发写同一 fontindex.db → 锁冲突
+        /重复重建）。"""
+        if self._index_worker is not None:
+            InfoBar.warning("索引更新中", "请等索引更新完成后再重试失败文件",
+                            parent=self)
+            return
+        self._retry_outstanding += 1
+        self.worker.submit(f"retry:{dr}:{rel}", _retry_job, dr, rel)
+
+    def _retry_settled(self):
+        """重试收尾去抖：逐笔回执各刷一轮全目录探测曾是 N 坏文件=N 轮
+        lib+libdetail 灌满串行队列（搜索/预览全饿死）——尾触发一次。"""
+        self._retry_outstanding = max(0, self._retry_outstanding - 1)
+        if self._retry_outstanding == 0:
             self.refresh_status()
 
     def _on_failed(self, tag, err):
@@ -465,6 +484,7 @@ class LibraryPage(ScrollArea):
             InfoBar.warning("目录状态探测失败", err, parent=self)
         elif isinstance(tag, str) and tag.startswith("retry:"):
             InfoBar.error("重试失败", err, parent=self)
+            self._retry_settled()
 
     def _apply_stats(self, stats):
         for key, _ in _STAT_KEYS:
@@ -651,8 +671,7 @@ class LibraryPage(ScrollArea):
 
         def show(payload):
             dlg = _FailuresDialog(payload,
-                                  retry=lambda dr, rel: self.worker.submit(
-                                      f"retry:{dr}:{rel}", _retry_job, dr, rel),
+                                  retry=self._submit_retry,
                                   parent=self)
             dlg.exec()
 

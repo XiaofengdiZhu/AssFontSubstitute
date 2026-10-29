@@ -801,6 +801,46 @@ def test_failures_dialog_constructs(qapp, tmp_path, monkeypatch):
     host.deleteLater()
 
 
+def test_retry_gate_and_settled_debounce(qapp, tmp_path, monkeypatch):
+    # 终审 P1 两条：①索引更新在途时重试拒绝（与 IndexWorker 并发写同库）；
+    # ②重试收尾去抖——N 笔回执只触发一轮 refresh_status（原逐笔各刷一
+    # 轮全目录探测，N 坏文件=N 轮灌满串行队列）
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Signal
+
+    from ass_font_substitute.gui.pages.library_page import LibraryPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, object)
+
+        def __init__(self):
+            super().__init__()
+            self.submits = []
+
+        def submit(self, *a):
+            self.submits.append(a)
+
+    lp = LibraryPage(Settings(tmp_path / "s.json"), _FakeWorker())
+    refreshes = []
+    monkeypatch.setattr(lp, "refresh_status", lambda: refreshes.append(1))
+    # ① 门：索引在途拒绝
+    lp._index_worker = object()      # 非None 即在途（只用 isNone 判定）
+    lp._submit_retry("J:/f", "a.ttf")
+    assert lp.worker.submits == []
+    lp._index_worker = None
+    # ② 风暴：3 笔重试只刷一轮
+    for _ in range(3):
+        lp._submit_retry("J:/f", "a.ttf")
+    assert len([s for s in lp.worker.submits if s[0].startswith("retry:")]) == 3
+    for i in range(3):
+        lp._on_result(f"retry:J:/f:a{i}", None)
+    lp.deleteLater()
+    assert refreshes == [1]          # 尾触发一轮，非 3 轮
+
+
 def test_language_change_triggers_browse_name_reload(qapp, tmp_path, monkeypatch):
     # 展示名随界面语言链重挑的接线：valueChanged("language") →
     # browse_page.reload_names（browse 列表重建）；断线即名称滞留旧语言
