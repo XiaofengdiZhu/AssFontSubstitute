@@ -1,18 +1,17 @@
-"""端到端冒烟：索引 → 提取 → 分类 → 搜索 → 决定 → 写回（真实字幕样例）。
+"""端到端冒烟：索引 → 提取 → 分类 → 搜索 → 决定 → 写回。
 
-temp/ 只读：一律在 tmp_path 上操作副本。样例缺失时静默跳过。
-与任务书差异（见 report-H.md）：
-- 孪生字体只带简体 family（无 extra_aliases），走「繁名不在库 → opencc 转简 →
-  命中 → 覆盖率」的真实孪生路径（控制器 R8）；其用字取全文件去重字符，
-  否则 200 字截断 + 标点缺席会让孪生覆盖率必然不达 0.98。
-- 追加一个「在库但覆盖不足」的字体，否则 brief 的 replace/搜索分支在本库形
-  上不可达，搜索阶段无法被冒烟。
-- 分类为 missing 时以 target=None 走同一搜索器（探针粗排），缺失字体找替身
-  也是产品语义。
+样例字幕内联构造。曾用 temp/ 真实样例（glob 首个 .ass）：不入 git，
+别人克隆即静默跳过测了个寂寞；且用户工作区语料漂移会打破「四类全出」
+的固定分布断言（2026-10-30 实锤）。内联样例四类确定性全覆盖：
+- keep：全覆蓋圓（在库全覆盖，含 \\fn 内联入桶）+ 閒置明體（样式定义
+  无对白 → 零用字 keep）
+- twin：繁體黑體 不在库，opencc 转简 繁体黑体 在库全覆盖（真实孪生
+  路径，简体 family 无额外别名）
+- replace：低覆蓋圓 在库但只录「永」，覆盖率不达标；转简不在库 → 走
+  replace/搜索（否则搜索分支在本库形上不可达）
+- missing：幽靈襯線 不在库、转简也无 → target=None 同一搜索器找替身
+  （缺失字体找替身也是产品语义）
 """
-import re
-from pathlib import Path
-
 from ass_font_substitute.core.assparse.encoding import detect_encoding
 from ass_font_substitute.core.assparse.extract import extract_usages
 from ass_font_substitute.core.assparse.rewrite import rewrite_file
@@ -27,47 +26,54 @@ from ass_font_substitute.core.similarity.cache import Cache
 from ass_font_substitute.core.similarity.search import FontSearcher
 from tests.fonts import build_font
 
-REAL = next(Path("temp").glob("*.ass"), None)
+_ALL = "永宇的好木水同"        # 全库字体统一用字（孪生/全覆盖/候选需覆盖对白全字）
+
+_SAMPLE = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Def,繁體黑體,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+Style: Low,低覆蓋圓,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+Style: Ghost,幽靈襯線,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+Style: Idle,閒置明體,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:02.00,Def,,0,0,0,,永宇的{\\fn全覆蓋圓}好
+Dialogue: 0,0:00:02.00,0:00:03.00,Low,,0,0,0,,永宇木水
+Dialogue: 0,0:00:03.00,0:00:04.00,Ghost,,0,0,0,,木水同好
+"""
 
 
 def test_core_e2e(tmp_path):
-    if REAL is None:
-        return  # 无真实样例环境：跳过
-    raw = REAL.read_bytes()
+    raw = _SAMPLE.encode("utf-8")
     enc = detect_encoding(raw)
-    text = raw.decode(enc)
-
-    # ---- 1. 提取（先于建库：需据真实用字挑 replace 受害者）----
     src = tmp_path / "in.ass"
-    src.write_bytes(raw)  # temp/ 只读，副本上工作
+    src.write_bytes(raw)          # 字节直写：文本模式会把 \n 转 \r\n
+
+    # ---- 1. 提取 ----
     ex = extract_usages(src)
     assert ex.usages
     assert not ex.parse_error
     assert any(u.style_count for u in ex.usages)          # Style 字体名入桶
     assert any(u.inline_count for u in ex.usages)         # {\fn...} 内联入桶
 
-    # ---- 2. 索引：前 3 个 Style 字体名建简体孪生（family=简体名，无额外别名）
-    #         + 1 个在库但覆盖不足的繁体名（触发 replace/搜索）+ 1 个候选圆体
-    style_fonts = sorted(set(re.findall(r"^Style:.*?,([^,]+),", text, re.M)))
-    assert style_fonts
-    import opencc
-    t2s = opencc.OpenCC("t2s")
-    # 孪生用字 = 全文件去重字符（文档序）：保证孪生覆盖真实用字（含标点）
-    font_chars = "".join(dict.fromkeys(text))
-    used_names = {u.raw_name for u in ex.usages if u.chars}
-    victim = sorted(used_names - set(style_fonts[:3]))[0]
-
+    # ---- 2. 索引：简体孪生 + 低覆盖受害体 + 全覆盖保留体 + 候选圆体 ----
     lib_dir = tmp_path / "lib"
     lib_dir.mkdir()
-    for i, name in enumerate(style_fonts[:3]):
-        build_font(lib_dir / f"twin{i}.ttf", chars=font_chars,
-                   family=t2s.convert(name))
-    build_font(lib_dir / "lowcov.ttf", chars="永", family=victim)
-    build_font(lib_dir / "cand.ttf", chars=font_chars, family="候選圓體")
+    build_font(lib_dir / "twin.ttf", chars=_ALL, family="繁体黑体")
+    build_font(lib_dir / "lowcov.ttf", chars="永", family="低覆蓋圓")
+    build_font(lib_dir / "keep.ttf", chars=_ALL, family="全覆蓋圓")
+    build_font(lib_dir / "cand.ttf", chars=_ALL, family="候選圓體")
     conn = open_db(lib_dir / "fontindex.db")
     update_index(lib_dir, conn)
+    conn.close()
     lib = LibraryIndex.open([lib_dir])
-    assert lib.stats()["fonts"] == 5
+    assert lib.stats()["fonts"] == 4
 
     # ---- 3. 分类 + 搜索 + 决定 ----
     mapping: dict[str, str] = {}
@@ -100,12 +106,10 @@ def test_core_e2e(tmp_path):
             decided.append(u.norm_name)
             if cls.kind == "replace":
                 assert any(c.similarity is not None for c in cands)
-        # keep / missing（无候选时）：不映射
-    # 真实样例语料随 temp/ 漂移（用户工作区，类别分布不固定，曾钉
-    # 「8 keep/2 twin/1 replace/3 missing」四类全出已废）——只钉冒烟
-    # 主干：replace/missing 必现（搜索+写回路径必走）、映射非空、决策
-    # 可回放；twin 机制由 matcher 单测覆盖
-    assert {"replace", "missing"} <= kinds
+        # keep：不映射
+    # 内联样例四类确定性全覆盖（曾用 temp/ 真实样例钉固定分布，语料
+    # 漂移即碎）：四类各自至少一卡
+    assert kinds == {"keep", "twin", "replace", "missing"}
     assert mapping  # R8：孪生/搜索映射必须非空
     for n in decided:
         d = latest_decision(tmp_path / "cache.db", normalize_name(n), "t2s")
@@ -116,7 +120,7 @@ def test_core_e2e(tmp_path):
     r = rewrite_file(src, mapping, out=out)
     assert r.changed_lines
     assert detect_encoding(out.read_bytes()) == enc  # 编码原样保留
-    orig = raw.decode(enc)
+    orig = _SAMPLE
     new = out.read_bytes().decode(detect_encoding(out.read_bytes()))
     ol, nl = orig.splitlines(keepends=True), new.splitlines(keepends=True)
     assert len(ol) == len(nl)
