@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 
 from ass_font_substitute.core.similarity.cache import Cache
@@ -95,3 +97,77 @@ def test_move(tmp_path):
     assert p2.exists()
     c2 = Cache(p2)
     assert c2.get_render("fp", "v1", _bundle).tiles
+
+
+def test_hit_defers_used_at(tmp_path):
+    # P2：读命中不再逐条 UPDATE+commit，只内存记账，flush() 才落库
+    c = Cache(tmp_path / "cache.db")
+    c.get_render("fp", "v1", _bundle)
+    t0 = c.conn.execute("SELECT used_at FROM renders").fetchone()[0]
+    time.sleep(0.01)
+    c.get_render("fp", "v1", _bundle)              # 命中
+    t1 = c.conn.execute("SELECT used_at FROM renders").fetchone()[0]
+    assert t1 == t0                                # 未落库
+    c.flush()
+    assert c.conn.execute("SELECT used_at FROM renders").fetchone()[0] > t0
+
+
+def test_pair_hit_defers_used_at(tmp_path):
+    c = Cache(tmp_path / "cache.db")
+    c.put_pair("a", "b", "v1", CompareResult(0.5, 1.0, 4))
+    t0 = c.conn.execute("SELECT used_at FROM pairs").fetchone()[0]
+    time.sleep(0.01)
+    c.get_pair("a", "b", "v1")
+    assert c.conn.execute("SELECT used_at FROM pairs").fetchone()[0] == t0
+    c.flush()
+    assert c.conn.execute("SELECT used_at FROM pairs").fetchone()[0] > t0
+
+
+def test_pending_autoflush_at_threshold(tmp_path):
+    # 记账满 FLUSH_PENDING 条自动落库，无需显式 flush
+    c = Cache(tmp_path / "cache.db")
+    c.FLUSH_PENDING = 4
+    ts = {}
+    for i in range(4):
+        c.put_pair(f"a{i}", f"b{i}", "v1", CompareResult(0.5, 1.0, 4))
+        ts[i] = c.conn.execute(
+            "SELECT used_at FROM pairs WHERE fpa=? AND fpb=?",
+            (f"a{i}", f"b{i}")).fetchone()[0]          # 写入时的时间戳
+        time.sleep(0.01)
+        c.get_pair(f"a{i}", f"b{i}", "v1")             # 命中记账（比写入新）
+    n = c.conn.execute(
+        "SELECT COUNT(*) FROM pairs WHERE used_at>?", (ts[0],)).fetchone()[0]
+    assert n == 4 and not c._pending_pair              # 命中时间戳已批量落库
+
+
+def test_trim_flushes_pending_lru(tmp_path):
+    # LRU 正确性：大 bundle 旧写、小 bundle 新写，命中大 bundle（记账未落库）
+    # → trim 须先 flush 再淘汰，留下的应是刚用过的大 bundle 而非盘上时间戳新的小 bundle
+    big = _bundle("永中木水火")
+    small = _bundle("永")
+    c = Cache(tmp_path / "cache.db")
+    c.get_render("fpbig", "v1", lambda: big)
+    c.get_render("fpsmall", "v1", lambda: small)
+    nb = c.conn.execute("SELECT nbytes FROM renders WHERE fingerprint='fpbig'").fetchone()[0]
+    ns = c.conn.execute("SELECT nbytes FROM renders WHERE fingerprint='fpsmall'").fetchone()[0]
+    time.sleep(0.01)
+    c.get_render("fpbig", "v1", lambda: big)       # 命中记账（最新），未落库
+    c.trim(max_bytes=nb + ns - 1)
+    kept = {r[0] for r in c.conn.execute("SELECT fingerprint FROM renders")}
+    assert kept == {"fpbig"}                       # 盘上时间戳旧的 big 因 flush 幸存
+
+
+def test_clear_and_move_settle_pending(tmp_path):
+    # clear_all 清记账；move_to 落库后再迁移（命中记账的时间戳带到新库）
+    c = Cache(tmp_path / "a.db")
+    c.get_render("fp", "v1", _bundle)
+    c.get_render("fp", "v1", _bundle)
+    c.clear_all()
+    assert not c._pending_render and c.pair_count == 0
+    c.get_render("fp", "v1", _bundle)
+    t_old = c.conn.execute("SELECT used_at FROM renders").fetchone()[0]
+    time.sleep(0.01)
+    c.get_render("fp", "v1", _bundle)              # 命中记账（比 t_old 新），未落库
+    c.move_to(tmp_path / "b" / "c.db", migrate=True)
+    c2 = Cache(tmp_path / "b" / "c.db")
+    assert c2.conn.execute("SELECT used_at FROM renders").fetchone()[0] > t_old

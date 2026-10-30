@@ -28,7 +28,9 @@ PAIRS_MAX = 300_000
 class Cache:
     """渲染/比对缓存（SQLite WAL，单连接）。
 
-    线程约束：单线程使用（生产=CoreWorker 串行队列独占）。连接按默认
+    线程约束：单线程使用（生产=CoreWorker 串行队列独占）；同库文件也不得
+    开第二个 Cache 实例——_nb_sum/used_at 记账是实例内存态，双实例互不
+    可见必漂移。连接按默认
     check_same_thread=True 创建，跨线程共享即 ProgrammingError——需共享
     时由调用方外部串行化，本层不加锁（缓存场景不值得）。
     键口径：text_ver 一律经 _kv 并入 ALGO_VER；fingerprint 语义由
@@ -40,6 +42,10 @@ class Cache:
     # 失效，持久库（Data/cache.db）里的旧口径相似度不再静默命中。
     # 键前缀实现，零迁移。v2：量尺 96→48px + 锚 43 下限复用（tile 位级变）
     ALGO_VER = "2"
+    # 读命中 used_at 记账条数阈值：满即批量落库（读路径零写入的关键参数）
+    FLUSH_PENDING = 256
+    # put_pair 触发 _trim_pairs 行数检查的节流间隔（COUNT(*) 全表扫不逐条付）
+    PAIRS_TRIM_EVERY = 256
 
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -51,6 +57,13 @@ class Cache:
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
         self._ensure_schema()
+        # 读命中 used_at 延迟记账：命中只记内存，满 FLUSH_PENDING 条或
+        # trim/move_to 前批量落库——旧口径逐命中 UPDATE+commit，渲染缓存
+        # 命中实测最坏 2.8ms/次（WAL checkpoint 抖动），大库重扫被写放大
+        self._pending_render: dict[tuple, float] = {}
+        self._pending_pair: dict[tuple, float] = {}
+        self._nb_sum: int | None = None    # renders 字节总量缓存（trim 门用）
+        self._pair_puts = 0
 
     def _ensure_schema(self):
         # 旧库 pairs 无 used_at 列：结构不兼容直接弃表重建（缓存可丢）
@@ -63,15 +76,32 @@ class Cache:
         return f"{self.ALGO_VER}\x00{text_ver}"
 
     # ---- render ----
+    def flush(self):
+        """把读命中记账的 used_at 批量落库。trim/move_to 及记账满
+        FLUSH_PENDING 条时自动触发；显式调用亦幂等。"""
+        if not self._pending_render and not self._pending_pair:
+            return
+        with self.conn:
+            if self._pending_render:
+                self.conn.executemany(
+                    "UPDATE renders SET used_at=? WHERE fingerprint=? AND text_ver=?",
+                    [(ts, fp, tv) for (fp, tv), ts in self._pending_render.items()])
+                self._pending_render.clear()
+            if self._pending_pair:
+                self.conn.executemany(
+                    "UPDATE pairs SET used_at=? WHERE fpa=? AND fpb=? AND text_ver=?",
+                    [(ts, a, b, tv) for (a, b, tv), ts in self._pending_pair.items()])
+                self._pending_pair.clear()
+
     def get_render(self, fingerprint: str, text_ver: str, loader) -> RenderBundle:
+        kv = self._kv(text_ver)
         row = self.conn.execute(
             "SELECT blob FROM renders WHERE fingerprint=? AND text_ver=?",
-            (fingerprint, self._kv(text_ver))).fetchone()
+            (fingerprint, kv)).fetchone()
         if row:
-            self.conn.execute(
-                "UPDATE renders SET used_at=? WHERE fingerprint=? AND text_ver=?",
-                (time.time(), fingerprint, self._kv(text_ver)))
-            self.conn.commit()
+            self._pending_render[(fingerprint, kv)] = time.time()
+            if len(self._pending_render) >= self.FLUSH_PENDING:
+                self.flush()
             return _decode(row[0])
         bundle = loader()
         self._put_render(fingerprint, text_ver, bundle)
@@ -83,40 +113,49 @@ class Cache:
             self.conn.execute(
                 "INSERT OR REPLACE INTO renders VALUES (?,?,?,?,?)",
                 (fingerprint, self._kv(text_ver), blob, len(blob), time.time()))
+        if self._nb_sum is not None:
+            self._nb_sum += len(blob)
         self.trim()
 
     # ---- pair ----
     def get_pair(self, a: str, b: str, text_ver: str) -> CompareResult | None:
         a, b = sorted((a, b))
+        kv = self._kv(text_ver)
         row = self.conn.execute(
             "SELECT score,size_ratio,n_chars FROM pairs "
             "WHERE fpa=? AND fpb=? AND text_ver=?",
-            (a, b, self._kv(text_ver))).fetchone()
+            (a, b, kv)).fetchone()
         if not row:
             return None
-        with self.conn:
-            self.conn.execute(
-                "UPDATE pairs SET used_at=? WHERE fpa=? AND fpb=? AND text_ver=?",
-                (time.time(), a, b, self._kv(text_ver)))
+        self._pending_pair[(a, b, kv)] = time.time()
+        if len(self._pending_pair) >= self.FLUSH_PENDING:
+            self.flush()
         return CompareResult(*row)
 
     def put_pair(self, a: str, b: str, text_ver: str, r: CompareResult):
         a, b = sorted((a, b))
+        kv = self._kv(text_ver)
         with self.conn:
             self.conn.execute(
                 "INSERT OR REPLACE INTO pairs VALUES (?,?,?,?,?,?,?)",
-                (a, b, self._kv(text_ver), r.score, r.size_ratio, r.n_chars,
-                 time.time()))
-        self._trim_pairs()
+                (a, b, kv, r.score, r.size_ratio, r.n_chars, time.time()))
+        # 同键若已有读命中记账：DB 刚写的时间更新，留旧记账反而在 flush 时回退
+        self._pending_pair.pop((a, b, kv), None)
+        # 节流：COUNT(*) 全表扫不逐条付，PAIRS_TRIM_EVERY 查一次足够
+        self._pair_puts += 1
+        if self._pair_puts % self.PAIRS_TRIM_EVERY == 0:
+            self._trim_pairs()
 
     def _trim_pairs(self, max_rows: int = PAIRS_MAX):
-        if self.pair_count <= max_rows:
+        self.flush()                       # LRU 序：记账未落库会排错淘汰序
+        n = self.pair_count
+        if n <= max_rows:
             return
         with self.conn:
             self.conn.execute(
                 "DELETE FROM pairs WHERE rowid IN ("
                 "SELECT rowid FROM pairs ORDER BY used_at LIMIT ?)",
-                (self.pair_count - max_rows,))
+                (n - max_rows,))
 
     # ---- 容量 ----
     @property
@@ -129,25 +168,43 @@ class Cache:
         return self.conn.execute("SELECT COUNT(*) FROM pairs").fetchone()[0]
 
     def trim(self, max_bytes: int = DEFAULT_LIMIT):
-        while self.render_bytes > max_bytes:
-            row = self.conn.execute(
-                "SELECT fingerprint, text_ver FROM renders "
-                "ORDER BY used_at LIMIT 1").fetchone()
-            if not row:
-                return
-            with self.conn:
-                self.conn.execute(
-                    "DELETE FROM renders WHERE fingerprint=? AND text_ver=?",
-                    row)
+        # 字节总量走内存缓存（_nb_sum），不再逐插入 SUM 全表扫；超限先 flush
+        # （LRU 序正确），再按 64 行一批删最旧，批量删代替旧逐行删+反复 SUM
+        if self._nb_sum is None:
+            self._nb_sum = self.conn.execute(
+                "SELECT COALESCE(SUM(nbytes),0) FROM renders").fetchone()[0]
+        if self._nb_sum <= max_bytes:
+            return
+        self.flush()
+        with self.conn:
+            while self._nb_sum > max_bytes:
+                rows = self.conn.execute(
+                    "SELECT fingerprint, text_ver, nbytes FROM renders "
+                    "ORDER BY used_at LIMIT 64").fetchall()
+                if not rows:
+                    self._nb_sum = 0
+                    return
+                # 批内逐行删、够数即停：整批 executemany 会砍过界
+                for r in rows:
+                    self.conn.execute(
+                        "DELETE FROM renders WHERE fingerprint=? AND text_ver=?",
+                        (r[0], r[1]))
+                    self._nb_sum -= r[2]
+                    if self._nb_sum <= max_bytes:
+                        return
 
     def clear_all(self):
         with self.conn:
             self.conn.execute("DELETE FROM renders")
             self.conn.execute("DELETE FROM pairs")
+        self._pending_render.clear()
+        self._pending_pair.clear()
+        self._nb_sum = 0
 
     def move_to(self, new_path: Path, migrate: bool = True):
         # GUI 已绿色软件化（缓存定死 Data/cache.db 不可迁移）：核心层保留，
         # 现仅核心测试使用
+        self.flush()                       # 记账落库再关连接，迁移不带丢
         self.conn.close()
         if migrate:
             new_path.parent.mkdir(parents=True, exist_ok=True)

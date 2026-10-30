@@ -56,6 +56,8 @@ class CoreWorker(QThread):
                 self.result.emit(tag, fn(ctx, *args, **kw))
             except Exception as e:
                 self.failed.emit(tag, f"{type(e).__name__}: {e}")
+        if cache is not None:
+            cache.flush()   # 读命中记账收尾：正常退出不带丢 used_at（LRU 序）
 
     def submit(self, tag, fn, *args, **kw) -> JobHandle:
         handle = JobHandle()
