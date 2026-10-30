@@ -386,7 +386,22 @@ class FontCard(CardWidget):
 
     def _sync_rows(self):
         """行集 reconcile：新 key 建行插到 card.options 位次（其后第一个
-        已建行之前，其后全为新行则尾插），指标文案变了就地改。"""
+        已建行之前，其后全为新行则尾插），指标文案变了就地改；vm 卡里
+        消失的 key 删行——门槛重筛（efd6ad9）从卡移除不达标候选后 UI 行
+        必须跟着消失，只增改不删会被读作重筛没生效。删行撤该行预览条
+        在途渲染单（teardown 同款口径：废任务塞死 worker 串行队列）。"""
+        valid = {o.key for o in self.card.options}
+        for k in [k for k in self._rows if k not in valid]:
+            row = self._rows.pop(k)
+            self._opt_layout.removeWidget(row)
+            row.deleteLater()
+            self._boxes.pop(k, None)
+            self._metrics.pop(k, None)
+            bar = self._bar_by_key.pop(k, None)
+            if bar is not None:
+                bar.cancel()
+                if bar in self._bars:
+                    self._bars.remove(bar)
         old_rows = dict(self._rows)
         for i, o in enumerate(self.card.options):
             if o.key in old_rows:

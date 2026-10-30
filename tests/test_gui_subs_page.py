@@ -1799,3 +1799,74 @@ def test_finish_search_target_error_dirty_still_regates(qapp, tmp_path,
     page.vm.finish_search(card, searcher)
     assert card.search_state == "target_error"
     assert {o.key for o in card.options if o.source == "search"} == {"fpB"}
+
+
+def test_sync_rows_removes_dropped_options(qapp):
+    """行集 reconcile 必须支持删行：门槛重筛（efd6ad9）从 vm 卡移除不
+    达标候选后，apply() 曾只增改不删——UI 行永不消失，用户读作重筛没
+    生效。删行需撤该行预览条在途渲染（teardown 同款口径）。"""
+    from ass_font_substitute.gui.subs_vm import Card
+    from ass_font_substitute.gui.subs_vm import OptionItem
+    from ass_font_substitute.gui.widgets.font_card import FontCard
+
+    c = Card(norm_name="a", raw_name="a", kind="replace", n_chars=1,
+             options=[OptionItem(key="o1", display_name="甲"),
+                      OptionItem(key="o2", display_name="乙"),
+                      OptionItem(key="o3", display_name="丙")],
+             checked_key="o1")
+    fc = FontCard(c, None, None, lambda: "")
+    fc.show()
+    qapp.processEvents()
+    assert set(fc._rows) == {"o1", "o2", "o3"}
+
+    c.options = [o for o in c.options if o.key != "o2"]
+    fc.apply()
+    qapp.processEvents()
+    assert set(fc._rows) == {"o1", "o3"}
+    assert set(fc._metrics) == {"o1", "o3"}
+    assert set(fc._boxes) == {"o1", "o3"}
+    # 布局里行真的没了（不是藏起来）
+    from ass_font_substitute.gui.widgets.font_card import QFrame
+    laid = [fc._opt_layout.itemAt(i).widget() for i in range(fc._opt_layout.count())]
+    assert all(w is None or w not in [fc._rows.get(k) for k in ("o2",)] for w in laid)
+    assert fc._opt_layout.count() == 2
+    # 重复 apply（幂等）与删除后再加回
+    fc.apply()
+    fc.apply()
+    assert set(fc._rows) == {"o1", "o3"}
+    c.options.append(OptionItem(key="o2", display_name="乙"))
+    fc.apply()
+    assert set(fc._rows) == {"o1", "o2", "o3"}
+    fc.deleteLater()
+
+
+def test_sync_rows_removal_cancels_preview_bar(qapp):
+    # 被删行的预览条撤在途渲染单（teardown 同款），并从簿记中清出
+    from ass_font_substitute.gui.subs_vm import Card
+    from ass_font_substitute.gui.subs_vm import OptionItem
+    from ass_font_substitute.gui.widgets.font_card import FontCard
+    from tests.test_gui_subs_page import _ent
+
+    ent = _ent("fp1", "甲字体")
+    c = Card(norm_name="a", raw_name="a", kind="replace", n_chars=1,
+             options=[OptionItem(key="o1", display_name="甲", entity=ent),
+                      OptionItem(key="o2", display_name="乙", entity=ent)],
+             checked_key="o1")
+    class _W(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def submit(self, *a, **k):
+            return SimpleNamespace(cancelled=False)
+
+    pvm = SimpleNamespace(mono_cells=lambda: False, get_tiles=lambda k: None)
+    fc = FontCard(c, _W(), pvm, lambda: "")
+    fc.show()
+    qapp.processEvents()
+    assert set(fc._bar_by_key) == {"o1", "o2"}
+    c.options = [o for o in c.options if o.key != "o2"]
+    fc.apply()
+    qapp.processEvents()
+    assert set(fc._bar_by_key) == {"o1"}
+    assert all(b.key != "o2" if hasattr(b, "key") else True for b in fc._bars)
+    fc.deleteLater()
