@@ -270,8 +270,10 @@ def _dispatch_pool(ctx, pool, chunks, blob, text):
 
     from ass_font_substitute.core.similarity.pool import score_chunk
     try:
-        return [f.result() for f in
-                (pool.submit(score_chunk, blob, text, ch) for ch in chunks)]
+        # 先全部提交再逐个收——result 套生成器会「提交一个等一个」全串行
+        # （GUI 实测 CPU 20% 实锤：每片只有 1 worker 忙）
+        futs = [pool.submit(score_chunk, blob, text, ch) for ch in chunks]
+        return [f.result() for f in futs]
     except BrokenProcessPool:
         ctx.pool = None
         pool.shutdown(wait=False)

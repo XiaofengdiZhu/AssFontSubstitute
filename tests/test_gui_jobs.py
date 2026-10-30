@@ -283,3 +283,42 @@ def test_dispatch_pool_isolates_poison_font(ctx_stub, monkeypatch, tmp_path):
     assert g1 is not None and g2 is not None and g1 == g2
     assert broken_pool.shutdown_called                 # 崩池即弃
     assert ctx.pool is None                            # 下次 pull 重建自愈
+
+
+def test_dispatch_pool_submits_all_before_waiting(monkeypatch):
+    # 回归钉：result() 套 submit 生成器 = 提交一个等一个全串行（GUI CPU 20%
+    # 实锤）。须先全部 submit 再逐个 result
+    from types import SimpleNamespace
+
+    from ass_font_substitute.gui import jobs as jm
+
+    class LatchPool:
+        def __init__(self, n):
+            self.n = n
+            self.submitted = 0
+
+        def submit(self, fn, blob, text, ch):
+            self.submitted += 1
+            pool = self
+
+            class _R:
+                def result(self):
+                    assert pool.submitted == pool.n, \
+                        "result 在全部 submit 前被取——派发被串行化"
+                    return fn(blob, text, ch)
+
+            return _R()
+
+    calls = {"n": 0}
+
+    def fake_score(blob, text, ch):
+        calls["n"] += 1
+        return [None] * len(ch)
+
+    monkeypatch.setattr("ass_font_substitute.core.similarity.pool.score_chunk",
+                        fake_score)
+    chunks = [[("a", 0)], [("b", 0)], [("c", 0)]]
+    ctx = SimpleNamespace(pool=LatchPool(len(chunks)), pool_workers=3,
+                          settings=None)
+    res = jm._dispatch_pool(ctx, ctx.pool, chunks, b"", "x")
+    assert calls["n"] == 3 and len(res) == 3
