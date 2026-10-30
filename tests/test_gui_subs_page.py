@@ -198,6 +198,47 @@ def test_new_searcher_reads_current_min_sim_setting(qapp, tmp_path, monkeypatch)
     assert sub[2][4] == 0.6
 
 
+def test_keep_cards_before_zero_and_unified_text(qapp, tmp_path, monkeypatch):
+    """保留两档排序+统一文案（用户报告 2026-10-30）：有字 keep（保留
+    （覆盖足够））恒排 0 字 keep（保留（无对白用字））前，与到达序
+    无关——两者 vm 同为 kind=keep，按字数分档插位。"""
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+
+    def mk_usage(raw, chars):
+        return FontUsage(raw_name=raw, norm_name=raw, style_count=1,
+                         inline_count=0, chars=set(chars), variants={raw})
+
+    # 先喂全 parse（每份到齐即批内重算清卡，假 worker 不回 classify），
+    # 再按「到达序」喂 classify 回执测插位
+    feeds = [("乙字体", [], "p1.ass"),        # 零字 keep 先到
+             ("甲字体", ["永"], "p2.ass"),     # 有字 keep 后到：须插到其前
+             ("丙字体", [], "p3.ass")]         # 零字再到：排队尾
+    for raw, chars, path in feeds:
+        u = mk_usage(raw, chars)
+        page._on_result(f"parse:{path}", FileParse(path, None, [u], [], []))
+    for raw, chars, _path in feeds:
+        u = mk_usage(raw, chars)
+        page._on_result(f"classify:{page._gen}:0", (u, UsageClass(kind="keep")))
+    assert [c.norm_name for c in page.vm.cards] == ["甲字体", "乙字体", "丙字体"]
+
+    # 统一文案：卡头徽章「保留（覆盖足够）」/ 药丸「保留（无对白用字）」
+    # 两档同灰自绘药丸（2026-10-30 拍板：绿徽章太抢眼）——卡内无 InfoBadge
+    from PySide6.QtWidgets import QLabel
+    from qfluentwidgets import InfoBadge
+
+    def texts(norm):
+        return [lab.text() for lab in page._cards_ui[norm].findChildren(QLabel)]
+
+    assert "保留（覆盖足够）" in texts("甲字体")
+    assert "保留（无对白用字）" in texts("乙字体")
+    assert not page._cards_ui["甲字体"].findChildren(InfoBadge)
+    assert not page._cards_ui["乙字体"].findChildren(InfoBadge)
+
+
 def test_threshold_change_resets_ended_searches(qapp, tmp_path, monkeypatch):
     """相似候选前三设置（覆盖率/相似率门槛+相对大小区间）调整后重置
     已停的寻找（拍板 2026-10-30）：暂停/耗尽卡归 idle、旧搜索器弃、

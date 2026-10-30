@@ -22,9 +22,20 @@ from ass_font_substitute.gui.name_lang import ui_lang
 
 KEEP = "__keep__"           # 「保留原字体名」选项键（missing/zero 卡）
 
-CARD_RANK = {"twin": 0, "replace": 1, "missing": 2, "keep": 3, "zero": 3}
-# 卡片展示序（用户拍板 2026-10-28）：孪生最前 → 需替换 → 库中没有 → 保留
-# 垫底；classify 回执按此插入（worker 串行，卡序与提交序一致）
+CARD_RANK = {"twin": 0, "replace": 1, "missing": 2, "keep": 3, "zero": 4}
+# 卡片展示序（用户拍板 2026-10-28）：孪生最前 → 需替换 → 库中没有 →
+# 保留（覆盖足够）→ 保留（无对白用字）垫底（2026-10-30 拍板：保留两档
+# 不交错，有字档在前）；classify 回执按此插入（worker 串行，卡序与
+# 提交序一致）
+
+
+def card_rank(card) -> int:
+    """插入档位：0 字 keep 归 zero 档（vm 层两者同为 kind=keep，GUI 按
+    _ekind 同口径降格展示；Card.kind="zero" 仅测试直喂出现，亦兼容）。"""
+    kind = card.kind
+    if kind == "keep" and not card.n_chars:
+        kind = "zero"
+    return CARD_RANK.get(kind, 9)
 
 
 def _opt_score(o: OptionItem) -> float:

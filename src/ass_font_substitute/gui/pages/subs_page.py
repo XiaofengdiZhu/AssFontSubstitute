@@ -42,8 +42,8 @@ from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.lastdir import pick_open_files
 from ass_font_substitute.gui.paths import decisions_path
 from ass_font_substitute.gui.preview_vm import PreviewVM
-from ass_font_substitute.gui.subs_vm import CARD_RANK
 from ass_font_substitute.gui.subs_vm import SubsVM
+from ass_font_substitute.gui.subs_vm import card_rank
 from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.widgets.font_card import FontCard
 from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
@@ -396,10 +396,11 @@ class SubsPage(QWidget):
             usage, cls = payload
             card = self.vm.make_card(usage, cls)
             self.vm.apply_default_check(card)
-            # 卡序按 CARD_RANK 插入（孪生→需替换→库中没有→保留）
+            # 卡序按 card_rank 插入（孪生→需替换→库中没有→保留两档，
+            # 0 字档垫底）
             idx = len(self.vm.cards)
             for j, c in enumerate(self.vm.cards):
-                if CARD_RANK.get(c.kind, 9) > CARD_RANK.get(card.kind, 9):
+                if card_rank(c) > card_rank(card):
                     idx = j
                     break
             self.vm.cards.insert(idx, card)

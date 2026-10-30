@@ -100,11 +100,10 @@ _KIND_STYLE = {
     "missing": ("CANCEL", "#c42b1c", "#ff99a4"),
     "zero":    (None,     "#757575", "#9a9a9a"),
 }
-_STATUS_TEXT = {"keep": "库中有 · 覆盖足够",
+_STATUS_TEXT = {"keep": "保留（覆盖足够）",
                 "replace": "需替换", "missing": "库中没有",
                 "zero": "保留（无对白用字）"}   # twin 随方向，_build_head 现拼
-_BADGE_MAKER = {"keep": InfoBadge.success,
-                "replace": InfoBadge.warning, "missing": InfoBadge.error}
+_BADGE_MAKER = {"replace": InfoBadge.warning, "missing": InfoBadge.error}
 
 _ROW_QSS = """
 QFrame#optRow{ background: transparent; border: 1px solid rgba(128,128,128,0.35);
@@ -439,7 +438,7 @@ class FontCard(CardWidget):
     # ---- 头部 ----
     def _ekind(self) -> str:
         """展示用 kind：0 字的 keep（空库/无对白用字）按零用字态展示，
-        不冒充「库中有 · 覆盖足够」。"""
+        不冒充「保留（覆盖足够）」。"""
         return ("zero" if self.card.kind == "keep" and not self.card.n_chars
                 else self.card.kind)
 
@@ -465,8 +464,10 @@ class FontCard(CardWidget):
         h.addWidget(raw_lab)
         h.addWidget(CaptionLabel(self.card.header))
         h.addStretch(1)
-        if kind == "zero":
-            h.addWidget(_pill(_STATUS_TEXT["zero"]))
+        if kind in ("zero", "keep"):
+            # 保留两档同灰药丸（用户拍板 2026-10-30：保留是无事发生态，
+            # 绿徽章太抢眼）；零字档白字浅底隐形问题本就走自绘药丸
+            h.addWidget(_pill(_STATUS_TEXT[kind]))
         elif kind == "twin":
             twin = "找到孪生简体" if self._direction == "t2s" else "找到孪生繁体"
             h.addWidget(padded_badge(InfoBadge.success, twin))   # 好结果给绿（同页头徽章）
