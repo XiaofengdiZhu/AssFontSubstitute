@@ -303,6 +303,22 @@ class SubsVM:
             card.checked_key = KEEP
 
     # ---- 搜索层 ----
+    def reset_ended_searches(self) -> int:
+        """相似候选前三设置（覆盖率/相似率门槛+相对大小区间）变更后
+        重置已停的寻找（拍板 2026-10-30）：暂停/耗尽/原字体报错卡归
+        idle——钮回「开始寻找」，再点按新设置建新搜索器；已找到候选
+        保留在列（回填按指纹去重不会重复）。在跑的不动（持有建器快照
+        跑完为止，改动对其下轮才生效）。返回重置卡数。"""
+        n = 0
+        for c in self.cards:
+            if c.searching:
+                continue
+            if c.search_state in ("paused", "exhausted", "target_error"):
+                c.search_state = "idle"
+                c.searcher = None
+                n += 1
+        return n
+
     def attach_searcher(self, card: Card, searcher: FontSearcher) -> None:
         card.searcher = searcher
         card.searching = True

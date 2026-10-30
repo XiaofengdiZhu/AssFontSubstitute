@@ -198,6 +198,50 @@ def test_new_searcher_reads_current_min_sim_setting(qapp, tmp_path, monkeypatch)
     assert sub[2][4] == 0.6
 
 
+def test_threshold_change_resets_ended_searches(qapp, tmp_path, monkeypatch):
+    """相似候选前三设置（覆盖率/相似率门槛+相对大小区间）调整后重置
+    已停的寻找（拍板 2026-10-30）：暂停/耗尽卡归 idle、旧搜索器弃、
+    钮回「开始寻找相似字体」，已找到候选保留在列；在跑的不动，
+    暂停数量 n_pause 不在重置之列。"""
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
+    btn = _cont_btn(page._cards_ui[norm])
+    old_opts = list(card.options)
+
+    # 耗尽卡：调相似率门槛 → 归「开始寻找」，候选保留
+    card.search_state = "exhausted"
+    card.searcher = SimpleNamespace(min_sim=0.85)
+    page.settings.set("min_sim", 0.7)
+    assert card.search_state == "idle" and card.searcher is None
+    assert btn.text() == "开始寻找相似字体" and btn.isEnabled()
+    assert card.options == old_opts
+
+    # 暂停数量不在重置之列；覆盖率门槛重置暂停卡
+    card.search_state = "paused"
+    card.searcher = SimpleNamespace(min_sim=0.85)
+    page.settings.set("n_pause", 3)
+    assert card.search_state == "paused" and card.searcher is not None
+    page.settings.set("cov_threshold", 0.90)
+    assert card.search_state == "idle" and card.searcher is None
+
+    # 相对大小区间两键各触发一发
+    card.search_state = "paused"
+    card.searcher = SimpleNamespace(min_sim=0.85)
+    page.settings.set("size_min", 0.8)
+    assert card.search_state == "idle"
+    card.search_state = "target_error"
+    page.settings.set("size_max", 1.2)
+    assert card.search_state == "idle"
+
+    # 在跑的不动（持有建器快照跑完为止）
+    card.searching = True
+    card.search_state = "idle"
+    card.searcher = SimpleNamespace(min_sim=0.85)
+    page.settings.set("min_sim", 0.6)
+    assert card.searching and card.searcher is not None
+
+
 def test_apply_confirm_mapping_and_record(qapp, tmp_path, monkeypatch):
     from ass_font_substitute.core.decision.store import latest_decision
     from ass_font_substitute.gui.jobs import ApplyFileResult

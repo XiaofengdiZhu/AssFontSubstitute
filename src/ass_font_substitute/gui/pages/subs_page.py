@@ -53,6 +53,11 @@ from ass_font_substitute.gui.widgets.wheel_block import WheelBlock
 
 _REMOVE_RED = QColor("#e04343")   # 移除钮图标：亮暗主题下都醒目的危险红
 
+# 相似候选前三设置（覆盖率门槛/相似率门槛/相对大小区间）的键：改动
+# 即重置已停的寻找（暂停数量 n_pause 只影响批产量，不在其列）
+_SEARCH_RESET_KEYS = frozenset(
+    {"cov_threshold", "min_sim", "size_min", "size_max"})
+
 
 class SubsPage(QWidget):
     """处理字幕页：文件卡列表 → 参数行 → 字体卡渐进填充 → 底部应用条。
@@ -210,6 +215,7 @@ class SubsPage(QWidget):
         self.worker.failed.connect(self._on_failed)
         self.preview_edit.textChanged.connect(self._on_preview_text)
         self.settings.valueChanged.connect(self._on_mono_setting)
+        self.settings.valueChanged.connect(self._on_threshold_setting)
         self._preview_debounce = QTimer(self)
         self._preview_debounce.setSingleShot(True)
         self._preview_debounce.setInterval(300)
@@ -599,6 +605,17 @@ class SubsPage(QWidget):
         self.sw_mono.setChecked(value)      # 他页翻转时本页开关跟上
         for fc in self._cards_ui.values():
             fc.rerender_previews()
+
+    def _on_threshold_setting(self, key, value):
+        # 相似候选前三设置（覆盖率/相似率门槛+相对大小区间）改动：重置
+        # 已停的寻找（拍板 2026-10-30）——暂停卡「继续寻找」与耗尽卡
+        # 「无更多」都按旧门槛口径，继续/维持已失义，归回「开始寻找」
+        # 待手点（新搜索器现读新设置）；候选保留，再搜回填按指纹去重。
+        # 大小区间双键各发一次，第二次已无可重置为空操作
+        if key not in _SEARCH_RESET_KEYS:
+            return
+        if self.vm.reset_ended_searches():
+            self._apply_all_cards()
 
     def _card(self, norm):
         return next((c for c in self.vm.cards if c.norm_name == norm), None)
