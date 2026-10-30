@@ -163,7 +163,8 @@ class FontSearcher:
         命中就地过门槛（与串行同款快路径），未命中先覆盖率剪枝再按
         RENDER_CHUNK 分块派发 worker 渲染评分，收回同序逐个 absorb。
         dispatcher 契约 = (chunks, target_blob, sample_text) → 同序结果，
-        chunk 结果 = (score, size_ratio, n_chars) | None。worker 崩溃
+        chunk 结果 = ((score, size_ratio, n_chars) | None, blob | None) | None
+        （blob = 候选编码 bundle，_absorb 回写渲染缓存）。worker 崩溃
         （BrokenProcessPool）的隔离在 dispatcher 层负责（jobs 侧弃池重建
         + 二分定位毒字体后跳过）；此处兜底收到 BrokenProcessPool 时**
         绝不在主进程重渲**（毒字体 AV 会杀整个应用）——直接弃派发集，
@@ -253,16 +254,26 @@ class FontSearcher:
             # 只交 gather 段 pair 命中候选。无 deadline（兜底路径，秒级可受）
             return out
         for ents, res in zip(cmeta, results, strict=True):
-            for (e, cov), t in zip(ents, res, strict=True):
-                cand = self._absorb(e, cov, t)
+            for (e, cov), item in zip(ents, res, strict=True):
+                cand = self._absorb(e, cov, item)
                 if cand is not None:
                     out.append(cand)
         return out
 
-    def _absorb(self, e: FontEntity, cov: float, t: tuple | None) -> Candidate | None:
-        """池结果过门槛：写 pair 缓存（与 score_pair 同口径）+ 门槛记账。"""
+    def _absorb(self, e: FontEntity, cov: float,
+                item: tuple | None) -> Candidate | None:
+        """池结果落缓存 + 过门槛：item = (result, blob)，blob 为 worker
+        渲染的编码 bundle——回写渲染缓存（与 score_pair 的 get_render 同
+        口径；865bfdf 曾把 blob 丢掉，渲染缓存永远只有 target 一行，设置
+        页「字形预览」恒 0 MB）。渲染成功即落 render 缓存（含交集空），
+        pair 仅 compare 有效时写。"""
+        if item is None:
+            return None             # 渲染失败 → 跳过（不落缓存）
+        t, blob = item
+        if blob is not None:
+            self.cache.put_render_encoded(e.fingerprint, self._tver, blob)
         if t is None:
-            return None             # 渲染失败/交集空 → 跳过
+            return None             # 交集空：渲染已缓存，无 pair 可写
         r = CompareResult(*t)
         self.cache.put_pair(self.target.fingerprint, e.fingerprint,
                             self._tver, r)

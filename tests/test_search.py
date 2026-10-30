@@ -1,3 +1,5 @@
+import numpy as np
+
 import ass_font_substitute.core.similarity.search as search_mod
 from ass_font_substitute.core.fontindex.library import LibraryIndex
 from ass_font_substitute.core.fontindex.store import open_db
@@ -515,9 +517,10 @@ def test_pool_mixed_pair_hit_and_dispatch(tmp_path):
 
 
 def test_score_chunk_worker_fn(tmp_path):
-    # worker 纯函数直测：与串行 compare 同分（同渲染管线）
+    # worker 纯函数直测：与串行 compare 同分（同渲染管线）；结果附回编码
+    # blob（调用方写渲染缓存，worker 本身零缓存契约不变）
     from ass_font_substitute.core.similarity.pool import score_chunk
-    from ass_font_substitute.core.similarity.cache import _encode
+    from ass_font_substitute.core.similarity.cache import _decode, _encode
     from ass_font_substitute.core.similarity.render import render_bundle
     from ass_font_substitute.core.similarity.metrics import compare
     d = tmp_path / "w"
@@ -529,6 +532,23 @@ def test_score_chunk_worker_fn(tmp_path):
     jobs = [(str(d / "c.ttf"), 0), (str(d / "missing.ttf"), 0)]
     res = score_chunk(blob, CHARS, jobs)
     assert res[0] is not None
+    rt, cblob = res[0]
     r = compare(tb, render_bundle(d / "c.ttf", 0, CHARS))
-    assert res[0] == (r.score, r.size_ratio, r.n_chars)
+    assert rt == (r.score, r.size_ratio, r.n_chars)
+    b2 = _decode(cblob)                         # blob 可解码且与直渲同像
+    src = render_bundle(d / "c.ttf", 0, CHARS)
+    assert b2.tiles.keys() == src.tiles.keys()
+    assert all(np.array_equal(b2.tiles[c], src.tiles[c]) for c in b2.tiles)
     assert res[1] is None                       # 渲染失败 → None 跳过
+
+
+def test_pool_slice_writes_render_cache(tmp_path):
+    # 回归：池 worker 渲染结果必须回写渲染缓存——865bfdf 丢 blob，设置页
+    # 「字形预览」恒 0 MB（真库实锤：扫完 1280 实体 renders 仅 target 1 行）
+    lib = _lib(tmp_path, {"name": "c0", "chars": CHARS, "family": "圓體0"})
+    target = _by(lib, "TGT")
+    s = _pool_searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=10)
+    s.next_slice(max_evals=4, max_seconds=10, dispatcher=_InlineDispatcher())
+    n = s.cache.conn.execute("SELECT COUNT(*) FROM renders").fetchone()[0]
+    assert n == 2                               # target 急渲 + 候选回写
+    assert s.cache.render_bytes > 0

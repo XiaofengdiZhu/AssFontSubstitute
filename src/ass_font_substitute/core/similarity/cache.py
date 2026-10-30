@@ -71,9 +71,32 @@ class Cache:
         if cols and "used_at" not in cols:
             self.conn.execute("DROP TABLE pairs")
         self.conn.executescript(DDL)
+        self._purge_stale_algo()
+        self._enable_auto_vacuum()
+
+    def _purge_stale_algo(self):
+        # 旧 ALGO 版本行打开即清：永不命中纯占空间，且污染 render_bytes
+        # 统计（设置页显假 MB）。键前缀 2 位定宽（"02\x00…"），用 substr
+        # 定长前缀比对——length()/LIKE 遇值内 \x00 截断，substr 取前缀安全
+        prefix = f"{int(self.ALGO_VER):02d}"
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM renders WHERE substr(text_ver,1,2) != ?", (prefix,))
+            self.conn.execute(
+                "DELETE FROM pairs WHERE substr(text_ver,1,2) != ?", (prefix,))
+
+    def _enable_auto_vacuum(self):
+        # FULL：DELETE 释放的页在 commit 时自动归还 OS——清除缓存/LRU 淘汰
+        # 后文件不再驻留空洞（实测旧行为：Data/cache.db 内容 2MB 文件
+        # 108MB，freelist 占 99.6%）。存量库置位需 VACUUM 重建一次性付；
+        # 新空库 VACUUM 近零成本
+        if self.conn.execute("PRAGMA auto_vacuum").fetchone()[0] != 1:
+            self.conn.execute("PRAGMA auto_vacuum=FULL")
+            self.conn.execute("VACUUM")
 
     def _kv(self, text_ver: str) -> str:
-        return f"{self.ALGO_VER}\x00{text_ver}"
+        # ALGO_VER 转定宽 2 位前缀（_purge_stale_algo 的 substr 依赖定宽）
+        return f"{int(self.ALGO_VER):02d}\x00{text_ver}"
 
     # ---- render ----
     def flush(self):
@@ -108,7 +131,11 @@ class Cache:
         return bundle
 
     def _put_render(self, fingerprint, text_ver, bundle: RenderBundle):
-        blob = _encode(bundle)
+        self.put_render_encoded(fingerprint, text_ver, _encode(bundle))
+
+    def put_render_encoded(self, fingerprint: str, text_ver: str, blob: bytes):
+        """直接落已编码 blob（池模式 worker 渲染后回传，免主进程重编码）。
+        编码口径（_encode + 键前缀）与 worker 侧同库同版本，无需校验。"""
         with self.conn:
             self.conn.execute(
                 "INSERT OR REPLACE INTO renders VALUES (?,?,?,?,?)",
@@ -200,6 +227,9 @@ class Cache:
         self._pending_render.clear()
         self._pending_pair.clear()
         self._nb_sum = 0
+        # WAL 模式 auto_vacuum 的页归还推迟到 checkpoint：清除是用户显式
+        # 一次性操作，TRUNCATE 立刻把磁盘还回去（实测 8MB→24KB）
+        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     def move_to(self, new_path: Path, migrate: bool = True):
         # GUI 已绿色软件化（缓存定死 Data/cache.db 不可迁移）：核心层保留，

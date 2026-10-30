@@ -171,3 +171,51 @@ def test_clear_and_move_settle_pending(tmp_path):
     c.move_to(tmp_path / "b" / "c.db", migrate=True)
     c2 = Cache(tmp_path / "b" / "c.db")
     assert c2.conn.execute("SELECT used_at FROM renders").fetchone()[0] > t_old
+
+
+def test_put_render_encoded_direct(tmp_path):
+    # 池模式 worker 回传已编码 blob：直接落库免重编码，读命中不重渲
+    from ass_font_substitute.core.similarity.cache import _encode
+    c = Cache(tmp_path / "cache.db")
+    src = _bundle("永中")
+    c.put_render_encoded("fp", "v1", _encode(src))
+    calls = []
+    b = c.get_render("fp", "v1", lambda: calls.append(1) or _bundle("永中"))
+    assert not calls
+    for ch in "永中":
+        assert np.array_equal(b.tiles[ch], src.tiles[ch])
+    assert c.render_bytes == len(_encode(src))
+
+
+def test_open_purges_stale_algo_rows(tmp_path):
+    # ALGO 升版后旧前缀行打开即清：永不命中纯占空间，还污染 render_bytes
+    # 统计（设置页显假 MB）
+    p = tmp_path / "cache.db"
+    c = Cache(p)
+    c.put_render_encoded("fp", "v1", b"keep")
+    with c.conn:        # \x00 不能进 SQL 字面量，一律参数绑定
+        c.conn.execute("INSERT INTO renders VALUES (?,?,?,?,?)",
+                       ("old", "1\x00v0", b"", 99999, 0))
+        c.conn.execute("INSERT INTO pairs VALUES (?,?,?,?,?,?,?)",
+                       ("a", "b", "1\x00v0", 0.5, 1.0, 4, 0))
+    c.conn.close()
+    c2 = Cache(p)
+    assert c2.render_bytes == 4              # 旧行不计（b"keep"）
+    assert c2.pair_count == 0
+    n = c2.conn.execute("SELECT COUNT(*) FROM renders").fetchone()[0]
+    assert n == 1                            # 当前版本行幸存
+
+
+def test_delete_reclaims_disk_space(tmp_path):
+    # auto_vacuum=FULL：删除后页归还 OS，文件不驻留百 MB 空洞（实测旧行为：
+    # Data/cache.db 27710/27829 页 freelist，内容 2MB 文件 108MB）
+    p = tmp_path / "cache.db"
+    c = Cache(p)
+    big = b"\0" * (8 * 1024 * 1024)
+    with c.conn:
+        c.conn.execute("INSERT INTO renders VALUES ('fp', ?, ?, ?, 0)",
+                       (c._kv("v1"), big, len(big)))
+    c.conn.commit()
+    assert p.stat().st_size > 8 * 1024 * 1024
+    c.clear_all()
+    assert p.stat().st_size < 4 * 1024 * 1024

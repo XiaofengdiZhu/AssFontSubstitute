@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ass_font_substitute.core.similarity.cache import _decode
+from ass_font_substitute.core.similarity.cache import _encode
 from ass_font_substitute.core.similarity.metrics import compare
 from ass_font_substitute.core.similarity.render import render_bundle
 
@@ -21,9 +22,12 @@ from ass_font_substitute.core.similarity.render import render_bundle
 def score_chunk(target_blob: bytes, sample_text: str,
                 jobs: list[tuple[str, int]]) -> list[tuple | None]:
     """一批候选评分。jobs = [(path, face_index)…]，返回同序
-    (score, size_ratio, n_chars) 或 None（渲染失败/交集空，调用方跳过）。
-    target_blob = _encode(target RenderBundle)——每任务解码一次（~3ms）
-    摊到批内逐字体。"""
+    (result, blob)：result = (score, size_ratio, n_chars) | None（渲染
+    失败/交集空，调用方跳过）；blob = _encode(候选 RenderBundle)（渲染
+    成功才有，含交集空）——调用方写渲染缓存，worker 本身仍零缓存零状态
+    （缓存写留主进程，Cache 单连接契约不变）。blob 编码 ~2ms，14KB/字体
+    IPC 可忽略。target_blob = _encode(target RenderBundle)——每任务解码
+    一次（~3ms）摊到批内逐字体。"""
     tb = _decode(target_blob)
     out: list[tuple | None] = []
     for path, face_index in jobs:
@@ -33,5 +37,6 @@ def score_chunk(target_blob: bytes, sample_text: str,
         except Exception:
             out.append(None)        # 候选渲染失败无法证明达标（spec §11：跳过）
             continue
-        out.append(None if r is None else (r.score, r.size_ratio, r.n_chars))
+        out.append((None if r is None else (r.score, r.size_ratio, r.n_chars),
+                    _encode(b)))
     return out
