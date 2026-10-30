@@ -86,13 +86,23 @@ class Cache:
                 "DELETE FROM pairs WHERE substr(text_ver,1,2) != ?", (prefix,))
 
     def _enable_auto_vacuum(self):
-        # FULL：DELETE 释放的页在 commit 时自动归还 OS——清除缓存/LRU 淘汰
+        # FULL：DELETE 释放的页在 checkpoint 时归还 OS——清除缓存/LRU 淘汰
         # 后文件不再驻留空洞（实测旧行为：Data/cache.db 内容 2MB 文件
-        # 108MB，freelist 占 99.6%）。存量库置位需 VACUUM 重建一次性付；
-        # 新空库 VACUUM 近零成本
-        if self.conn.execute("PRAGMA auto_vacuum").fetchone()[0] != 1:
-            self.conn.execute("PRAGMA auto_vacuum=FULL")
-            self.conn.execute("VACUUM")
+        # 108MB，freelist 占 99.6%）。存量库置位需 VACUUM 重建一次性付
+        # （实测 113MB 库 0.25s）；新空库 VACUUM 近零成本
+        try:
+            if self.conn.execute("PRAGMA auto_vacuum").fetchone()[0] != 1:
+                self.conn.execute("PRAGMA auto_vacuum=FULL")
+                self.conn.execute("VACUUM")
+                # WAL 下 VACUUM 的截断要 checkpoint 才落盘（实测不 checkpoint
+                # 则 113MB 文件整个会话期驻留，conn.close 才缩）——一次性
+                # 成本顺手付掉，等同 clear_all 的还盘口径
+                self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.OperationalError:
+            # VACUUM 需闪断独占（并发读连接/双开实例即 BUSY）：置位只进内存
+            # 未写 header，下次打开自动重试——不值得为此炸 CoreWorker 启动
+            # （cache=None 整个应用残废直到重启）
+            pass
 
     def _kv(self, text_ver: str) -> str:
         # ALGO_VER 转定宽 2 位前缀（_purge_stale_algo 的 substr 依赖定宽）

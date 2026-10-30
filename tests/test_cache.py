@@ -219,3 +219,32 @@ def test_delete_reclaims_disk_space(tmp_path):
     assert p.stat().st_size > 8 * 1024 * 1024
     c.clear_all()
     assert p.stat().st_size < 4 * 1024 * 1024
+
+
+def test_first_open_reclaims_legacy_bloat(tmp_path):
+    # 存量库首次打开（升级路径）：旧前缀行即清 + auto_vacuum 置位 + 截断
+    # 落盘一次完成。回归钉：VACUUM 在 WAL 下只重建不缩文件，缺 TRUNCATE
+    # checkpoint 时 113MB 文件整个会话期驻留（实测 conn.close 才还）
+    import sqlite3
+    p = tmp_path / "cache.db"
+    conn = sqlite3.connect(p)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("CREATE TABLE renders(fingerprint TEXT, text_ver TEXT, "
+                 "blob BLOB, nbytes INTEGER, used_at REAL, "
+                 "PRIMARY KEY(fingerprint, text_ver))")
+    big = b"\0" * (8 * 1024 * 1024)
+    # 旧格式键（裸 ALGO_VER 前缀）+ 大 blob：升级前的真实存量形态
+    # （\x00 不能进 SQL 字面量，键也参数绑定）
+    conn.execute("INSERT INTO renders VALUES ('fp', ?, ?, ?, 0)",
+                 ("2\x00v0", big, len(big)))
+    conn.commit()
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    conn.close()
+    assert p.stat().st_size > 8 * 1024 * 1024
+    c = Cache(p)
+    try:
+        assert c.render_bytes == 0                # 旧前缀行已清
+        assert c.conn.execute("PRAGMA auto_vacuum").fetchone()[0] == 1
+        assert p.stat().st_size < 4 * 1024 * 1024  # 打开即还盘，不等 close
+    finally:
+        c.conn.close()
