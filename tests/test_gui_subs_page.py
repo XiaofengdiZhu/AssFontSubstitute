@@ -414,7 +414,7 @@ def test_preview_text_and_save_mode_combo(qapp, tmp_path, monkeypatch):
 
 
 def test_reload_keeps_unchecked_state(qapp, tmp_path, monkeypatch):
-    # 回归：重新载入重解析后不得恢复被用户取消勾选的文件（否则
+    # 回归：重解析回执并入后不得恢复被用户取消勾选的文件（否则
     # 「替换并保存」会写回明确排除的文件）
     page = _make_page(qapp, tmp_path, monkeypatch)
     from ass_font_substitute.core.models import FontUsage
@@ -427,8 +427,88 @@ def test_reload_keeps_unchecked_state(qapp, tmp_path, monkeypatch):
 
     page._on_result("parse:p.ass", parse_payload("p.ass"))
     page.vm.set_checked("p.ass", False)
-    page._on_result("parse:p.ass", parse_payload("p.ass"))   # 重载重解析
+    page._on_result("parse:p.ass", parse_payload("p.ass"))   # 重解析并入
     assert [f.checked for f in page.vm.files if f.path == "p.ass"] == [False]
+
+
+def test_remove_all_files_button(qapp, tmp_path, monkeypatch):
+    """标题栏「移除全部」（用户拍板 2026-10-30）：图标红同文件行移除钮、
+    无文件禁用；单文件直清，一个以上 MessageBox 确认（取消不动/确定
+    清空——vm 记账、_removed 弃置迟到回执、行卡重建成空态卡、整页重算
+    清卡）。"""
+
+    from qfluentwidgets import FluentIcon as FIF
+
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    from ass_font_substitute.gui.pages import subs_page
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    assert page.btn_clear.text() == "移除全部"
+    # 图标红同文件行移除钮（同 reference 渲染逐像素等价）
+    ref = FIF.REMOVE_FROM.icon(color=subs_page._REMOVE_RED).pixmap(32, 32)
+    img = page.btn_clear.icon().pixmap(32, 32).toImage()
+    assert img == ref.toImage()
+    # 空列表禁用；有文件启用
+    assert not page.btn_clear.isEnabled()
+
+    def parse_payload(path):
+        return FileParse(path, None, [FontUsage(
+            raw_name="甲字体", norm_name="甲字体", style_count=1,
+            inline_count=1, chars=set("永宇"), variants={"甲字体"})], [], [])
+
+    page._on_result("parse:p1.ass", parse_payload("p1.ass"))
+    # 单文件直清：不弹窗
+    calls = []
+
+    def _dlg_factory(ret):
+        class _Dlg:
+            def __init__(self, title, content, parent):
+                calls.append((title, content, parent))
+                self.yesButton, self.cancelButton = _Btn(), _Btn()
+
+            def exec(self):
+                return ret
+
+        class _Btn:
+            def setText(self, t):
+                self.text = t
+
+        return _Dlg
+
+    monkeypatch.setattr(subs_page, "MessageBox", _dlg_factory(1))
+    page._remove_all_files()
+    assert page.vm.files == [] and not calls
+    assert "p1.ass" in page._removed
+    assert not page.btn_clear.isEnabled()
+
+    # 两份文件：弹窗确认。取消不动（重加走 _add_paths：解除 _removed）
+    page._add_paths(["p1.ass"])
+    page._on_result("parse:p1.ass", parse_payload("p1.ass"))
+    page._on_result("parse:p2.ass", parse_payload("p2.ass"))
+    for i in range(2):
+        u = page.vm.files[i].usages[0]
+        page._on_result(f"classify:{page._gen}:{i}",
+                        (u, UsageClass(kind="keep")))
+    assert len(page.vm.files) == 2 and page._cards_ui
+    assert page.btn_clear.isEnabled()
+
+    monkeypatch.setattr(subs_page, "MessageBox", _dlg_factory(0))
+    page._remove_all_files()
+    assert len(page.vm.files) == 2 and len(calls) == 1
+    assert calls[0][0] == "移除全部字幕文件"
+    assert "确认移除 2 个字幕文件" in calls[0][1]
+
+    # 确定：清空
+    monkeypatch.setattr(subs_page, "MessageBox", _dlg_factory(1))
+    page._remove_all_files()
+    assert page.vm.files == [] and not page._cards_ui
+    assert {"p1.ass", "p2.ass"} <= page._removed
+    assert not page.btn_clear.isEnabled()
+    # 迟到回执弃置：文件不冒回、不重算
+    page._on_result("parse:p1.ass", parse_payload("p1.ass"))
+    assert page.vm.files == []
 
 
 def test_parse_batch_gates_reclassify(qapp, tmp_path, monkeypatch):

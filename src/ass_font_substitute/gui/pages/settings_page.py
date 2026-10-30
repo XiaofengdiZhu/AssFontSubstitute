@@ -19,11 +19,11 @@ from qfluentwidgets import BodyLabel
 from qfluentwidgets import CaptionLabel
 from qfluentwidgets import ColorDialog
 from qfluentwidgets import ComboBox
-from qfluentwidgets import Dialog
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import HyperlinkCard
 from qfluentwidgets import InfoBar
 from qfluentwidgets import LineEdit
+from qfluentwidgets import MessageBox
 from qfluentwidgets import MessageBoxBase
 from qfluentwidgets import PrimaryPushSettingCard
 from qfluentwidgets import PushButton
@@ -596,8 +596,11 @@ class SettingsPage(ScrollArea):
             InfoBar.error("缓存操作失败", f"{tag}: {err}", parent=self)
 
     def _clear_cache(self):
-        w = Dialog("清除相似度缓存", "将删除全部字形预览与相似度记录，下次搜索重新计算。确定？",
-                   self)
+        w = MessageBox("清除相似度缓存",
+                       "确认清除全部字体的相似度记录和对比文字渲染缓存？"
+                       "下次寻找相似字体时会再次产生", self)
+        w.yesButton.setText("确认")
+        w.cancelButton.setText("取消")
         if w.exec():
             self.worker.submit("cacheclear", _clear_job)
 

@@ -276,8 +276,9 @@ def test_default_check_last_decision_wins(vm_full, tmp_path):
 
 
 def test_default_check_replay_keeps_original_source(vm_full, tmp_path):
-    # 回归：记忆指向原字体行时只加「上次使用」徽标，不改写 source——
-    # 勾原字体行 = 不替换（Card.replaced 语义）不得被回放破坏
+    # 回归：记忆指向原字体行时不改写 source（勾原字体行 = 不替换，
+    # Card.replaced 语义），也不挂「上次使用」徽标（用户拍板 2026-10-30：
+    # 原行徽章已够，无事发生态不再标注）
     vm, ents = _vm_full(vm_full)
     usage = _usage("黑体", FULL)
     cls = UsageClass("keep", [ents[0], ents[1]], 1.0, [])
@@ -287,10 +288,8 @@ def test_default_check_replay_keeps_original_source(vm_full, tmp_path):
     o = card.option("fp-hei")
     assert card.checked_key == "fp-hei"
     assert o.source == "original"
-    assert "上次使用" in o.badges
+    assert "上次使用" not in o.badges
     assert card.replaced is False
-    vm.apply_default_check(card)                       # 回放去重：徽标不叠加
-    assert o.badges.count("上次使用") == 1
 
 
 def test_default_check_keep_decision_targets_keep_option(vm_full, tmp_path):

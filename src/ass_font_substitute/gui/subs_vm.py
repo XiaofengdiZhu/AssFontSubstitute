@@ -292,12 +292,14 @@ class SubsVM:
                 return
             o = card.option(fp) if not keep else None
             if o is not None:
-                # 回放只加「上次使用」徽标，不改写 source：记忆落在原字体行
-                # 时保持 source=original，Card.replaced 语义（勾原字体=不替换）
+                # 回放不改写原字体行 source（勾原字体=不替换的 Card.replaced
+                # 语义），也不挂「上次使用」徽标（用户拍板 2026-10-30：原行
+                # 「原字体」徽章已够，无事发生态不再标注）；其余行翻 last
+                # +挂徽标
                 if o.source != "original":
                     o.source = "last"
-                if "上次使用" not in o.badges:
-                    o.badges = [*o.badges, "上次使用"]
+                    if "上次使用" not in o.badges:
+                        o.badges = [*o.badges, "上次使用"]
                 card.checked_key = fp
                 return
         if card.kind == "twin":

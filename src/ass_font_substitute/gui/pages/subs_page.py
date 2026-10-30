@@ -20,6 +20,7 @@ from qfluentwidgets import GroupHeaderCardWidget
 from qfluentwidgets import InfoBadge
 from qfluentwidgets import InfoBar
 from qfluentwidgets import LineEdit
+from qfluentwidgets import MessageBox
 from qfluentwidgets import PrimaryPushButton
 from qfluentwidgets import PrimarySplitPushButton
 from qfluentwidgets import PushButton
@@ -121,7 +122,10 @@ class SubsPage(QWidget):
         # 字幕文件卡在 _rebuild_file_rows 里整卡重建（GroupHeaderCardWidget）：
         # 汇总/两钮是常驻控件，重建时重挂进新卡标题栏
         self.files_summary = CaptionLabel("0 / 0 个文件 · 0 种字体")
-        self.btn_reload = PushButton(FIF.SYNC, "重新载入")
+        # 图标红同文件行移除钮（危险动作同色）；空列表禁用（_update_files_summary）
+        self.btn_clear = PushButton(
+            FIF.REMOVE_FROM.icon(color=_REMOVE_RED), "移除全部")
+        self.btn_clear.setEnabled(False)
         # 主钮加文件，箭头 flyout 加目录（2026-10-29 用户要求）
         self.btn_add = PrimarySplitPushButton(FIF.ADD, "添加文件")
         self.files_box = QVBoxLayout()
@@ -210,7 +214,7 @@ class SubsPage(QWidget):
         act_dir.setToolTip("")   # qfw 菜单项悬停默认弹 text 同文 tooltip
         menu.addAction(act_dir)
         self.btn_add.setFlyout(menu)
-        self.btn_reload.clicked.connect(self._reload_files)
+        self.btn_clear.clicked.connect(self._remove_all_files)
         self.worker.result.connect(self._on_result)
         self.worker.failed.connect(self._on_failed)
         self.preview_edit.textChanged.connect(self._on_preview_text)
@@ -256,10 +260,29 @@ class SubsPage(QWidget):
         for p in paths:
             self.worker.submit(f"parse:{p}", _parse_job, p)
 
-    def _reload_files(self):
-        self._parsing.update(f.path for f in self.vm.files)
+    def _remove_all_files(self):
+        """一键清空文件列表（用户拍板 2026-10-30，替代「重新载入」）：
+        单文件直清；一个以上弹窗确认（MessageBox 无标题栏）。确认后逐份
+        走移除记账（_removed 弃置迟到回执、_parsing 不卡批），行卡只重建
+        一次，末了整页重算清卡。"""
+        n = len(self.vm.files)
+        if not n:
+            return
+        if n > 1:
+            w = MessageBox("移除全部字幕文件",
+                           f"确认移除 {n} 个字幕文件？选择的字体将记忆，"
+                           "重新添加即恢复。", self)
+            w.yesButton.setText("确认")
+            w.cancelButton.setText("取消")
+            if not w.exec():
+                return
         for f in self.vm.files:
-            self.worker.submit(f"parse:{f.path}", _parse_job, f.path)
+            self._removed.add(f.path)
+            self._parsing.discard(f.path)
+        self.vm.files = []
+        self._rebuild_file_rows()
+        if not self._parsing:
+            self._reclassify()
 
     def _parse_arrived(self, path: str):
         """批内一份结果到达：先记账，整批收齐才重算——逐份重算会把
@@ -277,7 +300,7 @@ class SubsPage(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         # 一张 GroupHeaderCardWidget 框住全部文件行（行间分隔线由组件管）；
-        # 标题栏当工具条：左=标题+汇总，右=重新载入+添加文件
+        # 标题栏当工具条：左=标题+汇总，右=移除全部+添加文件
         card = GroupHeaderCardWidget(self)
         card.setTitle("字幕文件")
         # 标题栏左块两行：标题下挂汇总（标题栏 48px 容得下）
@@ -290,7 +313,7 @@ class SubsPage(QWidget):
         lv.addWidget(self.files_summary)
         card.headerLayout.addWidget(left)
         card.headerLayout.addStretch(1)
-        card.headerLayout.addWidget(self.btn_reload)
+        card.headerLayout.addWidget(self.btn_clear)
         card.headerLayout.addWidget(self.btn_add)
         for f in self.vm.files:
             # qfw QSS min-width:28px 把空文本框撑到 57px（indicator 右侧
@@ -366,6 +389,7 @@ class SubsPage(QWidget):
         total = len(self.vm.files)
         n_fonts = len(self.vm.merged_usages())
         self.files_summary.setText(f"{checked} / {total} 个文件 · {n_fonts} 种字体")
+        self.btn_clear.setEnabled(bool(total))
 
     def _on_file_checked(self, path, on):
         self.vm.set_checked(path, on)
