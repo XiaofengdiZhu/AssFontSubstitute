@@ -626,8 +626,9 @@ class SubsPage(QWidget):
                                cancel)     # 续用：累计 hit_count 语义
             return
         # 新搜索器：相似度基准由 UI 线程算好传入（worker 线程无 vm 引用）；
-        # 门槛取 card.min_sim（vm 与在用搜索器保持同步），非设置页原值；
-        # 覆盖率/大小区间此刻从设置页现读（改设置不影响在跑的搜索器）
+        # 门槛/覆盖率/大小区间此刻从设置页现读——拍板「下次寻找相似时
+        # 生效」，点开始寻找即下次（曾读 card.min_sim 建卡快照，relax
+        # 时代遗留，设置改动进不了首轮搜索，2026-10-30 报告修复）
         card.searching = True
         cancel = {"cancelled": False}       # 先立取消标志：newsearcher 在途
         self._cancels[norm] = cancel        # 时点 Pause 也能生效（回执沿用）
@@ -637,7 +638,7 @@ class SubsPage(QWidget):
                            self.vm.chars_by_norm.get(norm, set()),
                            float(self.settings.get("cov_threshold")),
                            int(self.settings.get("n_pause")),
-                           float(card.min_sim or self.settings.get("min_sim")),
+                           float(self.settings.get("min_sim")),
                            (float(self.settings.get("size_min")),
                             float(self.settings.get("size_max"))),
                            self._direction)

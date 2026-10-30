@@ -307,7 +307,7 @@ class SubsVM:
         card.searcher = searcher
         card.searching = True
         card.search_state = "idle"
-        # 卡片门槛跟随本轮实搜值：放宽重算以此为基准（降 0.10 至下限）
+        # 卡片门槛记录本轮实搜值（新搜索器已改从设置页现读，此字段仅存档）
         card.min_sim = float(searcher.min_sim)
 
     def add_candidates(self, card: Card, candidates) -> list[OptionItem]:

@@ -151,8 +151,8 @@ def test_search_chain_pause_resume_exhaust_and_relax(qapp, tmp_path, monkeypatch
     assert card.search_state == "exhausted" and len(card.options) == 4
     assert len(page.worker.submits) == n_sub                 # 不再续拉
 
-    # 耗尽后调低门槛再搜：新门槛建新搜索器（relax 钮已删，直设等价）
-    card.min_sim = 0.75
+    # 耗尽后再搜：新搜索器按设置现值建门槛（relax 钮已删）
+    page.settings.set("min_sim", 0.75)
     page._continue_search(norm)
     sub = [s for s in page.worker.submits if s[0] == f"newsearcher:{norm}"][-1]
     assert sub[2][4] == 0.75                         # 新门槛建新搜索器
@@ -183,6 +183,19 @@ def test_search_activity_signal_tracks_card_searching(qapp, tmp_path,
     page._on_result(f"pull:{norm}", ([], "exhausted"))
     assert events == [True, False]
     assert not page._search_active
+
+
+def test_new_searcher_reads_current_min_sim_setting(qapp, tmp_path, monkeypatch):
+    """改相似率门槛后点开始寻找=拍板的「下次寻找」：新搜索器按设置页
+    现值建（覆盖率/大小同口径，现读）。曾读 card.min_sim——建卡时
+    快照，relax 时代遗留，设置改动永远进不了首轮搜索。"""
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, _card, norm = _feed_replace_card(page, ent_a, ent_b)
+    page.settings.set("min_sim", 0.6)
+    page._continue_search(norm)
+    sub = [s for s in page.worker.submits if s[0] == f"newsearcher:{norm}"][-1]
+    assert sub[2][4] == 0.6
 
 
 def test_apply_confirm_mapping_and_record(qapp, tmp_path, monkeypatch):
