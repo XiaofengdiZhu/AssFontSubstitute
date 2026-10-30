@@ -598,7 +598,7 @@ class SettingsPage(ScrollArea):
     def _clear_cache(self):
         w = MessageBox("清除相似度缓存",
                        "确认清除全部字体的相似度记录和对比文字渲染缓存？"
-                       "下次寻找相似字体时会再次产生", self)
+                       "下次寻找相似字体时会再次产生", self.window())
         w.yesButton.setText("确认")
         w.cancelButton.setText("取消")
         if w.exec():

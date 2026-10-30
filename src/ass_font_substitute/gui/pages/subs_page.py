@@ -271,7 +271,7 @@ class SubsPage(QWidget):
         if n > 1:
             w = MessageBox("移除全部字幕文件",
                            f"确认移除 {n} 个字幕文件？选择的字体将记忆，"
-                           "重新添加即恢复。", self)
+                           "重新添加即恢复。", self.window())
             w.yesButton.setText("确认")
             w.cancelButton.setText("取消")
             if not w.exec():
@@ -636,7 +636,9 @@ class SubsPage(QWidget):
         # 已停的寻找（拍板 2026-10-30）——暂停卡「继续寻找」与耗尽卡
         # 「无更多」都按旧门槛口径，继续/维持已失义，归回「开始寻找」
         # 待手点（新搜索器现读新设置）；候选保留，再搜回填按指纹去重。
-        # 大小区间双键各发一次，第二次已无可重置为空操作
+        # 在跑卡不暂停（拍板 2026-10-30 二次确认），置 dirty 后停时归
+        # idle（finish_search）。大小区间双键各发一次，第二次已无可
+        # 重置为空操作
         if key not in _SEARCH_RESET_KEYS:
             return
         if self.vm.reset_ended_searches():

@@ -83,6 +83,7 @@ class Card:
     checked_key: str | None = None
     searching: bool = False
     search_state: str = "idle"                         # idle/paused/exhausted/target_error
+    threshold_dirty: bool = False                      # 在跑中门槛变了：停后归 idle 不进 paused
     min_sim: float | None = None
     searcher: FontSearcher | None = None               # 仅 UI 线程读写；worker 只借用
 
@@ -326,15 +327,18 @@ class SubsVM:
         """相似候选前三设置（覆盖率/相似率门槛+相对大小区间）变更后
         重置已停的寻找（拍板 2026-10-30）：暂停/耗尽/原字体报错卡归
         idle——钮回「开始寻找」，再点按新设置建新搜索器；已找到候选
-        保留在列（回填按指纹去重不会重复）。在跑的不动（持有建器快照
-        跑完为止，改动对其下轮才生效）。返回重置卡数。"""
+        保留在列（回填按指纹去重不会重复）。在跑的不暂停（拍板
+        2026-10-30 二次确认），但置 threshold_dirty：跑停后归 idle 不进
+        「继续寻找」（finish_search）。返回重置卡数（不含在跑打标）。"""
         n = 0
         for c in self.cards:
             if c.searching:
+                c.threshold_dirty = True
                 continue
             if c.search_state in ("paused", "exhausted", "target_error"):
                 c.search_state = "idle"
                 c.searcher = None
+                c.threshold_dirty = False
                 n += 1
         return n
 
@@ -385,8 +389,15 @@ class SubsVM:
         """终态：cancelled=搜索中手动暂停（searcher 未自然暂停，归 paused
         态——续搜复用同一 searcher，累计 hit_count/compared 语义不丢）>
         target_error（原字体无法渲染）> paused（可继续）> exhausted（无
-        更多相似字体）。"""
+        更多相似字体）。门槛 dirty 卡例外（拍板 2026-10-30：在跑中改了
+        门槛，停后直接恢复初始态，不进「继续寻找」——旧口径的候选已
+        全列，续搜/无更多皆失义；target_error 与门槛无关保留原态）。"""
         card.searching = False
+        if card.threshold_dirty and not searcher.target_error:
+            card.search_state = "idle"
+            card.searcher = None
+            card.threshold_dirty = False
+            return
         if cancelled or searcher.paused:
             card.search_state = "paused"
         elif searcher.target_error:

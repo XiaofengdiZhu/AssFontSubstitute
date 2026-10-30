@@ -266,8 +266,9 @@ def test_keep_cards_before_zero_and_unified_text(qapp, tmp_path, monkeypatch):
 def test_threshold_change_resets_ended_searches(qapp, tmp_path, monkeypatch):
     """相似候选前三设置（覆盖率/相似率门槛+相对大小区间）调整后重置
     已停的寻找（拍板 2026-10-30）：暂停/耗尽卡归 idle、旧搜索器弃、
-    钮回「开始寻找相似字体」，已找到候选保留在列；在跑的不动，
-    暂停数量 n_pause 不在重置之列。"""
+    钮回「开始寻找相似字体」，已找到候选保留在列；在跑的不暂停但置
+    dirty——停后归初始态（拍板 2026-10-30 二次确认），n_pause 不在
+    重置之列。"""
     page = _make_page(qapp, tmp_path, monkeypatch)
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
     _usage, card, norm = _feed_replace_card(page, ent_a, ent_b)
@@ -299,12 +300,46 @@ def test_threshold_change_resets_ended_searches(qapp, tmp_path, monkeypatch):
     page.settings.set("size_max", 1.2)
     assert card.search_state == "idle"
 
-    # 在跑的不动（持有建器快照跑完为止）
+    # 在跑的不暂停（快照跑完为止），但置 dirty：停后归初始态
     card.searching = True
     card.search_state = "idle"
-    card.searcher = SimpleNamespace(min_sim=0.85)
+    card.searcher = SimpleNamespace(min_sim=0.85, paused=False,
+                                    target_error=False)
     page.settings.set("min_sim", 0.6)
     assert card.searching and card.searcher is not None
+    assert card.threshold_dirty
+
+    # 手动暂停回执：dirty 卡直接归初始态，不进「继续寻找」
+    page._on_result(f"pull:{norm}", ([], "cancelled"))
+    assert card.search_state == "idle" and card.searcher is None
+    assert not card.threshold_dirty and not card.searching
+    assert btn.text() == "开始寻找相似字体"
+
+    # 非 dirty 卡终态照旧：手动暂停归 paused 可续搜
+    page.settings.set("min_sim", 0.5)
+    card.searching = True
+    card.threshold_dirty = False
+    card.searcher = SimpleNamespace(min_sim=0.6, paused=False,
+                                    target_error=False)
+    page._on_result(f"pull:{norm}", ([], "cancelled"))
+    assert card.search_state == "paused" and card.searcher is not None
+
+    # dirty 卡自然耗尽同样归初始态（旧口径「无更多」失义）
+    card.searching = True
+    card.search_state = "paused"
+    card.searcher = SimpleNamespace(min_sim=0.5, paused=False,
+                                    target_error=False)
+    page.settings.set("min_sim", 0.4)      # 在跑中改门槛 → dirty
+    page._on_result(f"pull:{norm}", ([], "exhausted"))
+    assert card.search_state == "idle" and card.searcher is None
+
+    # dirty 卡原字体渲染失败保留 target_error（与门槛无关）
+    card.searching = True
+    card.searcher = SimpleNamespace(min_sim=0.4, paused=False,
+                                    target_error=True)
+    page.settings.set("min_sim", 0.3)      # 在跑中改门槛 → dirty
+    page._on_result(f"pull:{norm}", ([], "exhausted"))
+    assert card.search_state == "target_error"
 
 
 def test_apply_confirm_mapping_and_record(qapp, tmp_path, monkeypatch):
