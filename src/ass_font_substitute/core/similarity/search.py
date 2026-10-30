@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import time
 from collections.abc import Iterator
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 
 from ass_font_substitute.core.coverage.matcher import COV_THRESHOLD
@@ -13,6 +14,8 @@ from ass_font_substitute.core.fontindex.probes import PROBE_SC
 from ass_font_substitute.core.fontindex.probes import PROBE_TC
 from ass_font_substitute.core.models import Candidate
 from ass_font_substitute.core.similarity.cache import Cache
+from ass_font_substitute.core.similarity.cache import _encode as cache_encode
+from ass_font_substitute.core.similarity.metrics import CompareResult
 from ass_font_substitute.core.similarity.metrics import compare
 from ass_font_substitute.core.similarity.render import render_bundle
 
@@ -20,6 +23,8 @@ MIN_SIM = 0.85              # 最低相似率（默认设置，GUI 可调）
 SIZE_RANGE = (0.90, 1.10)   # 相对大小区间（默认设置，GUI 可调）
 EVAL_SLICE = 24             # next_slice 单片对比数上限（缓存命中时对比极快，
 SLICE_SECONDS = 0.5         # 另按时长切：两上限先到为准，回执节奏 ≤0.5s
+RENDER_CHUNK = 8            # 池模式每任务（chunk）实体数：IPC 粒度与暂停
+                            # 延迟的折中——冷渲染 ~14ms/字体，一片 8 个 ≈110ms
 # 内置 v1：简繁同形字（spec §9 词表）+ 数字字母标点
 SAMPLE_TEXT = ("永 中 木 水 火 山 田 石 目 心 手 白 的 我 你 他 它 好 行 生 "
                "同 尖 思 明 上 下 左 右 外 大 小 不 了 在 是 有 和 也 8 A a 0 ?")
@@ -117,6 +122,7 @@ class FontSearcher:
         self.pool_size = 0            # 对比池总数（GUI 进度分母）
         self.compared = 0             # 已对比字体数（GUI 进度分子）
         self._tver = text_version(sample_text)
+        self._target_blob: bytes | None = None   # 池模式 target 编码（急渲后缓存）
         pool = [e for e in lib.entities()
                 if target is None or e.fingerprint != target.fingerprint]
         ranked = rank_pool(target, pool, direction)
@@ -145,12 +151,32 @@ class FontSearcher:
                 return cand
 
     def next_slice(self, max_evals: int = EVAL_SLICE,
-                   max_seconds: float = SLICE_SECONDS) -> list[Candidate]:
+                   max_seconds: float = SLICE_SECONDS,
+                   dispatcher=None) -> list[Candidate]:
         """推进至多 max_evals 次对比或 max_seconds 秒（两上限先到为准），
         返回期间全部命中；暂停/耗尽即停。GUI 分片拉取用：单次 next() 会
         一路吞到命中为止（稀疏命中时一次吞掉整池），按时长分片才能让进度
         计数（compared/pool_size）稳定跳动、暂停近即时生效——按对比数分片
-        在缓存命中时一片瞬间扫完，回执照样成洪。"""
+        在缓存命中时一片瞬间扫完，回执照样成洪。
+
+        dispatcher 非空走池模式（并行渲染）：gather 逐实体读 pair 缓存——
+        命中就地过门槛（与串行同款快路径），未命中先覆盖率剪枝再按
+        RENDER_CHUNK 分块派发 worker 渲染评分，收回同序逐个 absorb。
+        dispatcher 契约 = (chunks, target_blob, sample_text) → 同序结果，
+        chunk 结果 = (score, size_ratio, n_chars) | None。worker 崩溃
+        （BrokenProcessPool）的隔离在 dispatcher 层负责（jobs 侧弃池重建
+        + 二分定位毒字体后跳过）；此处兜底收到 BrokenProcessPool 时**
+        绝不在主进程重渲**（毒字体 AV 会杀整个应用）——直接弃派发集，
+        gather 段的 pair 命中候选保留。同片内候选顺序与串行不保证逐位
+        一致（pair 命中即时 absorb、派发结果后置），UI 层 add_candidates
+        按综合分重排兜底；暂停越过 n_pause 也可能（片粒度软化，池模式
+        独有）；target_error 短路即返不烧完 max_evals（比串行更省）。"""
+        if dispatcher is None:
+            return self._serial_slice(max_evals, max_seconds)
+        return self._pool_slice(max_evals, max_seconds, dispatcher)
+
+    def _serial_slice(self, max_evals: int,
+                      max_seconds: float) -> list[Candidate]:
         out: list[Candidate] = []
         deadline = time.perf_counter() + max_seconds
         evals = 0
@@ -167,6 +193,101 @@ class FontSearcher:
             if cand is not None:
                 out.append(cand)
         return out
+
+    def _pool_slice(self, max_evals: int, max_seconds: float,
+                    dispatcher) -> list[Candidate]:
+        if self.target is None:     # 无相似度可评：纯元数据，走串行
+            return self._serial_slice(max_evals, max_seconds)
+        if self.paused or self.target_error:
+            return []
+        out: list[Candidate] = []
+        deadline = time.perf_counter() + max_seconds
+        blobs: list[tuple[str, int]] = []       # 待派发 job（path, face_index）
+        meta: list[tuple[FontEntity, float]] = []   # 与 blobs 对齐 (实体, 覆盖率)
+        evals = 0
+        while evals < max_evals and not self.paused:
+            if time.perf_counter() >= deadline:
+                break
+            e = next(self._iter, None)
+            if e is None:
+                self.exhausted = True
+                break
+            self.compared += 1
+            evals += 1
+            # 与串行 _evaluate 同款：pair 命中就地过门槛（零渲染快路径）
+            r = self.cache.get_pair(self.target.fingerprint, e.fingerprint,
+                                    self._tver)
+            if r is not None:
+                cand = self._gate(e, r, None)
+                if cand is not None:
+                    out.append(cand)
+                continue
+            cov, _missing = coverage_detail(e.cmap, self.chars)
+            if cov < self.cov_threshold:
+                continue                        # 覆盖率剪枝：计 compared 不派发
+            # 首个未命中才急渲 target（pair 全命中则永不解析，同串行懒渲）
+            if self._target_blob is None:
+                try:
+                    tb = self.cache.get_render(
+                        self.target.fingerprint, self._tver,
+                        lambda: render_bundle(_entity_path(self.target),
+                                              self.target.face_index,
+                                              self.sample_text))
+                except Exception:
+                    self.target_error = True
+                    return out
+                self._target_blob = cache_encode(tb)
+            blobs.append((str(_entity_path(e)), e.face_index))
+            meta.append((e, cov))
+        if not blobs:
+            return out
+        chunks = [blobs[i:i + RENDER_CHUNK]
+                  for i in range(0, len(blobs), RENDER_CHUNK)]
+        cmeta = [meta[i:i + RENDER_CHUNK]
+                 for i in range(0, len(meta), RENDER_CHUNK)]
+        try:
+            results = dispatcher(chunks, self._target_blob, self.sample_text)
+        except BrokenProcessPool:
+            # 崩池（dispatcher 层隔离失效的兜底）：绝不主进程重渲——毒字体
+            # AV 杀整个应用；弃派发集（compared 已计，进度不回退），本片
+            # 只交 gather 段 pair 命中候选。无 deadline（兜底路径，秒级可受）
+            return out
+        for ents, res in zip(cmeta, results, strict=True):
+            for (e, cov), t in zip(ents, res, strict=True):
+                cand = self._absorb(e, cov, t)
+                if cand is not None:
+                    out.append(cand)
+        return out
+
+    def _absorb(self, e: FontEntity, cov: float, t: tuple | None) -> Candidate | None:
+        """池结果过门槛：写 pair 缓存（与 score_pair 同口径）+ 门槛记账。"""
+        if t is None:
+            return None             # 渲染失败/交集空 → 跳过
+        r = CompareResult(*t)
+        self.cache.put_pair(self.target.fingerprint, e.fingerprint,
+                            self._tver, r)
+        return self._gate(e, r, cov)
+
+    def _gate(self, e: FontEntity, r: CompareResult,
+              cov: float | None) -> Candidate | None:
+        """评分后门槛：相似率 → 相对大小 → 覆盖率 → Candidate + 暂停记账。"""
+        if r.score < self.min_sim:
+            return None
+        if not (self.size_range[0] <= r.size_ratio <= self.size_range[1]):
+            return None
+        if cov is None:
+            cov, _missing = coverage_detail(e.cmap, self.chars)
+            if cov < self.cov_threshold:
+                return None
+        cand = Candidate(fingerprint=e.fingerprint, display_name=e.display_name,
+                         coverage=cov, script=e.script, category=e.category,
+                         weight=e.weight, source="recommend")
+        cand.similarity, cand.size_ratio, cand.n_chars = \
+            r.score, r.size_ratio, r.n_chars
+        self.hit_count += 1
+        if self.hit_count >= self.n_pause:
+            self.paused = True
+        return cand
 
     def _evaluate(self, e: FontEntity) -> Candidate | None:
         # 门槛按成本升序（实测：pair 缓存读取 ~5µs、coverage ~15µs、渲染+评分 ~57ms）：
@@ -199,23 +320,7 @@ class FontSearcher:
             return None             # 目标渲染失败：后续候选在顶部短路，不重试
         if r is None:
             return None             # 交集为空，无法比较 → 跳过
-        if r.score < self.min_sim:
-            return None
-        if not (self.size_range[0] <= r.size_ratio <= self.size_range[1]):
-            return None
-        if cov is None:
-            cov, _missing = coverage_detail(e.cmap, self.chars)
-            if cov < self.cov_threshold:
-                return None
-        cand = Candidate(fingerprint=e.fingerprint, display_name=e.display_name,
-                         coverage=cov, script=e.script, category=e.category,
-                         weight=e.weight, source="recommend")
-        cand.similarity, cand.size_ratio, cand.n_chars = \
-            r.score, r.size_ratio, r.n_chars
-        self.hit_count += 1
-        if self.hit_count >= self.n_pause:
-            self.paused = True
-        return cand
+        return self._gate(e, r, cov)
 
 
 def _entity_path(e: FontEntity) -> Path:

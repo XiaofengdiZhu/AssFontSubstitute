@@ -185,3 +185,101 @@ def ctx_stub(tmp_path, monkeypatch):
     s = Settings(tmp_path / "settings.json")
     return SimpleNamespace(settings=s, cache=Cache(tmp_path / "cache.db"),
                            snapshot=None, lib=None, lib_key=None)
+
+
+def test_ensure_render_pool_reuse_and_cap(ctx_stub, monkeypatch):
+    # 池按需建、复用同一实例；W = min(设置 max_threads, cpu_count)
+    from concurrent.futures import ProcessPoolExecutor
+
+    from ass_font_substitute.gui.jobs import ensure_render_pool
+    ctx_stub.settings.set("max_threads", 3)
+    p1 = ensure_render_pool(ctx_stub)
+    try:
+        assert isinstance(p1, ProcessPoolExecutor)
+        assert p1._max_workers == 3
+        assert ensure_render_pool(ctx_stub) is p1      # 复用
+    finally:
+        from ass_font_substitute.gui.jobs import shutdown_ctx
+        shutdown_ctx(ctx_stub)
+    assert ctx_stub.pool is None                       # 收敛置 None
+
+
+def test_pull_chunk_pool_mode(ctx_stub, font_dir, tmp_path):
+    # 池模式端到端：真 ProcessPoolExecutor 渲染评分，搜索耗尽、候选与串行一致
+    from ass_font_substitute.gui.jobs import make_searcher
+    from ass_font_substitute.gui.jobs import shutdown_ctx
+    build_font(font_dir / "c0.ttf", chars="永宇好", family="测试圆体0",
+               psname="C0")
+    build_font(font_dir / "c1.ttf", chars="永宇好", family="测试圆体1",
+               psname="C1")
+    update_dir(str(font_dir))
+    snap = ensure_library(ctx_stub, [str(font_dir)])
+    lib = snap.lib
+    target = next(e for e in lib.entities() if e.psname == "TestHei")
+
+    def search(ctx):
+        s = make_searcher(ctx_stub, target=target, chars=set("永宇好"),
+                          threshold=0.95, n_pause=10, min_sim=0.85,
+                          size_range=(0.90, 1.10), direction="t2s")
+        out, state = [], None
+        while True:
+            cands, state = pull_chunk(s, None, ctx=ctx)
+            out += cands
+            if state != "running":
+                return out, state
+
+    serial, state_s = search(None)
+    ctx_stub.pool = None
+    try:
+        parallel, state_p = search(ctx_stub)   # ctx 走真池（ensure 惰建）
+    finally:
+        shutdown_ctx(ctx_stub)
+    assert state_s == state_p == "exhausted"
+    assert [c.fingerprint for c in serial] == [c.fingerprint for c in parallel]
+    assert serial                                      # 两候选命中（box 同形）
+
+
+def test_dispatch_pool_isolates_poison_font(ctx_stub, monkeypatch, tmp_path):
+    # 池崩坏隔离：弃崩池 → 逐字体新池试探 → 毒字体 None 跳过，普通字体不丢
+    from concurrent.futures import Future
+    from concurrent.futures.process import BrokenProcessPool
+    from types import SimpleNamespace
+
+    from ass_font_substitute.core.similarity.pool import score_chunk
+    from ass_font_substitute.gui import jobs as jobs_mod
+    from ass_font_substitute.gui.jobs import _dispatch_pool
+
+    d = tmp_path / "po"
+    d.mkdir()
+    from tests.fonts import build_font as bf
+    bf(d / "t.ttf", chars="永", family="目標", psname="T")
+    bf(d / "g.ttf", chars="永", family="好字體")
+    from ass_font_substitute.core.similarity.render import render_bundle
+    from ass_font_substitute.core.similarity.cache import _encode
+    blob = _encode(render_bundle(d / "t.ttf", 0, "永"))
+    poison = (str(d / "poison.ttf"), 0)
+    good = (str(d / "g.ttf"), 0)
+
+    class FakePool:
+        def __init__(self):
+            self.shutdown_called = False
+        def submit(self, fn, blob_, text_, ch):
+            if any(j == poison for j in ch):
+                raise BrokenProcessPool()
+            f = Future()
+            f.set_result([fn(blob_, text_, [j])[0] for j in ch])
+            return f
+        def shutdown(self, wait=False):
+            self.shutdown_called = True
+
+    ctx = SimpleNamespace(pool=FakePool(), pool_workers=2, settings=ctx_stub.settings)
+    broken_pool = ctx.pool
+    monkeypatch.setattr(jobs_mod, "ensure_render_pool",
+                        lambda c: FakePool())          # 试探期恒新池
+    res = _dispatch_pool(ctx, broken_pool, [[good, poison, good]], blob, "永")
+    assert len(res) == 1 and len(res[0]) == 3
+    g1, po, g2 = res[0]
+    assert po is None                                  # 毒字体跳过
+    assert g1 is not None and g2 is not None and g1 == g2
+    assert broken_pool.shutdown_called                 # 崩池即弃
+    assert ctx.pool is None                            # 下次 pull 重建自愈

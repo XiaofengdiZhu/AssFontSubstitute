@@ -920,7 +920,7 @@ def _new_searcher_job(ctx, target, chars, cov, n_pause, min_sim, size_range,
 
 
 def _pull_job(ctx, searcher, cancel):
-    return pull_chunk(searcher, cancel)
+    return pull_chunk(searcher, cancel, ctx=ctx)
 
 
 def _pick_score_job(ctx, target, entity):

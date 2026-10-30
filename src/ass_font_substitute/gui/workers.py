@@ -44,7 +44,8 @@ class CoreWorker(QThread):
         except Exception as e:
             self.failed.emit("worker:init", f"{type(e).__name__}: {e}")
         ctx = SimpleNamespace(settings=self._settings, cache=cache,
-                              snapshot=None, lib=None, lib_key=None)
+                              snapshot=None, lib=None, lib_key=None,
+                              pool=None)
         while not self._stop:
             item = self._q.get()
             if item is None:
@@ -58,6 +59,8 @@ class CoreWorker(QThread):
                 self.failed.emit(tag, f"{type(e).__name__}: {e}")
         if cache is not None:
             cache.flush()   # 读命中记账收尾：正常退出不带丢 used_at（LRU 序）
+        from ass_font_substitute.gui.jobs import shutdown_ctx
+        shutdown_ctx(ctx)   # 渲染进程池收尾
 
     def submit(self, tag, fn, *args, **kw) -> JobHandle:
         handle = JobHandle()

@@ -15,6 +15,7 @@ from ass_font_substitute.core.fontindex.store import scan_dir
 from ass_font_substitute.core.fontindex.store import update_index
 from ass_font_substitute.core.models import FontUsage
 from ass_font_substitute.core.similarity.render import render_text_strip
+from ass_font_substitute.core.similarity import search as search_mod
 from ass_font_substitute.core.similarity.search import FontSearcher
 
 
@@ -204,20 +205,95 @@ def make_searcher(ctx, target, chars, threshold: float, n_pause: int,
         size_range=size_range, direction=direction)
 
 
-def pull_chunk(searcher: FontSearcher, cancel: dict | None = None):
+def ensure_render_pool(ctx):
+    """相似度渲染进程池（惰性单例，挂在 ctx.pool；W 记 ctx.pool_workers
+    免读 executor 私有字段）。W = min(设置 max_threads, cpu_count)，下限
+    2（单 worker 白付进程间往返）。GIL 微基准实锤线程不可行（freetype
+    FT_Stream 回调抢 GIL + numpy 小数组往返开销主导，2 线程负加速），
+    并行走进程；worker 崩溃（坏字体原生 AV）由 _dispatch_pool 二分定位
+    毒字体后跳过，绝不回主进程重渲。"""
+    import os
+    from concurrent.futures import ProcessPoolExecutor
+
+    if getattr(ctx, "pool", None) is not None:
+        return ctx.pool
+    cap = int(ctx.settings.get("max_threads") or 4)   # Settings 层 int 校验兜底
+    workers = max(2, min(cap, os.cpu_count() or 4))
+    ctx.pool = ProcessPoolExecutor(max_workers=workers)
+    ctx.pool_workers = workers
+    return ctx.pool
+
+
+def shutdown_ctx(ctx):
+    """CoreWorker 退出收尾：关进程池（幂等）。"""
+    pool = getattr(ctx, "pool", None)
+    if pool is not None:
+        ctx.pool = None
+        pool.shutdown(wait=True)
+
+
+def pull_chunk(searcher: FontSearcher, cancel: dict | None = None,
+               ctx=None):
     """推进**一片**（至多 EVAL_SLICE 次对比 / SLICE_SECONDS 秒，先到为
     准）即回执：state ∈ running/paused/exhausted/target_error/cancelled。
     切忌在此攒批（凑满 N 个命中才回）——稀疏命中时一个任务吞掉整池，
     UI 进度计数冻结整个任务期，手动暂停也得等任务尾才生效，且攒下的
     命中在暂停瞬间一次性上屏。命中语义（暂停累计 hit_count、
-    target_error 懒解析一次）全部由 searcher 承担，此层不解读。"""
+    target_error 懒解析一次）全部由 searcher 承担，此层不解读。
+
+    ctx 非空且 target 存在走池模式：一片 = W 个 RENDER_CHUNK 块一轮
+    （W = worker 数，冷渲染一轮 ~百 ms，暂停延迟同量级）；pair 全命中
+    的重扫在 searcher 内走串行快路径不派池（也不为此拉起进程池）。"""
     if cancel is not None and cancel.get("cancelled"):
         return [], "cancelled"
-    cands = searcher.next_slice()
+    if ctx is not None and searcher.target is not None and not searcher.paused:
+        pool = ensure_render_pool(ctx)
+        workers = max(2, getattr(ctx, "pool_workers", 4))
+        cands = searcher.next_slice(max_evals=search_mod.RENDER_CHUNK * workers,
+                                    dispatcher=lambda chunks, blob, text:
+                                    _dispatch_pool(ctx, pool, chunks, blob, text))
+    else:
+        cands = searcher.next_slice()
     if searcher.target_error or searcher.paused or searcher.exhausted:
         return cands, ("target_error" if searcher.target_error
                        else "paused" if searcher.paused else "exhausted")
     return cands, "running"
+
+
+def _dispatch_pool(ctx, pool, chunks, blob, text):
+    """派发全部 chunk 并按提交序收回。池崩坏（worker 原生崩溃，坏字体
+    AV 概率最高）：弃池（ctx.pool=None，下次 pull 重建自愈）→ 逐 chunk
+    二分重试定位毒字体（新池试探），单字体仍崩 = 毒字体，该字体置 None
+    跳过——渲染永不回主进程。二分每层新起池（spawn ~1s），毒字体事件
+    罕见，代价可受。"""
+    from concurrent.futures.process import BrokenProcessPool
+
+    from ass_font_substitute.core.similarity.pool import score_chunk
+    try:
+        return [f.result() for f in
+                (pool.submit(score_chunk, blob, text, ch) for ch in chunks)]
+    except BrokenProcessPool:
+        ctx.pool = None
+        pool.shutdown(wait=False)
+        return [_safe_chunk(ctx, ch, blob, text) for ch in chunks]
+
+
+def _safe_chunk(ctx, chunk, blob, text):
+    """崩池后逐字体试探（新池）：普通字体正常评分，再崩的即毒字体置
+    None 跳过。逐字体粒度天然精确定位，无需二分。"""
+    from concurrent.futures.process import BrokenProcessPool
+
+    from ass_font_substitute.core.similarity.pool import score_chunk
+    out = []
+    for j in chunk:
+        try:
+            pool = ensure_render_pool(ctx)
+            out.append(pool.submit(score_chunk, blob, text, [j]).result()[0])
+        except BrokenProcessPool:
+            ctx.pool = None
+            pool.shutdown(wait=False)
+            out.append(None)        # 毒字体：跳过该字体
+    return out
 
 
 def score_pick(ctx, target, entity):

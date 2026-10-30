@@ -367,3 +367,168 @@ def test_score_pair_shared_cache_semantics(tmp_path, monkeypatch):
     cache4 = Cache(tmp_path / "c4.db")
     assert search_mod.score_pair(target, c0, cache4, CHARS) is None
     assert cache4.pair_count == 0
+
+
+
+# ---- 池模式（dispatcher 并行评批）：门槛/暂停/耗尽语义与串行一致 ----
+
+class _InlineDispatcher:
+    """伪池：内联跑真 worker 函数（core.similarity.pool.score_chunk），
+    记录派发的 job 供断言。dispatcher 契约 = (chunks, target_blob, text)。"""
+
+    def __init__(self):
+        self.jobs = []
+
+    def __call__(self, chunks, blob, text):
+        from ass_font_substitute.core.similarity.pool import score_chunk
+        self.jobs += [j for ch in chunks for j in ch]
+        return [score_chunk(blob, text, ch) for ch in chunks]
+
+
+def _pool_searcher(tmp_path, lib, target, **kw):
+    kw.setdefault("sample_text", CHARS)
+    return FontSearcher(target, set("永中木水火土石田"), lib,
+                        Cache(tmp_path / "cache_p.db"), **kw)
+
+
+def test_pool_slice_matches_serial(tmp_path):
+    # 池模式（内联 worker）候选序与分值与串行完全一致
+    lib = _lib(tmp_path,
+               {"name": "c0", "chars": CHARS, "family": "圓體0"},
+               {"name": "c1", "chars": CHARS, "family": "圓體1"},
+               {"name": "c2", "chars": CHARS, "family": "圓體2"})
+    target = _by(lib, "TGT")
+    s_serial = _searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=10)
+    found_s = []
+    while not (s_serial.paused or s_serial.exhausted):
+        found_s += s_serial.next_slice(max_evals=2, max_seconds=10)
+    s_pool = _pool_searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=10)
+    disp = _InlineDispatcher()
+    found_p = []
+    while not (s_pool.paused or s_pool.exhausted):
+        found_p += s_pool.next_slice(max_evals=2, max_seconds=10, dispatcher=disp)
+    assert [(c.fingerprint, round(c.similarity, 6)) for c in found_s] == \
+           [(c.fingerprint, round(c.similarity, 6)) for c in found_p]
+    assert disp.jobs                            # 确有派发（未全走缓存快路径）
+
+
+def test_pool_slice_bookkeeping(tmp_path):
+    # compared 逐实体计（含覆盖率剪枝不派发的）；hit_count = 命中数；
+    # n_pause 攒满即暂停；耗尽置 exhausted
+    lib = _lib(tmp_path,
+               {"name": "c0", "chars": CHARS, "family": "圓體0"},
+               {"name": "far", "chars": "8Aa0?", "family": "遠字體"})
+    target = _by(lib, "TGT")
+    s = _pool_searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=2)
+    disp = _InlineDispatcher()
+    out = s.next_slice(max_evals=4, max_seconds=10, dispatcher=disp)
+    assert len(out) == 1                        # c0 命中（far 覆盖率剪枝）
+    assert s.compared == 2                      # TGT 自身排除；far 剪枝+c0 派发
+    assert s.hit_count == len(out)
+    out2 = s.next_slice(max_evals=4, max_seconds=10, dispatcher=disp)
+    assert out2 == [] and s.exhausted           # 池只有 2 候选，第二片耗尽
+    assert not s.paused                         # n_pause=2 未攒满
+    # 暂停语义：n_pause=1 时首片即暂停
+    s2 = _pool_searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=1)
+    disp2 = _InlineDispatcher()
+    s2.next_slice(max_evals=4, max_seconds=10, dispatcher=disp2)
+    assert s2.paused and s2.hit_count == 1
+    # far 的路径从未派发（覆盖率剪枝在派发前）
+    from pathlib import Path as _P
+    far = _by(lib, "FAR")
+    far_path = str(_P(far.dir_path) / far.rel_path)
+    assert not any(j[0] == far_path for j in disp.jobs)
+
+
+def test_pool_slice_exhausted(tmp_path):
+    # 池耗尽：iter 空置 exhausted，后续片返回空
+    lib = _lib(tmp_path, {"name": "c0", "chars": CHARS, "family": "圓體0"})
+    target = _by(lib, "TGT")
+    s = _pool_searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=10)
+    disp = _InlineDispatcher()
+    out = []
+    while not s.exhausted:
+        out += s.next_slice(max_evals=2, max_seconds=10, dispatcher=disp)
+    assert [c.fingerprint for c in out] == [_by(lib, "C0").fingerprint]
+    assert s.next_slice(max_evals=2, max_seconds=10, dispatcher=disp) == []
+
+
+def test_pool_target_render_error(tmp_path, monkeypatch):
+    # 池模式 target 急渲失败：置 target_error 短路，后续片返回空
+    lib = _lib(tmp_path, {"name": "c0", "chars": CHARS, "family": "圓體0"})
+    target = _by(lib, "TGT")
+    s = _pool_searcher(tmp_path, lib, target, cov_threshold=0.98)
+    real = search_mod.render_bundle
+
+    def explode(path, fi, text):
+        if Path(str(path)).name == "target.ttf":
+            raise RuntimeError("boom")
+        return real(path, fi, text)
+
+    monkeypatch.setattr(search_mod, "render_bundle", explode)
+    disp = _InlineDispatcher()
+    assert s.next_slice(max_evals=4, max_seconds=10, dispatcher=disp) == []
+    assert s.target_error
+    assert s.next_slice(max_evals=4, max_seconds=10, dispatcher=disp) == []
+
+
+def test_pool_broken_dispatcher_skips_dispatched(tmp_path):
+    # 崩池兜底（dispatcher 层隔离失效时）：绝不主进程重渲（毒字体 AV 杀
+    # 整个应用）——弃派发集，gather 段 pair 命中候选保留
+    from concurrent.futures.process import BrokenProcessPool
+    lib = _lib(tmp_path,
+               {"name": "c0", "chars": CHARS, "family": "圓體0"},
+               {"name": "c1", "chars": CHARS, "family": "圓體1"})
+    target = _by(lib, "TGT")
+    s = _pool_searcher(tmp_path, lib, target, cov_threshold=0.98, n_pause=10)
+
+    calls = {"n": 0}
+    def broken(chunks, blob, text):
+        calls["n"] += 1
+        raise BrokenProcessPool()
+
+    out = s.next_slice(max_evals=4, max_seconds=10, dispatcher=broken)
+    assert calls["n"] == 1
+    assert out == []                           # 派发集弃置，不回主进程重渲
+    assert s.compared == 3                     # far剪枝+c0+c1 进度记账不回退
+    assert s.hit_count == 0
+
+
+def test_pool_mixed_pair_hit_and_dispatch(tmp_path):
+    # pair 命中（即时 absorb）与派发评分混合：候选集与串行一致
+    from ass_font_substitute.core.similarity.search import score_pair
+    lib = _lib(tmp_path,
+               {"name": "c0", "chars": CHARS, "family": "圓體0"},
+               {"name": "c1", "chars": CHARS, "family": "圓體1"})
+    target = _by(lib, "TGT")
+    # 预热 c1 的 pair 缓存：本片 c1 走即时 absorb，c0 走派发
+    cache = Cache(tmp_path / "cache_p.db")
+    r = score_pair(target, _by(lib, "C1"), cache, CHARS)
+    assert r is not None
+    s = FontSearcher(target, set("永中木水火土石田"), lib, cache,
+                     sample_text=CHARS, cov_threshold=0.98, n_pause=10)
+    disp = _InlineDispatcher()
+    out = s.next_slice(max_evals=4, max_seconds=10, dispatcher=disp)
+    assert {c.fingerprint for c in out} == {_by(lib, "C0").fingerprint,
+                                            _by(lib, "C1").fingerprint}
+    assert s.hit_count == 2
+
+
+def test_score_chunk_worker_fn(tmp_path):
+    # worker 纯函数直测：与串行 compare 同分（同渲染管线）
+    from ass_font_substitute.core.similarity.pool import score_chunk
+    from ass_font_substitute.core.similarity.cache import _encode
+    from ass_font_substitute.core.similarity.render import render_bundle
+    from ass_font_substitute.core.similarity.metrics import compare
+    d = tmp_path / "w"
+    d.mkdir()
+    build_font(d / "t.ttf", chars=CHARS, family="目標圓體", psname="TGT")
+    build_font(d / "c.ttf", chars=CHARS, family="圓體0")
+    tb = render_bundle(d / "t.ttf", 0, CHARS)
+    blob = _encode(tb)
+    jobs = [(str(d / "c.ttf"), 0), (str(d / "missing.ttf"), 0)]
+    res = score_chunk(blob, CHARS, jobs)
+    assert res[0] is not None
+    r = compare(tb, render_bundle(d / "c.ttf", 0, CHARS))
+    assert res[0] == (r.score, r.size_ratio, r.n_chars)
+    assert res[1] is None                       # 渲染失败 → None 跳过
