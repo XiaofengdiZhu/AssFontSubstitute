@@ -342,6 +342,52 @@ class SubsVM:
                 n += 1
         return n
 
+    def regate_candidates(self) -> int:
+        """门槛变化后对已列出的搜索候选按新门槛重筛（拍板 2026-10-31）：
+        「候选保留」只保留仍达标的行——调高门槛后旧搜索低分行继续挂卡，
+        会被读作「门槛没生效」（用户报告实锤）。无分项（原字体/元数据
+        行）不动；在跑卡不筛（停时 threshold_dirty 归 idle，finish_search
+        里补筛）。返回移除行数。"""
+        ms = float(self._settings.get("min_sim"))
+        lo = float(self._settings.get("size_min"))
+        hi = float(self._settings.get("size_max"))
+        cv = float(self._settings.get("cov_threshold"))
+        removed = 0
+        for c in self.cards:
+            if c.searching:
+                continue
+            removed += self._regate_card(c, ms, lo, hi, cv)
+        return removed
+
+    def _regate_card(self, card: Card, ms: float, lo: float, hi: float,
+                     cv: float) -> int:
+        """单卡按门槛四参筛掉不达标的搜索行，口径与 FontSearcher._gate
+        对齐（sim < ms / size ∉ [lo, hi] / cov < cv 均出局，边界含等号
+        同 _gate）；勾选行被筛掉时勾选链回落（apply_default_check 重放：
+        上次使用 > 孪生 > 原字体）。similarity=None 的搜索行两路：KEEP
+        行（make_card 默认 source="search"）与缺字卡无 target 搜索行——
+        后者本就只受覆盖率管辖（_evaluate 无 target 路径），coverage 照
+        筛；None 兜底按 1.0 放行（_gate 处 coverage/size_ratio 恒为实算
+        值，None 仅 KEEP 行与防御路径出现，放行不误伤）。"""
+        keep = []
+        for o in card.options:
+            if o.source != "search":
+                keep.append(o)          # 原字体/孪生/上次使用行不属搜索门槛管辖
+                continue
+            size = o.size_ratio if o.size_ratio is not None else 1.0
+            cov = o.coverage if o.coverage is not None else 1.0
+            sim_out = o.similarity is not None and o.similarity < ms
+            if sim_out or not (lo <= size <= hi) or cov < cv:
+                continue
+            keep.append(o)
+        n = len(card.options) - len(keep)
+        if n:
+            card.options = keep
+            if card.checked_key is not None \
+                    and card.option(card.checked_key) is None:
+                self.apply_default_check(card)
+        return n
+
     def attach_searcher(self, card: Card, searcher: FontSearcher) -> None:
         card.searcher = searcher
         card.searching = True
@@ -391,17 +437,32 @@ class SubsVM:
         target_error（原字体无法渲染）> paused（可继续）> exhausted（无
         更多相似字体）。门槛 dirty 卡例外（拍板 2026-10-30：在跑中改了
         门槛，停后直接恢复初始态，不进「继续寻找」——旧口径的候选已
-        全列，续搜/无更多皆失义；target_error 与门槛无关保留原态）。"""
+        全列，续搜/无更多皆失义；target_error 态与门槛无关保留，但已列
+        候选仍按新门槛补筛（同失义，2026-10-31）。"""
         card.searching = False
         if card.threshold_dirty and not searcher.target_error:
             card.search_state = "idle"
             card.searcher = None
             card.threshold_dirty = False
+            # 在跑中改过门槛：本轮候选按旧口径收集，停时按新门槛补筛
+            self._regate_card(card, float(self._settings.get("min_sim")),
+                              float(self._settings.get("size_min")),
+                              float(self._settings.get("size_max")),
+                              float(self._settings.get("cov_threshold")))
             return
         if cancelled or searcher.paused:
             card.search_state = "paused"
         elif searcher.target_error:
             card.search_state = "target_error"
+            if card.threshold_dirty:
+                # 在跑中改过门槛：态保留（原字体报错与门槛无关，拍板
+                # 2026-10-30），但已列候选同按新门槛补筛——否则旧低分行
+                # 挂卡，与 dirty 归 idle 路径同一「门槛没生效」观感
+                card.threshold_dirty = False
+                self._regate_card(card, float(self._settings.get("min_sim")),
+                                  float(self._settings.get("size_min")),
+                                  float(self._settings.get("size_max")),
+                                  float(self._settings.get("cov_threshold")))
         else:
             card.search_state = "exhausted"
 

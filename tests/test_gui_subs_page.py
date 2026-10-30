@@ -1697,3 +1697,105 @@ def test_add_dir_empty_warning(qapp, tmp_path, monkeypatch):
     page._on_result(tag, fn(None, *args))
     assert warned == [str(d)]
     page.deleteLater()
+
+
+def _cand(fp, name, sim, size=1.0, cov=1.0):
+    from ass_font_substitute.core.models import Candidate
+    c = Candidate(fingerprint=fp, display_name=name, coverage=cov,
+                  script="简", category="黑", weight=400, source="recommend")
+    c.similarity, c.size_ratio, c.n_chars = sim, size, 2
+    return c
+
+
+def test_threshold_change_regates_listed_candidates(qapp, tmp_path, monkeypatch):
+    """调高门槛后已列出的低分候选必须重筛（用户报告 2026-10-31：调门槛
+    点开始寻找，列出的字体不符新门槛——「候选保留」把旧搜索低分行留在
+    卡上，被读作门槛没生效）。四关逐次钉死：相似率（含 ==0.99 边界
+    放行，同 _gate 的 < 出局）→ 相对大小区间 → 覆盖率。"""
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    page.settings.set("size_max", 2.0)             # 先放宽尺寸档：重筛四关
+    card.search_state = "exhausted"                # 同发，各步只踩中一关
+    page.vm.add_candidates(card, [_cand("fpB", "乙体", 0.995),
+                                  _cand("fpE", "戊字体", 0.99),
+                                  _cand("fpX", "丙字体", 0.82),
+                                  _cand("fpS", "丁字体", 0.995, size=1.3),
+                                  _cand("fpC", "己字体", 0.995, cov=0.96)])
+    assert {o.key for o in card.options if o.source == "search"} == \
+        {"fpB", "fpE", "fpX", "fpS", "fpC"}        # 前置：五行都在
+    page.settings.set("min_sim", 0.99)             # 门槛变化 → 重筛
+    assert {o.key for o in card.options if o.source == "search"} == \
+        {"fpB", "fpE", "fpS", "fpC"}               # fpX 0.82 出局；fpE 压线留
+    page.settings.set("size_max", 1.0)
+    assert {o.key for o in card.options if o.source == "search"} == \
+        {"fpB", "fpE", "fpC"}                      # fpS 尺寸 1.3 出局
+    page.settings.set("cov_threshold", 0.99)
+    assert {o.key for o in card.options if o.source == "search"} == \
+        {"fpB", "fpE"}                             # fpC 覆盖率 0.96 出局
+
+
+def test_threshold_change_regates_no_target_rows_by_coverage(
+        qapp, tmp_path, monkeypatch):
+    # 缺字卡无 target 搜索行（similarity=None）只受覆盖率管辖（同
+    # FontSearcher._evaluate 无 target 路径口径）；调高覆盖率门槛照筛。
+    # coverage=None 的搜索行（KEEP 行默认 source="search"）兜底按 1.0
+    # 放行，不误伤
+    from ass_font_substitute.gui.subs_vm import OptionItem
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    page.vm.add_candidates(card, [_cand("fpN", "无靶体", None, cov=0.5)])
+    keep_row = OptionItem("fpK", "保留原字体名", source="search")
+    card.options.append(keep_row)                  # 直造 KEEP 形态：无 coverage
+    page.settings.set("cov_threshold", 0.99)
+    assert card.option("fpN") is None              # 覆盖率 0.5 出局
+    assert card.option("fpK") is keep_row          # None 兜底放行
+
+
+def test_threshold_change_regate_keeps_checked_fallback(qapp, tmp_path,
+                                                        monkeypatch):
+    # 被勾选行被筛掉：勾选链回落（apply_default_check），不悬挂死键
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    page.vm.add_candidates(card, [_cand("fpB", "乙体", 0.7)])
+    card.checked_key = "fpB"
+    page.settings.set("min_sim", 0.99)
+    assert card.option("fpB") is None
+    assert card.checked_key is not None
+    assert card.option(card.checked_key) is not None   # 勾选键仍指向活行
+
+
+def test_finish_search_dirty_card_regates_candidates(qapp, tmp_path,
+                                                     monkeypatch):
+    # 在跑中改门槛（threshold_dirty）：停时归 idle 且候选按新门槛重筛
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    page.vm.add_candidates(card, [_cand("fpB", "乙体", 0.995),
+                                  _cand("fpX", "丙字体", 0.82)])
+    card.searching = True
+    card.threshold_dirty = True
+    searcher = SimpleNamespace(paused=False, target_error=False)
+    page.vm.finish_search(card, searcher)
+    assert card.search_state == "idle" and card.searcher is None
+    assert {o.key for o in card.options if o.source == "search"} == {"fpB"}
+
+
+def test_finish_search_target_error_dirty_still_regates(qapp, tmp_path,
+                                                        monkeypatch):
+    # 在跑中改门槛 + 原字体渲染失败停搜：态保留 target_error（钮语义
+    # 与门槛无关，拍板 2026-10-30），但已列候选仍按新门槛补筛——否则
+    # 旧低分行挂卡，与归 idle 路径同一「门槛没生效」观感
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    page.vm.add_candidates(card, [_cand("fpB", "乙体", 0.995),
+                                  _cand("fpX", "丙字体", 0.82)])
+    card.searching = True
+    card.threshold_dirty = True
+    searcher = SimpleNamespace(paused=False, target_error=True)
+    page.vm.finish_search(card, searcher)
+    assert card.search_state == "target_error"
+    assert {o.key for o in card.options if o.source == "search"} == {"fpB"}

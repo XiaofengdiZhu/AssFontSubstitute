@@ -641,7 +641,11 @@ class SubsPage(QWidget):
         # 重置为空操作
         if key not in _SEARCH_RESET_KEYS:
             return
-        if self.vm.reset_ended_searches():
+        reset = self.vm.reset_ended_searches()
+        # 已列候选按新门槛重筛（拍板 2026-10-31）：「候选保留」只留仍
+        # 达标的行，否则调高门槛后旧低分行挂在卡上像门槛没生效
+        regated = self.vm.regate_candidates()
+        if reset or regated:
             self._apply_all_cards()
 
     def _card(self, norm):
