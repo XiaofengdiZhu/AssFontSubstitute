@@ -847,6 +847,59 @@ def _pick_btn(fc):
     return hits[0]
 
 
+def _icon_ink_luma(btn):
+    """钮图标区（x≈12 起竖居中）最暗不透明像素 luma：图标墨色采样，
+    亮主题黑墨趋低、暗主题白墨趋高。"""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QImage
+
+    img = QImage(btn.size(), QImage.Format_ARGB32_Premultiplied)
+    img.fill(0)
+    btn.render(img)
+    best = 1000
+    cy = btn.height() // 2
+    for y in range(max(0, cy - 10), min(btn.height(), cy + 10)):
+        for x in range(10, 32):
+            c = img.pixelColor(QPoint(x, y))
+            if c.alpha() == 0:
+                continue
+            luma = (c.red() * 299 + c.green() * 587 + c.blue() * 114) // 1000
+            best = min(best, luma)
+    return best
+
+
+def test_cont_btn_icon_follows_theme(qapp):
+    """搜索钮图标随亮暗主题换色（用户报告 2026-10-30）：qfw 按钮收
+    FluentIconBase 才逐 paint 以 Theme.AUTO 重渲；收 .icon() 得到的
+    QIcon 定死建时主题色，切主题不跟随。"""
+    from qfluentwidgets import Theme
+    from qfluentwidgets import setTheme
+
+    from ass_font_substitute.gui.subs_vm import Card
+    from ass_font_substitute.gui.subs_vm import OptionItem
+    from ass_font_substitute.gui.widgets.font_card import FontCard
+
+    c = Card(norm_name="a", raw_name="a", kind="replace", n_chars=1,
+             options=[OptionItem(key="keep", display_name="a"),
+                      OptionItem(key="orig", display_name="o")],
+             checked_key="orig")
+    try:
+        setTheme(Theme.LIGHT)
+        fc = FontCard(c, None, None, lambda: "")
+        fc.show()
+        qapp.processEvents()
+        btn = _cont_btn(fc)
+        light_ink = _icon_ink_luma(btn)
+        setTheme(Theme.DARK)
+        qapp.processEvents()
+        dark_ink = _icon_ink_luma(btn)
+        assert light_ink < 120, light_ink
+        assert dark_ink > 160, dark_ink
+    finally:
+        setTheme(Theme.AUTO)
+        fc.deleteLater()
+
+
 def test_cont_button_states_and_manual_pause(qapp, tmp_path, monkeypatch):
     """搜索钮一钮三态（用户拍板 2026-10-28）：idle=继续寻找/Pause=寻找中
     计数/耗尽=禁用 Info 文案；搜索中再点=置取消标志，cancelled 回执归

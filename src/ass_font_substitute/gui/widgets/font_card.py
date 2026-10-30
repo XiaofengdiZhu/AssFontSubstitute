@@ -219,7 +219,7 @@ class _MissingFlyoutView(FlyoutViewBase):
         self.em_label = CaptionLabel("…") if more else None
         if self.em_label is not None:
             h.addWidget(self.em_label, 0, Qt.AlignVCenter)
-        btn = TransparentToolButton(FIF.COPY.icon(), self)
+        btn = TransparentToolButton(FIF.COPY, self)   # 收 FluentIconBase：逐 paint 取主题色
         btn.setIconSize(QSize(14, 14))
         btn.setFixedSize(22, 22)
         install_tip(btn, "复制未覆盖字符")
@@ -496,7 +496,7 @@ class FontCard(CardWidget):
         # 2026-10-29）：拷贝**全部**未覆盖字符（展示截 30 只管显示，
         # 用户纠偏 2026-10-29：截断的是预览不是载荷）。小号 22×22/icon
         # 14，行内不抢高
-        btn = TransparentToolButton(FIF.COPY.icon(), box)
+        btn = TransparentToolButton(FIF.COPY, box)    # 收 FluentIconBase：逐 paint 取主题色
         btn.setIconSize(QSize(14, 14))
         btn.setFixedSize(22, 22)
         install_tip(btn, "复制未覆盖字符")
@@ -729,10 +729,12 @@ class FontCard(CardWidget):
                     and self._pick.isEnabled():
                 self._pick.setFocus(Qt.FocusReason.OtherFocusReason)
             btn.setProperty("state", state)
-            btn.setIcon(FIF.PAUSE.icon() if state == "searching"
-                        else FIF.INFO.icon()
+            # 收 FluentIconBase 本体：qfw 逐 paint 以 Theme.AUTO 重渲，
+            # 亮暗切换自动换色；收 .icon() 的 QIcon 定死建时主题色
+            btn.setIcon(FIF.PAUSE if state == "searching"
+                        else FIF.INFO
                         if state in ("exhausted", "target_error")
-                        else FIF.MORE.icon())
+                        else FIF.MORE)
             btn.setEnabled(enabled)
         if btn.text() != text:
             btn.setText(text)
