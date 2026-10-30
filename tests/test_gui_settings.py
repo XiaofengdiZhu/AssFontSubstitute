@@ -1,5 +1,7 @@
+import gc
 import json
 import os
+import time
 
 import pytest
 
@@ -672,3 +674,160 @@ def test_cache_stats_refresh_on_search_end_and_show(qapp, tmp_path, monkeypatch)
                                   "path": str(tmp_path)})
     assert "相似度记录 7 条" in page.cache_card.contentLabel.text()
     page.deleteLater()
+
+
+def test_slider_drag_without_release_still_commits(qapp, tmp_path,
+                                                   monkeypatch):
+    """released 万一丢失（真机实测常规拖拽 Qt 抓取能送回 released，但
+    窗口失活/触屏合成等场景排除不尽）时 _sliding 卡 True、提交全丢——
+    滑杆显示新值而设置仍旧值。拖拽静默防抖提交兜底 + _sliding 自愈复位。"""
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Signal
+
+    from ass_font_substitute.gui.pages.settings_page import SettingsPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def submit(self, *a):
+            pass
+
+    s = Settings(tmp_path / "settings.json")
+    page = SettingsPage(s, _FakeWorker())
+    card = page.sim_card
+    card._DRAG_COMMIT_MS = 10                 # 测试提速
+    card._on_slider_pressed()                 # 手柄按下（released 将丢失）
+    card.slider.setValue(100)                 # 拖拽改值：防抖排队，不即时提交
+    assert s.get("min_sim") == MIN_SIM        # 未到期未提交
+    deadline = time.time() + 2
+    while time.time() < deadline and s.get("min_sim") != 1.0:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert s.get("min_sim") == 1.0            # released 丢了也必须提交
+    assert not card._sliding                  # 自愈复位
+    # 自愈后程序化改值恢复即时提交
+    card.slider.setValue(90)
+    assert s.get("min_sim") == 0.9
+    page.deleteLater()
+    qapp.processEvents()
+    gc.collect()    # 死页此刻回收：qfw styleSheetManager 迭代非 GC 安全，
+                    # 留到后续用例 qconfig.set 迭代中收会炸 dictionary changed size
+
+
+def test_slider_release_cancels_pending_debounce(qapp, tmp_path, monkeypatch):
+    # 正常松手路径即时提交且取消防抖计时器（防双写：防抖到期再提交同值
+    # 虽无害，但计时器留着属泄漏）
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Signal
+
+    from ass_font_substitute.gui.pages.settings_page import SettingsPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def submit(self, *a):
+            pass
+
+    s = Settings(tmp_path / "settings.json")
+    page = SettingsPage(s, _FakeWorker())
+    card = page.sim_card
+    card._on_slider_pressed()
+    card.slider.setValue(95)
+    assert card._commit_timer.isActive()
+    card._on_slider_released()
+    assert s.get("min_sim") == 0.95
+    assert not card._commit_timer.isActive()
+    page.deleteLater()
+    qapp.processEvents()
+    gc.collect()                              # 同上：安全点回收死页
+
+
+def test_slider_repress_flushes_pending_debounce(qapp, tmp_path, monkeypatch):
+    # 上轮拖拽 released 丢了、防抖未到期又按下：_on_slider_pressed 必须
+    # 先把待提交值冲刷落盘——不然计时器被新拖拽接管，本轮若不再动值且
+    # released 又丢，上轮改值随计时器被丢而永久丢失
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Signal
+
+    from ass_font_substitute.gui.pages.settings_page import SettingsPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def submit(self, *a):
+            pass
+
+    s = Settings(tmp_path / "settings.json")
+    page = SettingsPage(s, _FakeWorker())
+    card = page.sim_card
+    card._on_slider_pressed()
+    card.slider.setValue(100)
+    assert card._commit_timer.isActive()      # 防抖待提交
+    card._on_slider_pressed()                 # 防抖未到期再次按下
+    assert s.get("min_sim") == 1.0            # 待提交值已冲刷
+    assert not card._commit_timer.isActive()
+    assert card._sliding                      # 新拖拽态不受影响
+    card._on_slider_released()
+    page.deleteLater()
+    qapp.processEvents()
+    gc.collect()                              # 同上：安全点回收死页
+
+
+def test_slider_continued_drag_after_pause_no_per_move_commit(
+        qapp, tmp_path, monkeypatch):
+    # 防抖自愈复位 _sliding 后用户仍按住续拖（拖拽中途停顿超时限很常见）：
+    # 剩余 move 不得退化成每 move 落盘（全量 JSON 写正是要省的开销），
+    # 故 _on_value 并判鼠标左键按住、续拖恒走防抖；松手统一提交
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Qt
+    from PySide6.QtCore import Signal
+    from PySide6.QtWidgets import QApplication
+
+    from ass_font_substitute.gui.pages.settings_page import SettingsPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def submit(self, *a):
+            pass
+
+    s = Settings(tmp_path / "settings.json")
+    page = SettingsPage(s, _FakeWorker())
+    card = page.sim_card
+    card._DRAG_COMMIT_MS = 10                 # 测试提速
+    commits = []
+    real_commit = card._on_commit
+    card._on_commit = lambda x: (commits.append(x), real_commit(x))
+
+    card._on_slider_pressed()
+    card.slider.setValue(100)
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and len(commits) < 1:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert commits == [100]                   # 停顿超时限：防抖自愈提交一次
+    assert not card._sliding                  # 自愈复位
+    # 模拟仍按住左键续拖：后续 move 只刷显示、重启防抖，不再即时落盘
+    monkeypatch.setattr(QApplication, "mouseButtons",
+                        staticmethod(lambda: Qt.MouseButton.LeftButton))
+    for v in (95, 90, 85):
+        card.slider.setValue(v)
+    assert commits == [100]                   # 续拖未逐 move 落盘
+    card._on_slider_released()                # 松手统一提交终值
+    assert commits == [100, 85]
+    assert s.get("min_sim") == 0.85
+    page.deleteLater()
+    qapp.processEvents()
+    gc.collect()                              # 同上：安全点回收死页

@@ -7,11 +7,13 @@ from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 from PySide6.QtCore import QEvent
+from PySide6.QtCore import QTimer
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QUrl
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor
 from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QApplication
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
@@ -89,7 +91,12 @@ class _WheelFreeCard(SettingCard):
 class _SliderSpinCard(_WheelFreeCard):
     """滑杆 + compact 数值框卡：双向联动。拖拽滑杆只刷显示、松手提交
     （每个 move 事件落盘=每秒百余次全量 JSON 写，浪费）；数值框直接改
-    值即提交。"""
+    值即提交。松手提交另有拖拽静默防抖兜底：真机实测常规拖拽 Qt 抓取
+    能把 release 送回手柄，但手柄只是 22px 子控件，窗口失活、触屏/笔
+    输入合成等场景无法逐一排除 released 丢失——丢了也在静默后提交。"""
+
+    # 拖拽防抖提交间隔：静默该时长即视作拖拽结束。类属性便于测试覆写
+    _DRAG_COMMIT_MS = 250
 
     def __init__(self, icon, title, content, lo, hi, step, value, on_commit,
                  suffix="", parent=None):
@@ -120,15 +127,34 @@ class _SliderSpinCard(_WheelFreeCard):
         # （blockSignals 防回环），松手统一提交。键盘/程序化改滑杆不发
         # released，按非拖拽态即时提交
         self._sliding = False
+        # 拖拽防抖提交兜底：released 万一丢失，_sliding 卡 True 提交全
+        # 丢——滑杆显示新值而设置仍旧值（门槛没生效的一类疑似根源）。
+        # 静默 _DRAG_COMMIT_MS 即视作拖拽结束提交，并自愈复位 _sliding
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self._on_deferred_commit)
         self.spin.valueChanged.connect(self._on_spin_value)
         self.slider.valueChanged.connect(self._on_value)
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
 
     def _on_slider_pressed(self):
+        if self._commit_timer.isActive():
+            # 上轮拖拽 released 丢了、防抖未到期就又按下：先把待提交值
+            # 落盘再开新拖拽——不然计时器被新拖拽接管，本轮若不再动值
+            # 且 released 又丢，上轮改值就永久丢了
+            self._commit_timer.stop()
+            self._on_commit(self.slider.value())
         self._sliding = True
 
     def _on_slider_released(self):
+        self._sliding = False
+        self._commit_timer.stop()
+        self._on_commit(self.slider.value())
+
+    def _on_deferred_commit(self):
+        # 拖拽静默即结束（拖拽中 move 不断重启计时器）；released 丢了也
+        # 在此自愈复位，后续值变化按非拖拽态即时提交
         self._sliding = False
         self._on_commit(self.slider.value())
 
@@ -141,8 +167,15 @@ class _SliderSpinCard(_WheelFreeCard):
         self.spin.blockSignals(True)
         self.spin.setValue(v)
         self.spin.blockSignals(False)
-        if not self._sliding:
+        # 防抖判据 = 拖拽态 或 左键按住。只判 _sliding 不够：防抖自愈把
+        # _sliding 复位后用户仍按住续拖（拖拽中途停顿超时限很常见），
+        # 剩余 move 会退化成每 move 落盘——正是这套机制要省的开销，故
+        # 并判 QApplication.mouseButtons()
+        if not self._sliding and not (
+                QApplication.mouseButtons() & Qt.MouseButton.LeftButton):
             self._on_commit(v)           # 键盘/程序化改滑杆即时提交
+        else:
+            self._commit_timer.start(self._DRAG_COMMIT_MS)
 
 
 class _SampleEditBox(MessageBoxBase):
