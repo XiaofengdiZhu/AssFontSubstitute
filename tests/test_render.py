@@ -267,3 +267,60 @@ def test_encoder_for_truncated_falls_back(tmp_path):
     fh = _io.BytesIO(_cmap2_blob(False, truncate=8))
     enc = _encoder_for(None, fh, 0)
     assert enc.codec is None and enc.cmap2 == {}
+
+
+def test_second_pass_px_anchor_and_floor():
+    # 量尺 48px：median 墨迹锚 ANCHOR_INK=43；锚后 ≤48 全踩下限 48
+    # （pass1 位图直接复用免重渲）；median 偏小才放大字号防 _fit 上采样
+    from ass_font_substitute.core.similarity.render import RULER_PX
+    from ass_font_substitute.core.similarity.render import _second_pass_px
+
+    assert RULER_PX == 48
+    assert _second_pass_px(43.0) == 48          # 锚点正中：免重渲
+    assert _second_pass_px(43.2) == 48          # round 后 48
+    assert _second_pass_px(47.0) == 48          # 大墨迹踩下限
+    assert _second_pass_px(44.0) == 48          # 48*43/44≈46.9 → floor 48
+    assert _second_pass_px(28.0) == 74          # 小墨迹重渲放大 48*43/28≈73.7
+    assert _second_pass_px(0.0) == 48           # 空 bundle 兜底
+
+
+def test_render_bundle_ruler_reuse(monkeypatch, tmp_path):
+    # 量尺 48px + 锚 43 + 下限：墨迹 ≥43px 的字体 pass2 免重渲（pass1 位图
+    # 直接 _fit）；ink_median 是 48px 口径（size_ratio 尺度不变量）。
+    # 工厂 box scale=1.5 → 0.9em 墨迹 → 48px 下 43.2px ≥ 锚点 → 复用路径
+    calls = []
+    real = render._render_char
+
+    def counting(face, enc, ch, px):
+        calls.append(px)
+        return real(face, enc, ch, px)
+
+    monkeypatch.setattr(render, "_render_char", counting)
+    p = tmp_path / "tall.ttf"
+    build_font(p, chars="永中木", scale=1.5)
+    b = render_bundle(p, 0, "永中木")
+    assert set(b.tiles) == {"永", "中", "木"}
+    assert len(calls) == 3 and calls == [48, 48, 48]   # 只渲一遍
+    assert 42 <= b.ink_median <= 45                     # 48px 量尺口径
+
+
+def test_render_bundle_small_ink_rerenders(monkeypatch, tmp_path):
+    # 墨迹 < 锚点（默认 box 0.6em → 48px 下 28.8px）：px2=72 重渲，位图不复用
+    calls = []
+    real = render._render_char
+
+    def counting(face, enc, ch, px):
+        calls.append(px)
+        return real(face, enc, ch, px)
+
+    monkeypatch.setattr(render, "_render_char", counting)
+    p = tmp_path / "low.ttf"
+    build_font(p, chars="永中木")
+    b = render_bundle(p, 0, "永中木")
+    assert set(b.tiles) == {"永", "中", "木"}
+    assert len(calls) == 6                       # pass1 恰 3 次，后 3 次是 pass2
+    # 第二遍按锚点公式放大重渲（hinting 使 median 29 → 71px，不硬编）
+    px2 = calls[3]
+    assert px2 > 48 and calls.count(px2) == 3
+    assert abs(px2 - 48 * 43 / b.ink_median) <= 1
+    assert 27 <= b.ink_median <= 31              # 量尺仍是 48px 口径

@@ -36,9 +36,10 @@ class Cache:
     不变的窄场景缓存可能 stale，索引重算不失效，已知限制）。"""
 
     # 渲染/比对算法版本（单一事实源，变更时 +1）：TILE/TARGET_INK/
-    # BASE_PX/CHAR_WEIGHT/phash/NCC 任一变更后缓存键随之整体失效，持久
-    # 库（Data/cache.db）里的旧口径相似度不再静默命中。键前缀实现，零迁移
-    ALGO_VER = "1"
+    # RULER_PX/ANCHOR_INK/CHAR_WEIGHT/phash/NCC 任一变更后缓存键随之整体
+    # 失效，持久库（Data/cache.db）里的旧口径相似度不再静默命中。
+    # 键前缀实现，零迁移。v2：量尺 96→48px + 锚 43 下限复用（tile 位级变）
+    ALGO_VER = "2"
 
     def __init__(self, path: Path):
         self.path = Path(path)

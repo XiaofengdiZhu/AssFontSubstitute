@@ -13,7 +13,11 @@ from ass_font_substitute.core.models import CMAP_UNICODE_KEYS
 
 TILE = 48
 TARGET_INK = 36
-BASE_PX = 96
+RULER_PX = 48        # 量尺字号：pass1 渲染+测墨迹高度中位数，位图保留供 pass2 复用
+ANCHOR_INK = 43      # pass2 锚点：median 墨迹目标高度（48px 量尺下库内 ~66% 字体
+                     # px2 落回 48 → 整个 pass2 免重渲；分布实测 median=43、CV 9.7%）
+# 实际复用带 median ≥ 2064/48.5 ≈ 42.56（round 半带 + max 钳制），略宽于锚点
+
 
 @dataclass
 class _Encoder:
@@ -199,9 +203,25 @@ def _fit(arr: np.ndarray) -> np.ndarray:
     return out
 
 
-def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
-    """两遍渲染：96px 测墨迹高度中位数 → 按 TARGET_INK/中位数 定尺寸重渲。
+def _second_pass_px(median: float) -> int:
+    """pass2 字号：median 墨迹锚到 ANCHOR_INK px；下限 RULER_PX——锚后
+    ≤RULER_PX 的全踩下限（锚 43 时即 median ≥43 的全部字体），pass1 位图
+    直接复用免重渲；median 偏小（大留白字体）才放大字号重渲，避免 _fit
+    把低分辨率墨迹上采样糊 tile。"""
+    if not median:
+        return RULER_PX
+    return max(RULER_PX, round(RULER_PX * ANCHOR_INK / median))
 
+
+def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
+    """量尺渲染：48px 渲一遍测墨迹高度中位数（size_ratio 口径）并保留位图
+    → 按 锚43/中位数 定 pass2 字号，≤48px 全踩下限直接复用 pass1 位图
+    （库内 ~66% 字体），median 偏小的才放大字号重渲第二遍。
+
+    墨迹高度中位数是尺度不变量，量尺字号 96→48 不改 size_ratio 语义
+    （hinting 微扰 ~1px/43px ≈ 2.3%/字体，比值最坏 ~4.7%——真机 40 字体
+    基准实测 Δsize_ratio ≤0.035；恰压 0.9/1.1 门槛的边缘对可能翻转，
+    ALGO_VER v2 整体失效旧缓存兜底）。
     缺字（cmap 无映射）直接跳过，绝不渲染 .notdef tofu。
     以文件对象打开：Windows 上 FreeType 按 ANSI 码页解释路径字符串，
     非 ASCII 路径会打不开；传文件对象则由 Python 负责读文件，不受编码影响。
@@ -213,21 +233,27 @@ def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
         # 重复字符去重（样例文本用户可编辑，重复字两遍全量重渲纯浪费）
         wanted = list(dict.fromkeys(ch for ch in chars
                                     if enc.index(face, ch) != 0))
-        # pass 1: 基准尺寸墨迹高度中位数
+        # pass 1: 量尺字号渲染——位图保留，median ≥ 锚点字体第二遍直接复用
+        first: dict[str, np.ndarray] = {}
         heights = {}
         for ch in wanted:
-            arr = _render_char(face, enc, ch, BASE_PX)
+            arr = _render_char(face, enc, ch, RULER_PX)
             if arr is not None:
+                first[ch] = arr
                 heights[ch] = _ink_height(arr)
         if not heights:
             return RenderBundle({}, 0.0, frozenset())
         median = float(np.median(sorted(heights.values())))
+        px = _second_pass_px(median)
         tiles: dict[str, np.ndarray] = {}
         for ch in wanted:
-            px = max(8, round(BASE_PX * TARGET_INK / median)) if median else BASE_PX
-            arr = _render_char(face, enc, ch, px)
+            arr = first.get(ch)
             if arr is None:
                 continue
+            if px != RULER_PX:               # 复用判定：锚后仍落量尺字号
+                arr = _render_char(face, enc, ch, px)
+                if arr is None:
+                    continue
             tiles[ch] = _fit(arr)
         return RenderBundle(tiles, median, frozenset(tiles))
 
