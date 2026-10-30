@@ -304,15 +304,18 @@ class SettingsPage(ScrollArea):
         g1 = SettingCardGroup("相似候选", self.view)
         self.cov_card = _SliderSpinCard(
             FIF.FILTER, "覆盖率门槛",
-            "在库字形对字幕用字的覆盖达到该值即直接采用，否则进入相似度搜索",
+            "字体支持的字符，覆盖字幕所需字符的比例，达到此门槛时，"
+            "才会加入候选",
             _pct(COV_BOUNDS[0]), _pct(COV_BOUNDS[1]), 1,
             _pct(settings.get("cov_threshold")),
             lambda x: self.settings.set("cov_threshold", x / 100),
             suffix="%")
+        # 2026-10 下限 50 收到 70：存量 <70 显示钳 70，存储保留旧值
+        # （构造不提交约定）
         self.sim_card = _SliderSpinCard(
             FIF.SPEED_HIGH, "相似率门槛",
-            "候选字体与原字体的相似率低于该值将不列出",
-            _pct(SIM_BOUNDS[0]), _pct(SIM_BOUNDS[1]), 5,
+            "字体与原字体的相似率，达到此门槛时，才会加入候选",
+            _pct(SIM_BOUNDS[0]), _pct(SIM_BOUNDS[1]), 1,
             _pct(settings.get("min_sim")),
             lambda x: self.settings.set("min_sim", x / 100),
             suffix="%")
@@ -321,12 +324,13 @@ class SettingsPage(ScrollArea):
         # 保留旧值（构造不提交约定）
         self.pause_card = _SliderSpinCard(
             FIF.PAUSE, "相似字体暂停数量",
-            "每找到该数量的相似字体就暂停等待确认，之后可继续搜索",
+            "每找到该数量（可能超出）的相似字体就暂停等待选择，"
+            "之后可继续搜索",
             1, 10, 1, int(settings.get("n_pause")),
             lambda x: self.settings.set("n_pause", x))
         self.threads_card = _SliderSpinCard(
             FIF.IOT, "最大使用线程数",
-            "建索引并行解析的上限（并行解析尚未启用，当前仅存储）",
+            "寻找相似字体和建立字体库索引时使用的 CPU 线程数上限",
             1, max(1, os.cpu_count() or 4), 1,
             int(settings.get("max_threads")),
             lambda x: self.settings.set("max_threads", x))
@@ -335,6 +339,12 @@ class SettingsPage(ScrollArea):
         g1.addSettingCard(self.size_card)
         g1.addSettingCard(self.pause_card)
         g1.addSettingCard(self.threads_card)
+        # 对比文字归「相似候选」组最下面：改动使相似度结果全部失效，
+        # 与保存方式/后缀（输出行为）不同类
+        self.sample_card = PushSettingCard(
+            "编辑…", FIF.FONT, "对比文字", _sample_brief(settings.get("sample_text")), self)
+        self.sample_card.clicked.connect(self._edit_sample)
+        g1.addSettingCard(self.sample_card)
         self._add_sim_pending_hint(g1)
         v.addWidget(g1)
 
@@ -363,12 +373,8 @@ class SettingsPage(ScrollArea):
                                               Qt.AlignmentFlag.AlignRight)
         self.suffix_card.hBoxLayout.addSpacing(16)
         self.suffix_edit.editingFinished.connect(self._save_suffix)
-        self.sample_card = PushSettingCard(
-            "编辑…", FIF.FONT, "对比文字", _sample_brief(settings.get("sample_text")), self)
-        self.sample_card.clicked.connect(self._edit_sample)
         g2.addSettingCard(self.save_mode_card)
         g2.addSettingCard(self.suffix_card)
-        g2.addSettingCard(self.sample_card)
         v.addWidget(g2)
 
         # ── 相似度缓存 ────────────────────────────────────────
@@ -411,7 +417,8 @@ class SettingsPage(ScrollArea):
 
     def _make_size_card(self):
         card = _WheelFreeCard(FIF.TILES, "相对大小区间",
-                              "候选字形相对原字体的大小允许范围", self)
+                              "字体相对于原字体的大小，在此范围内时，"
+                              "才会加入候选", self)
         self.range_slider = RangeSlider(
             _pct(SIZE_BOUNDS[0]), _pct(SIZE_BOUNDS[1]),
             _pct(self.settings.get("size_min")),

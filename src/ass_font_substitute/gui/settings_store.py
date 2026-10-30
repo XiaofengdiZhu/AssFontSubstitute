@@ -16,10 +16,11 @@ from ass_font_substitute.core.similarity.search import SAMPLE_TEXT
 from ass_font_substitute.core.similarity.search import SIZE_RANGE
 
 # 界面滑杆边界（spec §10）：覆盖率 80–100（2026-10 下限 90 收到 80）；
-# 相似率 50–100；大小区间 50–150（200% 过宽无实用场景，2026-10 收到
-# 150）。存储一律小数，页面按百分数换算
+# 相似率 70–100（2026-10 下限 50 收到 70——低于 70 的相似字体无替身价值）
+# + 步距 1（从 5 收细，微调钮一次 5% 太粗）；大小区间 50–150（200% 过宽
+# 无实用场景，2026-10 收到 150）。存储一律小数，页面按百分数换算
 COV_BOUNDS = (0.80, 1.00, 0.01)
-SIM_BOUNDS = (0.50, 1.00, 0.05)
+SIM_BOUNDS = (0.70, 1.00, 0.01)
 SIZE_BOUNDS = (0.50, 1.50, 0.01)
 
 DEFAULTS: dict = {

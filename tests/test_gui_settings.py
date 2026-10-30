@@ -43,10 +43,13 @@ def test_defaults_match_core_constants():
     assert DEFAULTS["overwrite_default"] is False
     assert DEFAULTS["preview_mono"] is False        # 强制等宽默认关
     assert DEFAULTS["max_threads"] >= 1
-    # 界面滑杆值域：覆盖率下限 80（2026-10 从 90 放开）、大小上限 150
+    # 界面滑杆值域：覆盖率下限 80（2026-10 从 90 放开）、大小上限 150、
+    # 相似率下限 70（2026-10 从 50 收紧）+ 步距 1（从 5 收细）
     from ass_font_substitute.gui.settings_store import COV_BOUNDS
+    from ass_font_substitute.gui.settings_store import SIM_BOUNDS
     from ass_font_substitute.gui.settings_store import SIZE_BOUNDS
     assert COV_BOUNDS == (0.80, 1.00, 0.01)
+    assert SIM_BOUNDS == (0.70, 1.00, 0.01)
     assert SIZE_BOUNDS == (0.50, 1.50, 0.01)
 
 
@@ -831,3 +834,70 @@ def test_slider_continued_drag_after_pause_no_per_move_commit(
     page.deleteLater()
     qapp.processEvents()
     gc.collect()                              # 同上：安全点回收死页
+
+
+def test_sim_card_min_70_step_1(qapp, tmp_path, monkeypatch):
+    # 相似率门槛滑杆/数值框：下限 70（2026-10 从 50 收紧）、微调步距 1
+    # （从 5 收细——点击微调钮一次 5% 太粗，70–100 区间只有 31 档）
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Signal
+
+    from ass_font_substitute.gui.pages.settings_page import SettingsPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def submit(self, *a):
+            pass
+
+    page = SettingsPage(Settings(tmp_path / "settings.json"), _FakeWorker())
+    card = page.sim_card
+    assert card.slider.minimum() == 70
+    assert card.slider.maximum() == 100
+    assert card.slider.singleStep() == 1
+    assert card.spin.minimum() == 70
+    assert card.spin.singleStep() == 1
+    page.deleteLater()
+    qapp.processEvents()
+    gc.collect()                              # 死页安全点回收（qfw 样式表迭代非 GC 安全）
+
+
+def test_sample_card_in_sim_group(qapp, tmp_path, monkeypatch):
+    # 「对比文字」从「输出」组搬到「相似候选」组最下面：语义上属相似候选
+    # 配置（改动使相似度结果失效），与保存方式/后缀（输出行为）无关
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Signal
+    from qfluentwidgets import SettingCardGroup
+
+    from ass_font_substitute.gui.pages.settings_page import SettingsPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def submit(self, *a):
+            pass
+
+    page = SettingsPage(Settings(tmp_path / "settings.json"), _FakeWorker())
+    groups = {g.titleLabel.text(): g
+              for g in page.view.findChildren(SettingCardGroup)}
+
+    def cards(group):
+        # qfw 1.11.3 ExpandLayout 缺陷：addWidget 进 __widgets，但
+        # count()/itemAt() 读 __items（只有 addItem 填，恒空）——卡片
+        # 名单只能走 name-mangled 私有字段
+        return list(group.cardLayout._ExpandLayout__widgets)
+
+    sim_cards = cards(groups["相似候选"])
+    out_cards = cards(groups["输出"])
+    assert page.sample_card in sim_cards
+    assert page.sample_card is sim_cards[-1]   # 组内最末位
+    assert page.sample_card not in out_cards
+    page.deleteLater()
+    qapp.processEvents()
+    gc.collect()                              # 死页安全点回收
