@@ -465,6 +465,16 @@ class SettingsPage(ScrollArea):
         self._search_active = active
         # 新搜索开始=建器已带最新设置；搜索全部结束=无待生效项
         self.sim_pending_hint.hide()
+        if not active:
+            # 一轮寻找写完相似度记录：计数卡现刷（曾只 ctor+cacheclear
+            # 触发，寻找一堆后计数不动要重启才更新，2026-10-30 报告）
+            self._refresh_cache_stats()
+
+    def showEvent(self, e):
+        # 每次进设置页现读缓存计数：手选评分等其它写库路径不走
+        # searchActiveChanged，靠翻页兜底
+        super().showEvent(e)
+        self._refresh_cache_stats()
 
     def _mark_sim_pending(self):
         if self._search_active:

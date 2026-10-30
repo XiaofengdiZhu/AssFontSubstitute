@@ -626,3 +626,49 @@ def test_accent_card_follow_custom_and_dialog(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(sp, "ColorDialog", _dlg_factory(1, "#009faa"))
     page._on_accent(1)
     assert s.get("theme_color") == "#009faa"
+
+
+def test_cache_stats_refresh_on_search_end_and_show(qapp, tmp_path, monkeypatch):
+    """相似度记录计数现刷（用户报告 2026-10-30：寻找一堆后计数卡不动，
+    要重启才更新——_refresh_cache_stats 原只有 ctor+cacheclear 两个触发
+    点，搜索/手选写库后无人再查）。现刷两触发：①一轮寻找全部结束
+    （searchActiveChanged False）②每次进设置页（showEvent，覆盖手选
+    评分等其它写库路径）。"""
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    from PySide6.QtCore import QObject
+    from PySide6.QtCore import Signal
+
+    from ass_font_substitute.gui.pages.settings_page import SettingsPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    class _FakeWorker(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def __init__(self):
+            super().__init__()
+            self.submits = []
+
+        def submit(self, tag, fn, *a, **k):
+            self.submits.append((tag, fn, a, k))
+
+    s = Settings(tmp_path / "settings.json")
+    w = _FakeWorker()
+    page = SettingsPage(s, w)
+    n0 = len(w.submits)                     # ctor 已查一次（基线）
+
+    page._on_search_active(True)            # 开搜：不刷
+    assert len(w.submits) == n0
+    page._on_search_active(False)           # 一轮结束：现刷
+    assert len(w.submits) == n0 + 1
+    assert w.submits[-1][0] == "cachestat"
+
+    page.show()
+    qapp.processEvents()                    # 进设置页：现刷（showEvent）
+    assert len(w.submits) == n0 + 2
+
+    # 回执上卡：文案含两项计数（既有行为回归钉）
+    page._on_result("cachestat", {"render_bytes": 2048, "pair_count": 7,
+                                  "path": str(tmp_path)})
+    assert "相似度记录 7 条" in page.cache_card.contentLabel.text()
+    page.deleteLater()
