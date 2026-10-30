@@ -101,8 +101,11 @@ def test_core_e2e(tmp_path):
             if cls.kind == "replace":
                 assert any(c.similarity is not None for c in cands)
         # keep / missing（无候选时）：不映射
-    # 真实样例固定覆盖全部四类：8 keep（零用字）、2 twin、1 replace、3 missing
-    assert kinds == {"keep", "twin", "replace", "missing"}
+    # 真实样例语料随 temp/ 漂移（用户工作区，类别分布不固定，曾钉
+    # 「8 keep/2 twin/1 replace/3 missing」四类全出已废）——只钉冒烟
+    # 主干：replace/missing 必现（搜索+写回路径必走）、映射非空、决策
+    # 可回放；twin 机制由 matcher 单测覆盖
+    assert {"replace", "missing"} <= kinds
     assert mapping  # R8：孪生/搜索映射必须非空
     for n in decided:
         d = latest_decision(tmp_path / "cache.db", normalize_name(n), "t2s")

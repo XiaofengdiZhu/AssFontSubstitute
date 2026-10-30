@@ -85,15 +85,32 @@ def vm_full(tmp_path):
     return tmp_path
 
 
-def test_make_card_keep_with_original_badge(vm_full):
+def test_make_card_keep_collapses_to_original(vm_full):
+    # keep 卡只留「原」行（用户拍板 2026-10-30，截图实锤：更纱黑体 TC
+    # 一卡列出同族 W200–W700 正斜体十行墙）——无事发生态，同族其余面
+    # 写回语义相同（均为此名）；生产 classify 的 keep 实体全部按名命中，
+    # 跨族行本就不存在
     vm, ents = _vm_full(vm_full)
     usage = _usage("黑体", FULL)
     cls = UsageClass("keep", [ents[0], ents[1]], 1.0, [])
     card = vm.make_card(usage, cls)
     assert card.kind == "keep"
     assert card.header == "1 样式 · 2 行内 · 4 字"
-    assert [o.key for o in card.options] == ["fp-hei", "fp-song"]
+    assert [o.key for o in card.options] == ["fp-hei"]
     assert "原字体" in card.options[0].badges     # 「不改动」标签已删（2026-10-28）
+    vm.apply_default_check(card)
+    assert card.checked_key == "fp-hei" and card.replaced is False
+
+
+def test_make_card_replace_lists_original_first(vm_full):
+    # 需替换卡仍全列供挑面：原字体恒第一，在库非原命中为推荐行
+    vm, ents = _vm_full(vm_full)
+    usage = _usage("黑体", FULL)
+    cls = UsageClass("replace", [ents[0], ents[1]], 1.0, [])
+    card = vm.make_card(usage, cls)
+    assert card.kind == "replace"
+    assert [o.key for o in card.options] == ["fp-hei", "fp-song"]
+    assert "原字体" in card.options[0].badges
     # _ent("fp-song", "宋体", "永宇", "宋")："宋" 落在 category 位，
     # script 保持默认 "简"、weight 默认 400
     assert card.options[1].meta == ["简", "W400", "宋"]
@@ -105,12 +122,13 @@ def test_make_card_keep_with_original_badge(vm_full):
 def test_make_card_dedupes_original_rows(vm_full):
     # 库中同族多文件（别名规范名相同）：「原」行只留一个，其余降推荐行；
     # 覆盖平局取 |weight−400| 最小者（ASS 未设字重渲染按 400 选面），
-    # 不看库序
+    # 不看库序。用 replace 档验证（keep 档已塌缩只留原行，
+    # 降级行只在 replace/孪生补列可见）
     vm, ents = _vm_full(vm_full)
     ent_w300 = _ent("fp-hei-w300", "黑体", FULL, weight=300)
     vm.set_entities([ent_w300, ents[0]])          # 300 版库序在前
     card = vm.make_card(_usage("黑体", FULL),
-                        UsageClass("keep", [ent_w300, ents[0]], 1.0, []))
+                        UsageClass("replace", [ent_w300, ents[0]], 1.0, []))
     origs = [o for o in card.options if "原字体" in o.badges]
     assert len(origs) == 1 and origs[0].key == "fp-hei"   # 400 更近，非先入序
     demoted = card.option("fp-hei-w300")
@@ -122,14 +140,14 @@ def test_make_card_dedupes_original_rows(vm_full):
     ent_ital = _ent("fp-hei-ital", "黑体", FULL, italic=True)
     vm.set_entities([ent_ital, ents[0]])
     card3 = vm.make_card(_usage("黑体", FULL),
-                         UsageClass("keep", [ent_ital, ents[0]], 1.0, []))
+                         UsageClass("replace", [ent_ital, ents[0]], 1.0, []))
     assert [o.key for o in card3.options
             if "原字体" in o.badges] == ["fp-hei"]
     # 覆盖率最高者持徽标（非先入序）
     ent_low = _ent("fp-low", "黑体", "永")
     vm.set_entities([ent_low, ents[0]])
     card2 = vm.make_card(_usage("黑体", FULL),
-                         UsageClass("keep", [ent_low, ents[0]], 1.0, []))
+                         UsageClass("replace", [ent_low, ents[0]], 1.0, []))
     assert [o.key for o in card2.options
             if "原字体" in o.badges] == ["fp-hei"]
 
@@ -248,7 +266,7 @@ def test_candidate_rows_resorted_by_score(vm_full):
 def test_default_check_last_decision_wins(vm_full, tmp_path):
     vm, ents = _vm_full(vm_full)
     usage = _usage("黑体", FULL)
-    cls = UsageClass("keep", [ents[0], ents[1]], 1.0, [])
+    cls = UsageClass("replace", [ents[0], ents[1]], 1.0, [])
     card = vm.make_card(usage, cls)
     record_decision(vm.decisions_db, "黑体", "t2s", "fp-song")
     vm.apply_default_check(card)
@@ -405,7 +423,7 @@ def test_build_mapping_covers_all_variants(vm_full, tmp_path):
     vm, ents = _vm_full(vm_full)
     usage = _usage("黑体", FULL)
     usage.variants = {"黑体", "HEITI", "heiti"}
-    cls = UsageClass("keep", [ents[0], ents[1]], 1.0, [])
+    cls = UsageClass("replace", [ents[0], ents[1]], 1.0, [])
     card = vm.make_card(usage, cls)
     card.checked_key = "fp-song"                       # 手动改选宋体
     vm.cards = [card]
@@ -416,7 +434,7 @@ def test_build_mapping_covers_all_variants(vm_full, tmp_path):
 def test_replacement_counts(vm_full):
     vm, ents = _vm_full(vm_full)
     c1 = vm.make_card(_usage("黑体", FULL),
-                      UsageClass("keep", [ents[0], ents[1]], 1.0, []))
+                      UsageClass("replace", [ents[0], ents[1]], 1.0, []))
     c1.checked_key = "fp-song"                          # 换宋体 → 替换
     # 宋体卡勾 fp-song 是原字体行（source=original）不计替换；改用孪生行：
     # 勾「非原字体行」实体 → 替换，映射 宋体→宋体（孪生改写同名的真实形态）
@@ -442,7 +460,7 @@ def test_apply_files_and_decisions(vm_full, tmp_path):
     fp = FileParse(str(sub), None, [_usage("黑体", FULL)], [], [])
     fp.checked = True
     vm.files = [fp]
-    cls = UsageClass("keep", [ents[0], ents[1]], 1.0, [])
+    cls = UsageClass("replace", [ents[0], ents[1]], 1.0, [])
     card = vm.make_card(_usage("黑体", FULL), cls)
     card.checked_key = "fp-song"
     vm.cards = [card]
@@ -464,7 +482,7 @@ def test_apply_conflict_requires_confirm(vm_full, tmp_path):
     out.write_text("旧文件", "utf-8")                    # 已存在 → 冲突
     fp = FileParse(str(sub), None, [_usage("黑体", FULL)], [], [])
     vm.files = [fp]
-    cls = UsageClass("keep", [ents[0], ents[1]], 1.0, [])
+    cls = UsageClass("replace", [ents[0], ents[1]], 1.0, [])
     card = vm.make_card(_usage("黑体", FULL), cls)
     card.checked_key = "fp-song"
     vm.cards = [card]

@@ -206,7 +206,13 @@ class SubsVM:
                     rest.append(o)
             origs = [best]
         rest.sort(key=lambda o: -_opt_score(o))
-        if cls.kind == "twin" and cls.twin_hit is not None:
+        if cls.kind == "keep":
+            # keep 卡只留「原」行（用户拍板 2026-10-30，截图实锤：更纱
+            # 黑体 TC 一卡列出同族 W200–W700 正斜体十行）——无事发生态，
+            # 同族其余面写回语义相同（均为此名），整墙行是噪音；需替换
+            # 卡仍全列供挑面
+            card.options = origs or [OptionItem(KEEP, "保留原字体名")]
+        elif cls.kind == "twin" and cls.twin_hit is not None:
             twin = cls.twin_hit
             same = next((o for o in origs if o.key == twin.fingerprint), None)
             if same is not None:

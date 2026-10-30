@@ -198,6 +198,30 @@ def test_new_searcher_reads_current_min_sim_setting(qapp, tmp_path, monkeypatch)
     assert sub[2][4] == 0.6
 
 
+def test_keep_card_collapses_to_original_row(qapp, tmp_path, monkeypatch):
+    """keep 卡只留「原」行（用户报告 2026-10-30 截图：更纱黑体 TC 一卡
+    列出同族 W200–W700 正斜体十行）：无事发生态，同族其余面写回语义
+    相同（均为此名），整墙行是噪音；需替换卡仍全列供挑面。"""
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ents = [_ent("fp0", "甲字体"), _ent("fp1", "甲字体", chars="永宇阿"),
+            _ent("fp2", "甲字体")]
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=2,
+                      inline_count=5, chars={"永", "宇"}, variants={"甲字体"})
+    page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0",
+                    (usage, UsageClass(kind="keep", entities=ents)))
+    card = page.vm.cards[0]
+    assert card.kind == "keep"
+    assert len(card.options) == 1
+    o = card.options[0]
+    assert o.badges == ["原字体"] and o.source == "original"
+    assert card.checked_key == o.key          # 默认勾选链落在原行
+
+
 def test_keep_cards_before_zero_and_unified_text(qapp, tmp_path, monkeypatch):
     """保留两档排序+统一文案（用户报告 2026-10-30）：有字 keep（保留
     （覆盖足够））恒排 0 字 keep（保留（无对白用字））前，与到达序
