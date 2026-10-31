@@ -59,6 +59,11 @@ _ENUM_KEYS = {
 _SUFFIX_RE = re.compile(r"^\..+$")
 # 强调色：空串=跟随系统；非空必须 #rrggbb（ColorDialog c.name() 出货格式）
 _THEME_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+# 旧版默认对比文字（隔字空格，2026-10-31 去除）：存量等于它=从未自定义，
+# 装载即换新默认并回写净化；自定义值原样保留
+_LEGACY_SAMPLE_TEXT = ("永 中 木 水 火 山 田 石 目 心 手 白 的 我 你 他 它 好 行 生 "
+                       "同 尖 思 明 上 下 左 右 外 大 小 不 了 在 是 有 和 也 "
+                       "8 A a 0 ?")
 
 
 def _is_win_geometry(v) -> bool:
@@ -121,7 +126,10 @@ class Settings(QObject):
                         and not isinstance(v, bool) and math.isfinite(v):
                     self._data[k] = float(v)    # NaN/Inf 会崩 round()，拒收
                 elif k == "sample_text" and isinstance(v, str) and v.strip():
-                    self._data[k] = v
+                    if v == _LEGACY_SAMPLE_TEXT:
+                        dirty = True       # 旧默认空格版：留在新默认并净化
+                    else:
+                        self._data[k] = v
                 elif k == "save_suffix" and isinstance(v, str) \
                         and _SUFFIX_RE.match(v):
                     self._data[k] = v           # 存量后缀复验，与 set 同规则

@@ -39,6 +39,7 @@ from qfluentwidgets import TextEdit
 from qfluentwidgets import qconfig
 from qfluentwidgets import setFont
 
+from ass_font_substitute.core.similarity.search import SAMPLE_TEXT
 from ass_font_substitute.gui.paths import default_cache_path
 from ass_font_substitute.gui.settings_store import COV_BOUNDS
 from ass_font_substitute.gui.settings_store import SIM_BOUNDS
@@ -187,11 +188,20 @@ class _SampleEditBox(MessageBoxBase):
         warn = CaptionLabel("保存后已有的相似度结果将全部失效，"
                             "下次使用时自动按新文字重新计算。")
         warn.setWordWrap(True)
+        # 重置为默认：警告行右端普通按钮（SYNC 图标）——试过按钮行最左
+        # （三钮等宽被读成同级主操作）与透明小字链（用户均否）；
+        # 回填内置默认文字，仍须点「保存」才落盘
+        self.resetButton = PushButton(FIF.SYNC, "重置为默认", self)
+        self.resetButton.clicked.connect(self._reset_default)
+        warn_row = QHBoxLayout()
+        warn_row.setContentsMargins(0, 0, 0, 0)
+        warn_row.addWidget(warn, 1, Qt.AlignmentFlag.AlignBottom)
+        warn_row.addWidget(self.resetButton, 0, Qt.AlignmentFlag.AlignBottom)
         self.edit = TextEdit()
         self.edit.setPlainText(text)
         self.edit.setFixedHeight(220)
         self.viewLayout.addWidget(self.titleLabel)
-        self.viewLayout.addWidget(warn)
+        self.viewLayout.addLayout(warn_row)
         self.viewLayout.addWidget(self.edit)
         self.yesButton.setText("保存")
         self.cancelButton.setText("取消")
@@ -205,6 +215,9 @@ class _SampleEditBox(MessageBoxBase):
         self.edit.textChanged.connect(
             lambda: self.yesButton.setEnabled(bool(self.edit.toPlainText().strip())))
         self.yesButton.setEnabled(bool(text.strip()))
+
+    def _reset_default(self):
+        self.edit.setPlainText(SAMPLE_TEXT)
 
 
 def _theme_aware_title(group) -> None:

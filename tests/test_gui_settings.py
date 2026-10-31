@@ -901,3 +901,57 @@ def test_sample_card_in_sim_group(qapp, tmp_path, monkeypatch):
     page.deleteLater()
     qapp.processEvents()
     gc.collect()                              # 死页安全点回收
+
+
+def test_sample_text_default_has_no_spaces():
+    # 默认对比文字不再带隔字空格（用户报告「莫名其妙的空格」）：
+    # 渲染按字符取字形，空格不产 tile 纯属历史排版残留；去空格须是纯
+    # 分隔剥离、字符集合不变（曾拼接手误混进重复「大」，钉死防再犯）
+    legacy = ("永 中 木 水 火 山 田 石 目 心 手 白 的 我 你 他 它 好 行 生 "
+              "同 尖 思 明 上 下 左 右 外 大 小 不 了 在 是 有 和 也 8 A a 0 ?")
+    assert sorted(SAMPLE_TEXT) == sorted(legacy.replace(" ", ""))
+    assert " " not in SAMPLE_TEXT
+    assert " " not in DEFAULTS["sample_text"]
+
+
+def test_legacy_spaced_sample_text_migrated(tmp_path):
+    # 存量设置仍是旧默认（隔字空格版）：装载即换成新默认并回写净化——
+    # 用户不必手点重置；自定义过的对比文字（≠旧默认）原样保留
+    import json as _json
+    legacy = "永 中 木 水 火 山 田 石 目 心 手 白 的 我 你 他 它 好 行 生 " \
+             "同 尖 思 明 上 下 左 右 外 大 小 不 了 在 是 有 和 也 8 A a 0 ?"
+    f = tmp_path / "s.json"
+    f.write_text(_json.dumps({"sample_text": legacy}), "utf-8")
+    s = Settings(f)
+    assert s.get("sample_text") == SAMPLE_TEXT
+    assert " " not in json.loads(f.read_text("utf-8"))["sample_text"]
+    # 净化幂等：二次装载不得再触发 dirty→save（文件内容不被重写）
+    after_first = f.read_text("utf-8")
+    Settings(f)
+    assert f.read_text("utf-8") == after_first
+    # 自定义值不动
+    s.set("sample_text", "自定义甲乙丙")
+    s2 = Settings(f)
+    assert s2.get("sample_text") == "自定义甲乙丙"
+
+
+def test_sample_edit_box_reset_button(qapp, tmp_path, monkeypatch):
+    # 编辑弹窗「重置为默认」：回填当前默认 SAMPLE_TEXT 并点亮保存钮
+    # （重置后须点「保存」才落盘——预览语义与手改一致）
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    from PySide6.QtWidgets import QPushButton, QWidget
+
+    from ass_font_substitute.gui.pages.settings_page import _SampleEditBox
+
+    host = QWidget()                          # MaskDialogBase ctor 直接取
+    host.resize(720, 480)                     # parent.width()，须有宿主
+    dlg = _SampleEditBox("自定义甲乙丙", parent=host)
+    resets = [b for b in dlg.findChildren(QPushButton) if b.text() == "重置为默认"]
+    assert len(resets) == 1
+    assert dlg.edit.toPlainText() == "自定义甲乙丙"
+    resets[0].click()
+    assert dlg.edit.toPlainText() == SAMPLE_TEXT
+    assert dlg.yesButton.isEnabled()          # 重置后可保存
+    dlg.deleteLater()
+    qapp.processEvents()
+    gc.collect()
