@@ -2000,7 +2000,25 @@ def test_psname_subline_on_same_name_collision(qapp):
             return SimpleNamespace(cancelled=False)
 
     pvm = SimpleNamespace(mono_cells=lambda: False, get_tiles=lambda k: None)
-    fc = FontCard(c, _W(), pvm, lambda: "")
+    # 回归守卫：无父状态 setVisible(True) 会把控件抬成顶层窗口（Windows
+    # 空标题回退显 exe 名「python」，加载碰撞行时闪空白窗）。注意
+    # addWidget 进未安装布局不挂父——挂父发生在布局装到已 realizes 的
+    # 祖先时，ps_lab 曾栽在这（2026-11-01）
+    from PySide6.QtWidgets import QWidget
+    stray: list[QWidget] = []
+    _orig_vis = QWidget.setVisible
+
+    def _spy(self, v):
+        if v and self.parent() is None and self.isWindow():
+            stray.append(self)
+        return _orig_vis(self, v)
+
+    QWidget.setVisible = _spy
+    try:
+        fc = FontCard(c, _W(), pvm, lambda: "")
+    finally:
+        QWidget.setVisible = _orig_vis
+    assert not stray
     fc.show()
     qapp.processEvents()
 

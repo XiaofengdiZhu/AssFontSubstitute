@@ -629,7 +629,11 @@ class FontCard(CardWidget):
         # reset）——卡内 ≥2 行同 display_name 时该行名下显 PostScript 名
         # （规范身份，版本去重拍板口径）；无碰撞零噪音不占行高。碰撞集
         # 变化由 _sync_rows 已建行分支就地显隐
-        ps_lab = _MetricsLabel()
+        # 显式挂父（self）：下面 setVisible 时 text 布局尚未安装到祖先，
+        # addWidget 不产生父子关系——无父 setVisible(True) 会把控件抬成
+        # 顶层窗口（Windows 空标题回退显 exe 名「python」，加载碰撞行闪
+        # 空白窗教训 2026-11-01）；布局安装时 Qt 会自动改挂到行内
+        ps_lab = _MetricsLabel(self)
         ps_lab.setObjectName("psname")
         ps_lab.setFixedWidth(_TEXT_W)
         ps_lab.setFullText(self.tr(_PS_PREFIX) + (o.entity.psname or "")
