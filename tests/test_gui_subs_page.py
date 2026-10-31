@@ -1798,6 +1798,73 @@ def test_threshold_change_regate_exempts_checked_other_gates(
     assert card.option("keep") is keep_row       # 勾选 KEEP 行豁免
 
 
+def test_make_card_auto_adds_last_used_row(qapp, tmp_path, monkeypatch):
+    """上次选择自动加行（用户需求 2026-10-31，同孪生自动加行同理）：
+    决策库有该名+方向记录、记的是字体（keep=False）、指纹在库且不在
+    选项中 → 造「上次使用」行插原字体行之后；apply_default_check 既有
+    回放链会自动勾上它。已在选项中的指纹不重复加行（回放只挂徽标）；
+    keep=True（上次选了保留原名）不加行；指纹已不在库（重扫剔除）不
+    加行。"""
+    from ass_font_substitute.core.decision.store import record_decision
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    ent_l = _ent("fpL", "上次体")
+    page.vm.set_entities([ent_a, ent_b, ent_l])
+
+    record_decision(Path(page.vm.decisions_db), "甲字体", "t2s",
+                    "fpL", False)
+    _usage, card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    o = card.option("fpL")
+    assert o is not None and o.source == "last"
+    assert "上次使用" in o.badges
+    assert card.checked_key == "fpL"           # 回放链自动勾上次使用
+    keys = [x.key for x in card.options]
+    assert keys.index("fp1") < keys.index("fpL") < keys.index("fp2")
+
+    record_decision(Path(page.vm.decisions_db), "甲字体", "t2s",
+                    "fp2", False)
+    _usage, card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    assert sum(1 for x in card.options if x.key == "fp2") == 1   # 不重复加行
+    assert "上次使用" in card.option("fp2").badges                # 回放挂徽标
+    assert card.checked_key == "fp2"
+
+    record_decision(Path(page.vm.decisions_db), "甲字体", "t2s",
+                    "fpL", True)
+    _usage, card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    assert card.option("fpL") is None          # keep=True 不加行
+
+    record_decision(Path(page.vm.decisions_db), "甲字体", "t2s",
+                    "fpGone", False)
+    _usage, card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    assert card.option("fpGone") is None       # 指纹不在库不加行
+    assert card.checked_key == "fp1"           # 回放不中，落原字体默认链
+
+
+def test_last_used_row_not_search_target_on_pure_twin_card(
+        qapp, tmp_path, monkeypatch):
+    # 纯孪生卡（原字体不在库）旧语义 target=None 搜穿整池；上次使用
+    # 自动加行不得使 target 漂移为上次使用实体（审查 P1 实锤：白得
+    # 门槛/暂停语义，渲染失败还会整卡 target_error）
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.decision.store import record_decision
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_t, ent_l = _ent("fpT", "乙字体"), _ent("fpL", "上次体")
+    page.vm.set_entities([ent_t, ent_l])
+    record_decision(Path(page.vm.decisions_db), "甲字体", "t2s",
+                    "fpL", False)
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=2,
+                      inline_count=5, chars={"永"}, variants={"甲字体"})
+    page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    cls = UsageClass(kind="twin", entities=[ent_t], coverage=1.0,
+                     missing_chars=[], twin_hit=ent_t)
+    page._on_result(f"classify:{page._gen}:0", (usage, cls))
+    card = page.vm.cards[0]
+    assert card.option("fpL") is not None       # 上次使用行已自动加
+    assert page.vm._search_target(card) is None  # 但不作搜索基准
+
+
 def test_finish_search_dirty_card_regates_candidates(qapp, tmp_path,
                                                      monkeypatch):
     # 在跑中改门槛（threshold_dirty）：停时归 idle 且候选按新门槛重筛

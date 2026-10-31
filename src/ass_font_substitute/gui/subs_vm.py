@@ -207,6 +207,13 @@ class SubsVM:
                     rest.append(o)
             origs = [best]
         rest.sort(key=lambda o: -_opt_score(o))
+        if cls.kind != "keep":
+            # keep 卡塌缩原行（无事发生态），上次使用行不进（省一次
+            # 决策库查询）；replace/twin 卡插原字体（孪生）之后、推荐行之前
+            last = self._last_used_option(card, usage,
+                                          {o.key for o in opts})
+            if last is not None:
+                rest.insert(0, last)
         if cls.kind == "keep":
             # keep 卡只留「原」行（用户拍板 2026-10-30，截图实锤：更纱
             # 黑体 TC 一卡列出同族 W200–W700 正斜体十行）——无事发生态，
@@ -275,6 +282,29 @@ class SubsVM:
                           badges=(["原字体"] if is_orig else []),
                           source="original" if is_orig else "recommend",
                           entity=e)
+
+    def _last_used_option(self, card: Card, usage: FontUsage,
+                          known_keys: set[str]) -> OptionItem | None:
+        """上次使用自动加行（用户需求 2026-10-31，同孪生自动加行同理）：
+        决策库有该名+方向记录、记的是字体（keep=False）、指纹在库且不在
+        本卡已有键集 → 造「上次使用」行；apply_default_check 既有回放链
+        会挂徽标并自动勾上。指纹已在选项中不重复加行（回放只挂徽标），
+        指纹已不在库（重扫剔除）不加行。keep/missing 卡不进此路径
+        （调用点有 kind 守卫；无事发生态/不在库档各有拍板形态）。
+        known_keys 传建卡中键集（card.options 此刻尚未赋值）。"""
+        d = latest_decision(self.decisions_db, card.norm_name, self.direction)
+        if d is None:
+            return None
+        fp, keep = d
+        if keep or fp in known_keys:
+            return None
+        e = self.ent_by_fp.get(fp)
+        if e is None:
+            return None
+        o = self._entity_option(e, usage)
+        o.source = "last"
+        o.badges = [*o.badges, "上次使用"]
+        return o
 
     def _meta(self, e: FontEntity) -> list[str]:
         return [e.script, weight_tag(e.weight), e.category]
@@ -473,10 +503,13 @@ class SubsVM:
 
     def _search_target(self, card: Card) -> FontEntity | None:
         """相似度基准 = 字幕原字体对应的在库实体（优先原名命中，否则覆盖
-        最高者）；孪生体不作 target（已在选项里，指纹会经池排除逻辑互斥）。"""
+        最高者）；孪生体不作 target（已在选项里，指纹会经池排除逻辑互斥）；
+        上次使用行也不作 target（审查实锤 2026-10-31：纯孪生卡旧语义
+        target=None 搜穿整池，自动加行曾使其漂移为 target=上次使用实体
+        ——白得门槛/暂停语义，渲染失败还会整卡 target_error）。"""
         chars = self.chars_by_norm.get(card.norm_name, set())
         ents = [o.entity for o in card.options if o.entity is not None
-                and "孪生对应" not in o.badges]
+                and "孪生对应" not in o.badges and o.source != "last"]
         if not ents:
             return None
         orig = next((e for e in ents
