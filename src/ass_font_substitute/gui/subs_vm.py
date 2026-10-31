@@ -363,8 +363,10 @@ class SubsVM:
                      cv: float) -> int:
         """单卡按门槛四参筛掉不达标的搜索行，口径与 FontSearcher._gate
         对齐（sim < ms / size ∉ [lo, hi] / cov < cv 均出局，边界含等号
-        同 _gate）；勾选行被筛掉时勾选链回落（apply_default_check 重放：
-        上次使用 > 孪生 > 原字体）。similarity=None 的搜索行两路：KEEP
+        同 _gate）；被勾选行豁免（拍板 2026-10-31：用户已明确选择的候选
+        不因调门槛被移除——门槛管准入，不管撤销既有选择），勾选键因此
+        正常路径不悬挂；文末 apply_default_check 回落块仅为悬挂键防御
+        残留。similarity=None 的搜索行两路：KEEP
         行（make_card 默认 source="search"）与缺字卡无 target 搜索行——
         后者本就只受覆盖率管辖（_evaluate 无 target 路径），coverage 照
         筛；None 兜底按 1.0 放行（_gate 处 coverage/size_ratio 恒为实算
@@ -373,6 +375,9 @@ class SubsVM:
         for o in card.options:
             if o.source != "search":
                 keep.append(o)          # 原字体/孪生/上次使用行不属搜索门槛管辖
+                continue
+            if o.key == card.checked_key:
+                keep.append(o)          # 勾选行豁免重筛
                 continue
             size = o.size_ratio if o.size_ratio is not None else 1.0
             cov = o.coverage if o.coverage is not None else 1.0

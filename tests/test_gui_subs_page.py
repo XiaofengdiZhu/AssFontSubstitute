@@ -1753,18 +1753,49 @@ def test_threshold_change_regates_no_target_rows_by_coverage(
     assert card.option("fpK") is keep_row          # None 兜底放行
 
 
-def test_threshold_change_regate_keeps_checked_fallback(qapp, tmp_path,
-                                                        monkeypatch):
-    # 被勾选行被筛掉：勾选链回落（apply_default_check），不悬挂死键
+def test_threshold_change_regate_exempts_checked_row(qapp, tmp_path,
+                                                     monkeypatch):
+    # 被勾选行豁免重筛（用户拍板 2026-10-31：选中的候选不移除——用户
+    # 已明确选择，门槛无权撤销）；未勾选不达标行照筛
     page = _make_page(qapp, tmp_path, monkeypatch)
     ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
     _usage, card, _norm = _feed_replace_card(page, ent_a, ent_b)
-    page.vm.add_candidates(card, [_cand("fpB", "乙体", 0.7)])
+    page.vm.add_candidates(card, [_cand("fpB", "乙体", 0.7),
+                                  _cand("fpX", "丙字体", 0.82)])
     card.checked_key = "fpB"
     page.settings.set("min_sim", 0.99)
-    assert card.option("fpB") is None
-    assert card.checked_key is not None
-    assert card.option(card.checked_key) is not None   # 勾选键仍指向活行
+    assert card.option("fpB") is not None        # 勾选行豁免
+    assert card.checked_key == "fpB"
+    assert card.option("fpX") is None            # 未勾选低分行出局
+
+
+def test_threshold_change_regate_exempts_checked_other_gates(
+        qapp, tmp_path, monkeypatch):
+    # 豁免钉全三关：勾选行撞覆盖率关、撞大小区间关均存活；勾选 KEEP
+    # 行（checked_key == "keep"，KEEP 行 source="search" 且 coverage/
+    # size_ratio 为 None）也豁免——顺带钉死 None→1.0 兜底不再误杀勾选
+    # KEEP 行的旧边界
+    from ass_font_substitute.gui.subs_vm import OptionItem
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _usage, card, _norm = _feed_replace_card(page, ent_a, ent_b)
+    page.settings.set("size_max", 2.0)             # 先放宽尺寸档：各步只踩中一关
+    page.vm.add_candidates(card, [_cand("fpC", "己字体", 0.995, cov=0.96),
+                                  _cand("fpS", "丁字体", 0.995, size=1.3),
+                                  _cand("fpX", "丙字体", 0.82)])
+    keep_row = OptionItem("keep", "甲字体", source="search")
+    card.options.append(keep_row)
+    card.checked_key = "fpC"
+    page.settings.set("cov_threshold", 0.99)
+    assert card.option("fpC") is not None        # 勾选行撞覆盖率关豁免
+    assert card.option("fpX") is None            # 未勾选低分行出局
+    card.checked_key = "fpS"
+    page.settings.set("size_max", 1.0)
+    assert card.option("fpS") is not None        # 勾选行撞尺寸关豁免
+    assert card.checked_key == "fpS"             # 勾选键不回落
+    card.checked_key = "keep"
+    page.settings.set("min_sim", 0.99)           # 第三关触发，KEEP 行在场
+    assert card.option("keep") is keep_row       # 勾选 KEEP 行豁免
 
 
 def test_finish_search_dirty_card_regates_candidates(qapp, tmp_path,
