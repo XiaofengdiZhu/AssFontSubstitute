@@ -442,7 +442,7 @@ def test_size_card_range_slider(qapp, tmp_path):
 
 
 def test_general_group_language_theme_bg(qapp, tmp_path, monkeypatch):
-    # 常规组三卡：初值、改动落盘并发信号、繁体模式选项名换正體中文
+    # 常规组三卡：初值、改动落盘并发信号、切语言提示重启
     monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
     from PySide6.QtCore import QObject
     from PySide6.QtCore import Signal
@@ -475,16 +475,30 @@ def test_general_group_language_theme_bg(qapp, tmp_path, monkeypatch):
     assert themes == ["dark"] and effects == ["none"]
     assert s.get("theme") == "dark" and s.get("bg_effect") == "none"
 
+    # 切语言：落盘 + 提示重启（选项名随运行中语言，本会话不变）；
+    # 切回运行语言不提示
+    from ass_font_substitute.gui.pages import settings_page as sp
+    infos = []
+    monkeypatch.setattr(sp.InfoBar, "info",
+                        lambda *a, **k: infos.append(a[:2]))
+    labels = ["简体中文", "繁体中文"]
     page.lang_combo.setCurrentIndex(1)
     assert s.get("language") == "zh-Hant"
+    assert infos == [("语言已更改", "重启应用后生效")]
     assert [page.lang_combo.itemText(i)
-            for i in range(page.lang_combo.count())] == ["简体中文", "正體中文"]
-    assert page.lang_combo.currentIndex() == 1
+            for i in range(page.lang_combo.count())] == labels
     page.lang_combo.setCurrentIndex(0)
     assert s.get("language") == "zh-Hans"
-    assert [page.lang_combo.itemText(i)
-            for i in range(page.lang_combo.count())] == ["简体中文", "繁体中文"]
+    assert len(infos) == 1
     page.deleteLater()
+
+    # 繁体启动：选项名繁方惯称「正體中文」
+    s.set("language", "zh-Hant")
+    page2 = SettingsPage(s, _FakeWorker())
+    assert [page2.lang_combo.itemText(i)
+            for i in range(page2.lang_combo.count())] == ["简体中文", "正體中文"]
+    assert page2.lang_combo.currentIndex() == 1
+    page2.deleteLater()
 
 
 def test_enum_keys_roundtrip_and_reject(tmp_path):
@@ -939,7 +953,8 @@ def test_sample_edit_box_reset_button(qapp, tmp_path, monkeypatch):
     # 编辑弹窗「重置为默认」：回填当前默认 SAMPLE_TEXT 并点亮保存钮
     # （重置后须点「保存」才落盘——预览语义与手改一致）
     monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
-    from PySide6.QtWidgets import QPushButton, QWidget
+    from PySide6.QtWidgets import QPushButton
+    from PySide6.QtWidgets import QWidget
 
     from ass_font_substitute.gui.pages.settings_page import _SampleEditBox
 
@@ -955,3 +970,53 @@ def test_sample_edit_box_reset_button(qapp, tmp_path, monkeypatch):
     dlg.deleteLater()
     qapp.processEvents()
     gc.collect()
+
+
+def test_language_first_run_follows_system(tmp_path, monkeypatch):
+    """首启（存档无 language 键）按系统 locale 探测并落盘；此后以存档
+    为准不再探测（含存过默认 zh-Hans 的存量文件）。"""
+    import json
+
+    from ass_font_substitute.gui import settings_store as ss
+
+    monkeypatch.setattr(ss, "_detect_language", lambda: "zh-Hant")
+    # 无存档
+    s = ss.Settings(tmp_path / "s.json")
+    assert s.get("language") == "zh-Hant"
+    assert json.loads((tmp_path / "s.json").read_text("utf-8"))["language"] \
+        == "zh-Hant"                                     # 已落盘，重启不再探测
+    # 有存档但缺 language 键
+    f2 = tmp_path / "s2.json"
+    f2.write_text(json.dumps({"theme": "dark"}), encoding="utf-8")
+    s2 = ss.Settings(f2)
+    assert s2.get("language") == "zh-Hant"
+    assert json.loads(f2.read_text("utf-8"))["language"] == "zh-Hant"
+    # 存量文件已存（含默认 zh-Hans）：不探测不覆写
+    monkeypatch.setattr(ss, "_detect_language", lambda: "zh-Hant")
+    f3 = tmp_path / "s3.json"
+    f3.write_text(json.dumps({"language": "zh-Hans"}), encoding="utf-8")
+    s3 = ss.Settings(f3)
+    assert s3.get("language") == "zh-Hans"
+    s.deleteLater()
+    s2.deleteLater()
+    s3.deleteLater()
+
+
+def test_detect_language_by_locale(monkeypatch):
+    """繁体区（台/港/澳）→ zh-Hant；简中区/其他语言 → zh-Hans。"""
+    from types import SimpleNamespace
+
+    from PySide6.QtCore import QLocale
+
+    from ass_font_substitute.gui import settings_store as ss
+
+    for name, want in (("zh_TW", "zh-Hant"), ("zh_HK", "zh-Hant"),
+                       ("zh_MO", "zh-Hant"), ("zh_CN", "zh-Hans"),
+                       ("zh_SG", "zh-Hans"), ("en_US", "zh-Hans"),
+                       ("ja_JP", "zh-Hans")):
+        fake = SimpleNamespace(
+            system=lambda n=name: QLocale(n),
+            Chinese=QLocale.Chinese, Taiwan=QLocale.Taiwan,
+            HongKong=QLocale.HongKong, Macao=QLocale.Macao)
+        monkeypatch.setattr(ss, "QLocale", fake)
+        assert ss._detect_language() == want, name

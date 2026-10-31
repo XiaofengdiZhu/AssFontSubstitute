@@ -5,9 +5,12 @@ classify_script）；行 meta 不上屏该值，但筛选要能圈出这批字�
 选项文案「简/繁」以删除线渲染（两个脚本都划掉 = 都不是）。"""
 from qfluentwidgets import ComboBox as _ComboBox
 
+from ass_font_substitute.gui import vm_text
+
 NO_SCRIPT = "简/繁"
 
-# 选项文案 → pvm.script 筛选值；全部/空不在表内，统一 None（不筛）
+# 选项源值 → pvm.script 筛选值；全部/空不在表内，统一 None（不筛）。
+# 下拉显示译文、userData 存源值（显示串随界面语言变，不能当键）
 _SCRIPT_VALUES = {"简": "简", "繁": "繁", "简繁": "简繁", NO_SCRIPT: "未标注"}
 
 
@@ -27,7 +30,7 @@ class StrikeTailComboBox(_ComboBox):
         self.currentTextChanged.connect(self._sync_button_strike)
 
     def _sync_button_strike(self, text: str) -> None:
-        on = text == NO_SCRIPT
+        on = text == vm_text.text(NO_SCRIPT)
         f = self.font()
         if f.strikeOut() != on:
             f.setStrikeOut(on)
@@ -39,7 +42,8 @@ class StrikeTailComboBox(_ComboBox):
 
         def _strike_tail(*_args):
             item = view.item(view.count() - 1)
-            if item is not None and item.text().lstrip() == NO_SCRIPT:
+            if item is not None \
+                    and item.text().lstrip() == vm_text.text(NO_SCRIPT):
                 f = item.font()
                 f.setStrikeOut(True)
                 item.setFont(f)
@@ -56,5 +60,7 @@ def options(pvm) -> list[str]:
 
 
 def pick(cb) -> str | None:
-    """当前选中项 → pvm.script 筛选值；全部/空 = None（不筛）。"""
-    return _SCRIPT_VALUES.get(cb.currentText())
+    """当前选中项 → pvm.script 筛选值；全部/空 = None（不筛）。
+    键取 userData（源值）；无 userData 的项（全部/裸 addItems）按文本兜底。"""
+    data = cb.currentData()
+    return _SCRIPT_VALUES.get(data if data is not None else cb.currentText())

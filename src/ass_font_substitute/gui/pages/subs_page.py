@@ -115,7 +115,7 @@ class SubsPage(QWidget):
 
         head = QHBoxLayout()
         # BodyLabel 而非裸 QLabel：LABEL qss 黑/白随主题（裸 QLabel 黑字死调色板）
-        self.page_title = BodyLabel("处理字幕")
+        self.page_title = BodyLabel(self.tr("处理字幕"))
         setFont(self.page_title, 20)   # qfw setFont：20px Normal 字重不变
         head.addWidget(self.page_title)
         head.addStretch(1)
@@ -125,13 +125,13 @@ class SubsPage(QWidget):
 
         # 字幕文件卡在 _rebuild_file_rows 里整卡重建（GroupHeaderCardWidget）：
         # 汇总/两钮是常驻控件，重建时重挂进新卡标题栏
-        self.files_summary = CaptionLabel("0 / 0 个文件 · 0 种字体")
+        self.files_summary = CaptionLabel(self.tr("0 / 0 个文件 · 0 种字体"))
         # 图标红同文件行移除钮（危险动作同色）；空列表禁用（_update_files_summary）
         self.btn_clear = PushButton(
-            FIF.REMOVE_FROM.icon(color=_REMOVE_RED), "移除全部")
+            FIF.REMOVE_FROM.icon(color=_REMOVE_RED), self.tr("移除全部"))
         self.btn_clear.setEnabled(False)
         # 主钮加文件，箭头 flyout 加目录（2026-10-29 用户要求）
-        self.btn_add = PrimarySplitPushButton(FIF.ADD, "添加文件")
+        self.btn_add = PrimarySplitPushButton(FIF.ADD, self.tr("添加文件"))
         self.files_box = QVBoxLayout()
         self.files_box.setContentsMargins(0, 0, 0, 0)
         v.addLayout(self.files_box)
@@ -147,10 +147,12 @@ class SubsPage(QWidget):
         pl.setHorizontalSpacing(18)
         pl.setVerticalSpacing(8)
         self.seg_dir = SegmentedWidget(self)
-        self.seg_dir.addItem("t2s", "繁 → 简", lambda: self._set_direction("t2s"))
-        self.seg_dir.addItem("s2t", "简 → 繁", lambda: self._set_direction("s2t"))
+        self.seg_dir.addItem("t2s", self.tr("繁 → 简"),
+                             lambda: self._set_direction("t2s"))
+        self.seg_dir.addItem("s2t", self.tr("简 → 繁"),
+                             lambda: self._set_direction("s2t"))
         self.seg_dir.setCurrentItem("t2s")
-        pl.addWidget(_fld("孪生检测方向", self.seg_dir))
+        pl.addWidget(_fld(self.tr("孪生检测方向"), self.seg_dir))
         ph.addWidget(flow_wrap, 1)
         # 强制等宽（settings 键 preview_mono，两页同键互通）：预览统一格宽
         # 渲染，多字体行逐字对位；默认关（自然字距）。qfw SwitchButton 的
@@ -160,9 +162,10 @@ class SubsPage(QWidget):
         self.sw_mono.setOnText("")
         self.sw_mono.setOffText("")
         self.sw_mono.setChecked(self.settings.get("preview_mono"))
-        install_tip(self.sw_mono, "统一格宽渲染预览（全角 1em/半角 0.5em），多字体行逐字对位")
+        install_tip(self.sw_mono, self.tr(
+            "统一格宽渲染预览（全角 1em/半角 0.5em），多字体行逐字对位"))
         self.sw_mono.checkedChanged.connect(self._on_mono_toggled)
-        ph.addWidget(_fld("强制等宽", self.sw_mono), 0, Qt.AlignVCenter)
+        ph.addWidget(_fld(self.tr("强制等宽"), self.sw_mono), 0, Qt.AlignVCenter)
         # 可键入 + 下拉最近 10 条历史（与字体库预览页共享，回车记一条）
         self.preview_edit = PreviewInput(self.settings)
         ph.addWidget(self.preview_edit, 0, Qt.AlignVCenter)
@@ -179,9 +182,10 @@ class SubsPage(QWidget):
         # 上下对称且收紧：内容垂直居中、栏体矮（控件 hint ~33px + 20 边距）
         bottom.setContentsMargins(36, 15, 36, 15)
         bottom.setSpacing(12)
-        bottom.addWidget(CaptionLabel("保存方式:"))
+        bottom.addWidget(CaptionLabel(self.tr("保存方式:")))
         self.save_mode = ComboBox()
-        self.save_mode.addItems(["另存为新文件", "覆盖原文件"])
+        self.save_mode.addItems(
+            [self.tr("另存为新文件"), self.tr("覆盖原文件")])
         self.save_mode.setFixedWidth(150)
         self.save_mode.setCurrentIndex(
             1 if self.settings.get("overwrite_default") else 0)
@@ -191,7 +195,7 @@ class SubsPage(QWidget):
         self.save_mode.installEventFilter(self._wheel_block)
         bottom.addWidget(self.save_mode)
         # 另存模式才需要后缀；编辑与设置页双向同步（suffixChanged 信号）
-        self.suffix_label = CaptionLabel("另存后缀:")
+        self.suffix_label = CaptionLabel(self.tr("另存后缀:"))
         self.suffix_edit = LineEdit()
         self.suffix_edit.setText(self.settings.get("save_suffix"))
         self.suffix_edit.setFixedWidth(160)
@@ -200,9 +204,9 @@ class SubsPage(QWidget):
         bottom.addWidget(self.suffix_label)
         bottom.addWidget(self.suffix_edit)
         bottom.addStretch(1)
-        self.replace_label = CaptionLabel("将替换 0 / 0 种字体")
+        self.replace_label = CaptionLabel(self.tr("将替换 0 / 0 种字体"))
         bottom.addWidget(self.replace_label)
-        self.btn_apply = PrimaryPushButton(FIF.PLAY, "替换并保存")
+        self.btn_apply = PrimaryPushButton(FIF.PLAY, self.tr("替换并保存"))
         self.btn_apply.setEnabled(False)
         self.btn_apply.clicked.connect(self._apply)
         bottom.addWidget(self.btn_apply)
@@ -213,7 +217,7 @@ class SubsPage(QWidget):
         # ---- connect 段（控件就绪后统一接线）----
         self.btn_add.clicked.connect(self._add_files)
         menu = RoundMenu(parent=self.btn_add)
-        act_dir = Action(FIF.FOLDER_ADD, "添加目录",
+        act_dir = Action(FIF.FOLDER_ADD, self.tr("添加目录"),
                          triggered=self._add_dir)
         act_dir.setToolTip("")   # qfw 菜单项悬停默认弹 text 同文 tooltip
         menu.addAction(act_dir)
@@ -246,12 +250,13 @@ class SubsPage(QWidget):
 
     # ---- 文件层 ----
     def _add_files(self):
-        paths = pick_open_files(self, self.settings, "添加字幕文件",
-                                "ASS 字幕 (*.ass)", "subs")
+        paths = pick_open_files(self, self.settings, self.tr("添加字幕文件"),
+                                self.tr("ASS 字幕 (*.ass)"), "subs")
         self._add_paths(paths)
 
     def _add_dir(self):
-        d = pick_existing_dir(self, self.settings, "添加字幕目录", "subs")
+        d = pick_existing_dir(self, self.settings, self.tr("添加字幕目录"),
+                              "subs")
         if d:
             self.worker.submit(f"scandir:{d}", _scan_dir_job, d)
 
@@ -291,11 +296,11 @@ class SubsPage(QWidget):
         if not n:
             return
         if n > 1:
-            w = MessageBox("移除全部字幕文件",
-                           f"确认移除 {n} 个字幕文件？选择的字体将记忆，"
-                           "重新添加即恢复。", self.window())
-            w.yesButton.setText("确认")
-            w.cancelButton.setText("取消")
+            w = MessageBox(self.tr("移除全部字幕文件"),
+                           self.tr("确认移除 {0} 个字幕文件？选择的字体将记忆，重新添加即恢复。").format(n),
+                           self.window())
+            w.yesButton.setText(self.tr("确认"))
+            w.cancelButton.setText(self.tr("取消"))
             if not w.exec():
                 return
         for f in self.vm.files:
@@ -324,7 +329,7 @@ class SubsPage(QWidget):
         # 一张 GroupHeaderCardWidget 框住全部文件行（行间分隔线由组件管）；
         # 标题栏当工具条：左=标题+汇总，右=移除全部+添加文件
         card = GroupHeaderCardWidget(self)
-        card.setTitle("字幕文件")
+        card.setTitle(self.tr("字幕文件"))
         # 标题栏左块两行：标题下挂汇总（标题栏 48px 容得下）
         left = QWidget()
         lv = QVBoxLayout(left)
@@ -357,16 +362,16 @@ class SubsPage(QWidget):
             rh.setSpacing(8)
             content = ""
             if f.error:
-                badge = padded_badge(InfoBadge.error, "解析失败")
+                badge = padded_badge(InfoBadge.error, self.tr("解析失败"))
                 rh.addWidget(badge, 0, Qt.AlignVCenter)
                 # tip 挂徽章本体：容器只吃自身窄缝 Enter，悬徽章不冒泡
                 install_tip(badge, f.error)
             else:
-                content = f"{f.font_count} 种字体"
+                content = self.tr("{0} 种字体").format(f.font_count)
             rm = TransparentToolButton(FIF.REMOVE_FROM)
             # 危险动作：红色示警（icon() 第二参才是颜色，须关键字传）
             rm.setIcon(FIF.REMOVE_FROM.icon(color=_REMOVE_RED))
-            install_tip(rm, "从列表移除")
+            install_tip(rm, self.tr("从列表移除"))
             rm.clicked.connect(lambda _=False, p=f.path: self._remove_file(p))
             rh.addWidget(rm, 0, Qt.AlignVCenter)
 
@@ -386,7 +391,7 @@ class SubsPage(QWidget):
             group.titleLabel.hide()
             group.textLayout.insertWidget(0, name)
         if not self.vm.files:
-            ph = CaptionLabel("（尚未添加字幕文件）")
+            ph = CaptionLabel(self.tr("（尚未添加字幕文件）"))
             ph.setAlignment(Qt.AlignCenter)
             wrap = QWidget()
             wh = QHBoxLayout(wrap)
@@ -410,7 +415,9 @@ class SubsPage(QWidget):
         checked = len(self.vm.checked_parses())
         total = len(self.vm.files)
         n_fonts = len(self.vm.merged_usages())
-        self.files_summary.setText(f"{checked} / {total} 个文件 · {n_fonts} 种字体")
+        self.files_summary.setText(
+            self.tr("{0} / {1} 个文件 · {2} 种字体").format(
+                checked, total, n_fonts))
         self.btn_clear.setEnabled(bool(total))
 
     def _on_file_checked(self, path, on):
@@ -429,7 +436,7 @@ class SubsPage(QWidget):
             if payload:
                 self._add_paths(payload)
             else:
-                InfoBar.warning("目录里没有字幕", d, parent=self)
+                InfoBar.warning(self.tr("目录里没有字幕"), d, parent=self)
             return
         if isinstance(tag, str) and tag.startswith("parse:"):
             if payload.path in self._removed:   # 移除后迟到的回执：弃置
@@ -523,8 +530,8 @@ class SubsPage(QWidget):
                 self.vm.attach_pick(card, entity, None, None)
                 self._apply_card(card)
                 self._update_summary()
-                InfoBar.warning("相似度评分失败",
-                                "已按无评分加入所选字体", parent=self)
+                InfoBar.warning(self.tr("相似度评分失败"),
+                                self.tr("已按无评分加入所选字体"), parent=self)
                 return                 # 已降级回填：不再走白名单报错
         # 弹泡白名单：只报本页任务。其余 tag（cachestat/预览渲染
         # 失败等）别页自会提示或已自行降级——无差别弹泡只会刷屏且不可读
@@ -533,7 +540,7 @@ class SubsPage(QWidget):
                 or tag.startswith(("apply:", "parse:", "classify:", "pull:",
                                    "newsearcher:", "pickscore:",
                                    "scandir:"))):
-            InfoBar.error("任务失败", f"{tag}: {err}", parent=self)
+            InfoBar.error(self.tr("任务失败"), f"{tag}: {err}", parent=self)
 
     # ---- 分类 ----
     def _reclassify(self):
@@ -726,15 +733,17 @@ class SubsPage(QWidget):
             # 闭包里的旧 card 成孤儿——回填前按 norm 重取
             card = self._card(norm)
             if card is None:
-                InfoBar.warning("字体已重算",
-                                "该字体卡片已被重新分类，请重新选择", parent=self)
+                InfoBar.warning(self.tr("字体已重算"),
+                                self.tr("该字体卡片已被重新分类，请重新选择"),
+                                parent=self)
                 return
             # 相似率/相对大小经 worker 评分（渲染+比较 ~57ms，UI 线程不做）；
             # 行先不入列，评分回执一并 attach（免两帧重建）。同 norm 在途
             # 防重入：双 pick 会让 pending 记录互相覆盖，失败回执张冠李戴
             if norm in self._pending_picks:
-                InfoBar.warning("评分进行中", "该字体的上一次评分还在路上，"
-                                "请稍候再选", parent=self)
+                InfoBar.warning(self.tr("评分进行中"),
+                                self.tr("该字体的上一次评分还在路上，请稍候再选"),
+                                parent=self)
                 return
             self.worker.submit(f"pickscore:{norm}", _pick_score_job,
                                vm_target(self.vm, card), dlg.selected)
@@ -746,8 +755,9 @@ class SubsPage(QWidget):
             return                        # 派工在途：忽略重复点击（防重入）
         conflicts = self.vm.pending_out_conflicts()
         if conflicts and not self._confirmed_once:
-            InfoBar.warning("另存文件已存在",
-                            "将覆盖：" + "；".join(conflicts) + "（再次点击确认）",
+            InfoBar.warning(self.tr("另存文件已存在"),
+                            self.tr("将覆盖：{0}（再次点击确认）").format(
+                                "；".join(conflicts)),
                             parent=self)
             self._confirmed_once = True
             return                        # 二次点击才真正执行（简单确认机制）
@@ -780,10 +790,12 @@ class SubsPage(QWidget):
         ok = [r for r in self._apply_results if r.error is None]
         bad = [r for r in self._apply_results if r.error is not None]
         if bad:
-            InfoBar.error("部分文件失败", "；".join(
+            InfoBar.error(self.tr("部分文件失败"), "；".join(
                 f"{Path(r.path).name}: {r.error}" for r in bad), parent=self)
         if ok:
-            InfoBar.success("替换完成", f"{len(ok)} 个文件已写入", parent=self)
+            InfoBar.success(self.tr("替换完成"),
+                            self.tr("{0} 个文件已写入").format(len(ok)),
+                            parent=self)
         self.vm.record_all()
         self._apply_dispatching = False
         self._apply_results = []
@@ -797,7 +809,8 @@ class SubsPage(QWidget):
                 kinds[c.kind] += 1
         self.summary.set_counts(kinds)
         n, total = self.vm.replacement_counts()
-        self.replace_label.setText(f"将替换 {n} / {total} 种字体")
+        self.replace_label.setText(
+            self.tr("将替换 {0} / {1} 种字体").format(n, total))
         # 派工期保持禁用：此时写盘用的是派工快照，改勾选不会生效，
         # 放开按钮只会让「替换并保存」与决策记忆（record_all）分叉
         self.btn_apply.setEnabled(not self._apply_dispatching
@@ -831,7 +844,8 @@ class SubsPage(QWidget):
         try:
             self.settings.set("save_suffix", text)
         except ValueError:
-            InfoBar.error("后缀无效", "必须以点开头且非空，如 .substituted.ass",
+            InfoBar.error(self.tr("后缀无效"),
+                          self.tr("必须以点开头且非空，如 .substituted.ass"),
                           parent=self)
             self.suffix_edit.setText(self.settings.get("save_suffix"))
             return
@@ -893,8 +907,8 @@ class _BadgeRow(QWidget):
 
     def text(self) -> str:
         c = self._counts
-        return (f"孪生对应 {c['twin']} / 需替换 {c['replace']} / "
-                f"库中没有 {c['missing']} / 保留 {c['keep']}")
+        return (self.tr("孪生对应 {0} / 需替换 {1} / 库中没有 {2} / 保留 {3}")
+                .format(c['twin'], c['replace'], c['missing'], c['keep']))
 
     def _rebuild(self):
         while self._h.count():
@@ -904,10 +918,14 @@ class _BadgeRow(QWidget):
         c = self._counts
         # 顺序=用户关注度（孪生最好 → 保留垫底）；孪生/保留互换底色：
         # 绿色给「孪生对应」（同样是无需处理的好结果），保留退中性蓝
-        for text, mk in ((f"孪生对应 {c['twin']}", InfoBadge.success),
-                         (f"需替换 {c['replace']}", InfoBadge.warning),
-                         (f"库中没有 {c['missing']}", InfoBadge.error),
-                         (f"保留 {c['keep']}", InfoBadge.info)):
+        for text, mk in ((self.tr("孪生对应 {0}").format(c['twin']),
+                          InfoBadge.success),
+                         (self.tr("需替换 {0}").format(c['replace']),
+                          InfoBadge.warning),
+                         (self.tr("库中没有 {0}").format(c['missing']),
+                          InfoBadge.error),
+                         (self.tr("保留 {0}").format(c['keep']),
+                          InfoBadge.info)):
             self._h.addWidget(padded_badge(mk, text))
         self._h.addStretch(1)
 

@@ -7,6 +7,7 @@ import re
 import threading
 from pathlib import Path
 
+from PySide6.QtCore import QLocale
 from PySide6.QtCore import QObject
 from PySide6.QtCore import Signal
 
@@ -37,7 +38,7 @@ DEFAULTS: dict = {
     "last_dirs": {},                               # 各对话框上次目录 {scope: 路径}
     "preview_history": [],                         # 预览文字历史（新→旧，最多 10 条；预览页/字幕页共享）
     "preview_mono": False,                         # 预览强制等宽（全角 1em/半角 0.5em 统一格宽，多行逐字对位）
-    "language": "zh-Hans",                         # 界面语言（国际化待接入，暂存储值）
+    "language": "zh-Hans",                         # 界面语言（启动装载译文，切换重启生效）
     "theme": "auto",                               # auto/light/dark
     "theme_color": "",                             # 强调色 #rrggbb；空=跟随系统
     "bg_effect": "mica",                           # 窗口材质；Win10 下 Mica 类自动退化为实色
@@ -79,6 +80,16 @@ def _is_win_geometry(v) -> bool:
                 for f in ("x", "y", "w", "h")))
 
 
+def _detect_language() -> str:
+    """系统 locale 繁体区（台/港/澳）→ zh-Hant，其余 → zh-Hans。
+    仅首次启动（存档无 language 键）调用；QLocale 不依赖 QApplication。"""
+    loc = QLocale.system()
+    if loc.language() == QLocale.Chinese and loc.territory() in (
+            QLocale.Taiwan, QLocale.HongKong, QLocale.Macao):
+        return "zh-Hant"
+    return "zh-Hans"
+
+
 class Settings(QObject):
     """JSON 设置。get/set 同步落盘（tmp + os.replace 原子写）；
     损坏/含未知键/类型不符的存量数据按默认处理，绝不崩 GUI。"""
@@ -106,6 +117,7 @@ class Settings(QObject):
             self._data = dict(DEFAULTS)
             f = self._file()
             if not f.exists():
+                self._adopt_language()
                 return
             try:
                 stored = json.loads(f.read_text("utf-8"))
@@ -149,8 +161,17 @@ class Settings(QObject):
                     self._data[k] = v
                 else:
                     dirty = True                # 未知键或类型不符
+            if "language" not in stored:
+                self._adopt_language()          # 首启/旧档缺键：跟随系统
             if dirty:
                 self.save()                     # 回写净化后的存量设置
+
+    def _adopt_language(self) -> None:
+        """首启（存档无 language 键）按系统 locale 探测界面语言并落盘：
+        此后以存档为准（含存过默认 zh-Hans 的存量文件），用户显式选择
+        不被系统语言漂移覆盖。"""
+        self._data["language"] = _detect_language()
+        self.save()
 
     def get(self, key: str):
         return self._data[key]

@@ -17,7 +17,7 @@ class PreviewInput(LineEdit):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self._settings = settings
-        self.setPlaceholderText("预览文字（留空显示字体名）")
+        self.setPlaceholderText(self.tr("预览文字（留空显示字体名）"))
         self.setMaxLength(60)   # 条带缓存按条数计，长文内存线性涨
         self.setMinimumWidth(260)
         self.setClearButtonEnabled(True)

@@ -48,7 +48,7 @@ class BrowsePage(ScrollArea):
         # 列表。tools 属性别名留给 smoke/测试直引
         head = QHBoxLayout()
         head.setSpacing(8)
-        self.page_title = BodyLabel("字体库预览")
+        self.page_title = BodyLabel(self.tr("字体库预览"))
         setFont(self.page_title, 20)   # qfw setFont：20px Normal 字重不变
         head.addWidget(self.page_title)
         head.addStretch(1)
@@ -66,7 +66,7 @@ class BrowsePage(ScrollArea):
         self.count_label = self.bar.count_label
         v.addWidget(self.bar)
 
-        self.hint = BodyLabel("先到「字体库管理」添加字体目录")
+        self.hint = BodyLabel(self.tr("先到「字体库管理」添加字体目录"))
         v.addWidget(self.hint)
         self.list = FontListWidget(worker, self.pvm,
                                    lambda: self.preview_edit.text())
@@ -123,7 +123,7 @@ class BrowsePage(ScrollArea):
     def _on_failed(self, tag, err):
         # blib 失败曾全层无人处理：页面保持旧列表+误导性 hint，无任何报错
         if tag == "blib":
-            InfoBar.error("字体库加载失败", err, parent=self)
+            InfoBar.error(self.tr("字体库加载失败"), err, parent=self)
 
     def reload_names(self):
         """界面语言变更：行展示名按语言链重挑（行模型即建即显，重建
@@ -158,17 +158,19 @@ class BrowsePage(ScrollArea):
         have = {Path(x) for x in self.settings.get("font_dirs")}
         for d in dirs:
             if Path(d) in have:
-                InfoBar.warning("提示", "该目录已在列表中", parent=self)
+                InfoBar.warning(self.tr("提示"), self.tr("该目录已在列表中"),
+                                parent=self)
                 continue
-            box = MessageBox("加入字体库", f"确认将 {d} 加入字体库？",
+            box = MessageBox(self.tr("加入字体库"),
+                             self.tr("确认将 {0} 加入字体库？").format(d),
                              self.window())
-            box.yesButton.setText("加入")
-            box.cancelButton.setText("取消")
+            box.yesButton.setText(self.tr("加入"))
+            box.cancelButton.setText(self.tr("取消"))
             if not box.exec():
                 continue
             self.dirsAdded.emit([d])
-            InfoBar.success("已加入字体库",
-                            "在「字体库管理」页更新全部索引后生效",
+            InfoBar.success(self.tr("已加入字体库"),
+                            self.tr("在「字体库管理」页更新全部索引后生效"),
                             parent=self, duration=3000)
 
 

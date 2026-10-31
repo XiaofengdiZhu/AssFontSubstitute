@@ -19,6 +19,7 @@ from qfluentwidgets import SwitchButton
 from qfluentwidgets import TransparentToggleToolButton
 
 from ass_font_substitute.gui import script_filter
+from ass_font_substitute.gui import vm_text
 from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.widgets.preview_input import PreviewInput
 from ass_font_substitute.gui.widgets.wheel_block import WheelBlock
@@ -62,9 +63,9 @@ class PreviewTools(QWidget):
         self.sw_mono.setOffText("")
         self.sw_mono.setChecked(bool(settings.get("preview_mono")))
         install_tip(self.sw_mono,
-                    "统一格宽渲染预览（全角 1em/半角 0.5em），多字体行逐字对位")
+                    self.tr("统一格宽渲染预览（全角 1em/半角 0.5em），多字体行逐字对位"))
         self.sw_mono.checkedChanged.connect(self._on_mono_toggled)
-        h.addWidget(_fld("强制等宽", self.sw_mono), 0, Qt.AlignVCenter)
+        h.addWidget(_fld(self.tr("强制等宽"), self.sw_mono), 0, Qt.AlignVCenter)
         self.preview_edit = PreviewInput(settings)
         self.preview_edit.setFixedWidth(340)
         self.preview_edit.textChanged.connect(self._on_text)
@@ -73,7 +74,7 @@ class PreviewTools(QWidget):
         # 只留 cmap 覆盖全部预览文字的字体；空文字无可筛字符=不筛
         # （require_text 空串视同不筛，见 PreviewVM）
         self.btn_cov = TransparentToggleToolButton(FIF.FILTER, self)
-        install_tip(self.btn_cov, "只显示包含全部预览文字的字体")
+        install_tip(self.btn_cov, self.tr("只显示包含全部预览文字的字体"))
         self.btn_cov.toggled.connect(self._on_cov_toggled)
         h.addWidget(self.btn_cov, 0, Qt.AlignVCenter)
         # 行尾收拢：SwitchButton 扩张策略会把多余宽度摊进控件之间
@@ -125,7 +126,7 @@ class FontFilterBar(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(8)
         self.name_edit = SearchLineEdit()
-        self.name_edit.setPlaceholderText("搜索字体名")
+        self.name_edit.setPlaceholderText(self.tr("搜索字体名"))
         # 下限 160：对话框（720 定宽）里留给带标签下拉与计数的空间比整页
         # 紧；预览页宽到 400 封顶才生效，160 不可见
         self.name_edit.setMinimumWidth(160)
@@ -138,38 +139,38 @@ class FontFilterBar(QWidget):
             cb.setFixedWidth(104)
             cb.currentIndexChanged.connect(self._apply)
             cb.installEventFilter(self._wheel_block)
-        self.count_label = CaptionLabel("0 款字体")
+        self.count_label = CaptionLabel(self.tr("0 款字体"))
         h.addWidget(self.name_edit, 1)
-        h.addWidget(_fld("分类", self.cb_cat))
-        h.addWidget(_fld("简繁", self.cb_script))
+        h.addWidget(_fld(self.tr("分类"), self.cb_cat))
+        h.addWidget(_fld(self.tr("简繁"), self.cb_script))
         # 字重下拉可选（拍板 2026-10-30：选择对话框不建——工具不改字重
         # 斜体，库页照旧）；cb 仍创建并参与 fill，隐藏档恒「全部」
         if weight_filter:
-            h.addWidget(_fld("字重", self.cb_weight))
+            h.addWidget(_fld(self.tr("字重"), self.cb_weight))
         h.addStretch(1)
         h.addWidget(self.count_label, 0, Qt.AlignVCenter)
         self.fill()
 
     def fill(self):
         """按 pvm 现有实体重填下拉选项（实体集装载/变化后由页面调用）。"""
-        script_items = ["全部", *script_filter.options(self.pvm)]
-        for cb, items in ((self.cb_cat, ["全部", *self.pvm.categories()]),
-                          (self.cb_script, script_items),
-                          (self.cb_weight, ["全部", *self.pvm.weight_buckets()])):
+        # 显示译文、userData 存源值（显示串随界面语言变，筛选按源值）；
+        # 首项「全部」无 userData = 不筛
+        for cb, values in ((self.cb_cat, self.pvm.categories()),
+                           (self.cb_script, script_filter.options(self.pvm)),
+                           (self.cb_weight, self.pvm.weight_buckets())):
             cb.blockSignals(True)
             cb.clear()
-            cb.addItems([str(x) for x in items])
+            cb.addItem(self.tr("全部"))
+            for v in values:
+                cb.addItem(vm_text.text(str(v)), userData=v)
             cb.blockSignals(False)
 
     def _apply(self):
-        def pick(cb):
-            t = cb.currentText()
-            return None if (not t or t == "全部") else t
-        self.pvm.category = pick(self.cb_cat)
+        self.pvm.category = self.cb_cat.currentData()
         self.pvm.script = script_filter.pick(self.cb_script)
-        wt = pick(self.cb_weight)
-        self.pvm.weight = int(wt) if wt else None
+        wt = self.cb_weight.currentData()
+        self.pvm.weight = int(wt) if wt is not None else None
         self.filtersChanged.emit()
 
     def set_count(self, n: int):
-        self.count_label.setText(f"{n} 款字体")
+        self.count_label.setText(self.tr("{0} 款字体").format(n))

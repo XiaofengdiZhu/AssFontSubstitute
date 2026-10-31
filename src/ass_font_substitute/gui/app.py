@@ -30,6 +30,8 @@ from qfluentwidgets import setThemeColor
 from qfluentwidgets.common.style_sheet import updateStyleSheet
 from qfluentwidgets.window import SplashScreen
 
+from ass_font_substitute.gui.i18n import fluent_translator
+from ass_font_substitute.gui.i18n import load_app_translator
 from ass_font_substitute.gui.pages.browse_page import BrowsePage
 from ass_font_substitute.gui.pages.library_page import LibraryPage
 from ass_font_substitute.gui.pages.settings_page import SettingsPage
@@ -110,7 +112,7 @@ class _Splash(SplashScreen):
         self.titleBar.maxBtn.setMaxState(self.window().isMaximized())
         self.ring = IndeterminateProgressRing(self)
         self.ring.setFixedSize(28, 28)
-        self.tip = BodyLabel("正在加载字体库…", self)
+        self.tip = BodyLabel(self.tr("正在加载字体库…"), self)
         # qfw 靠父对象事件过滤器跟随窗口尺寸，实测 show 期最大化那记
         # resize 不经 Qt 事件系统（独立过滤器同样收不到），轮询兜底；
         # 存续期仅启动数秒，50ms 开销可忽略，hide 即停
@@ -167,10 +169,13 @@ class AFSWindow(FluentWindow):
         self.browse_page = BrowsePage(self.settings, self.worker)
         self.subs_page = SubsPage(self.settings, self.worker)
         self.settings_page = SettingsPage(self.settings, self.worker)
-        self.addSubInterface(self.library_page, FIF.LIBRARY, "字体库管理")
-        self.addSubInterface(self.browse_page, FIF.VIEW, "字体库预览")
-        self.addSubInterface(self.subs_page, FIF.DOCUMENT, "处理字幕")
-        self.addSubInterface(self.settings_page, FIF.SETTING, "设置",
+        self.addSubInterface(self.library_page, FIF.LIBRARY,
+                             self.tr("字体库管理"))
+        self.addSubInterface(self.browse_page, FIF.VIEW,
+                             self.tr("字体库预览"))
+        self.addSubInterface(self.subs_page, FIF.DOCUMENT,
+                             self.tr("处理字幕"))
+        self.addSubInterface(self.settings_page, FIF.SETTING, self.tr("设置"),
                              NavigationItemPosition.BOTTOM)
         # qfw 侧栏出厂展开宽 322 太宽，砍掉三分之一
         self.navigationInterface.setExpandWidth(215)
@@ -213,7 +218,7 @@ class AFSWindow(FluentWindow):
         self._sys_theme_timer.setInterval(2000)
         self._sys_theme_timer.timeout.connect(self._poll_system_theme)
         self._sys_theme_timer.start()
-        self.setWindowTitle("Ass 字体替补")
+        self.setWindowTitle(self.tr("ASS 字体替补"))
         self.resize(*_DEFAULT_SIZE)
         # 最小窗口按布局硬约束定（175% DPI 实测各页 layout 最小宽：库页
         # 823=统计卡横排+目录行左块定宽、字幕页 767、预览页 844=搜索下限
@@ -314,11 +319,13 @@ class AFSWindow(FluentWindow):
         可能半截。worker 队列已被 shutdown 排空取消，超时只剩单个在途
         任务（不可中断），重试关闭通常几秒内即过。"""
         box = QMessageBox(self)
-        box.setWindowTitle("后台任务未结束")
-        box.setText("后台任务仍在收尾（可能正在写盘）。\n"
-                    "强制退出可能损坏数据。建议稍等片刻再关闭窗口。")
-        wait_btn = box.addButton("继续等待", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("强制退出", QMessageBox.ButtonRole.DestructiveRole)
+        box.setWindowTitle(self.tr("后台任务未结束"))
+        box.setText(self.tr("后台任务仍在收尾（可能正在写盘）。\n"
+                            "强制退出可能损坏数据。建议稍等片刻再关闭窗口。"))
+        wait_btn = box.addButton(self.tr("继续等待"),
+                                 QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(self.tr("强制退出"),
+                      QMessageBox.ButtonRole.DestructiveRole)
         box.setEscapeButton(wait_btn)   # Esc/点 X=默认继续等待，非强制退出
         box.exec()
         return box.clickedButton() is not wait_btn
@@ -440,7 +447,17 @@ def main() -> int:
         font = app.font()
         font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
         app.setFont(font)
-    w = AFSWindow()
+    # 界面语言：两路 translator 必须先于任何窗口创建装好（tr() 在控件
+    # 构造期求值，运行中不热切——设置页切语言提示重启）。引用须存活到
+    # app.exec 结束，局部变量即可；qfw 内置文案跟设置不跟系统语言
+    settings = Settings()
+    lang = settings.get("language")
+    fluent_tr = fluent_translator(lang)
+    app.installTranslator(fluent_tr)
+    app_tr = load_app_translator(lang)
+    if app_tr is not None:
+        app.installTranslator(app_tr)
+    w = AFSWindow(settings)
     # 启动画面：库加载（开库 + 逐目录探测，大库数秒）期间盖住窗口，
     # loadCompleted（首个 lib 结果/失败）收幕；30s 兜底防卡死盖板。
     # 无目录没有可等的加载，直接进主界面。

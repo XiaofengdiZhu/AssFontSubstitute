@@ -3,6 +3,7 @@ from __future__ import annotations
 import weakref
 
 import shiboken6
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtCore import QPropertyAnimation
 from PySide6.QtCore import QRect
 from PySide6.QtCore import QSize
@@ -28,6 +29,7 @@ from qfluentwidgets import isDarkTheme
 from qfluentwidgets import qconfig
 
 from ass_font_substitute.core.fontindex.library import FontEntity
+from ass_font_substitute.gui import vm_text
 from ass_font_substitute.gui.preview_vm import FamilyRow
 from ass_font_substitute.gui.preview_vm import weight_tag
 from ass_font_substitute.gui.widgets.pill import PillRow
@@ -48,11 +50,11 @@ BAR_H = 32                 # 预览条逻辑高
 
 def meta_items(e: FontEntity) -> list[str]:
     """行 meta 药丸项：script（未标注不上屏）· 字重 · 斜体 · 分类。"""
-    items = [] if e.script == "未标注" else [e.script]
+    items = [] if e.script == "未标注" else [vm_text.text(e.script)]
     items.append(weight_tag(e.weight))
     if e.italic:
-        items.append("斜体")
-    items.append(e.category)
+        items.append(QCoreApplication.translate("FontListWidget", "斜体"))
+    items.append(vm_text.text(e.category))
     return items
 
 

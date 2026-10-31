@@ -39,9 +39,9 @@ class FontPickerDialog(MessageBoxBase):
         self.pvm = PreviewVM(settings)
         self.pvm.set_entities(entities)
 
-        self.titleLabel = SubtitleLabel("从字体库选择")
+        self.titleLabel = SubtitleLabel(self.tr("从字体库选择"))
 
-        self.rec_title = SubtitleLabel("推荐（覆盖达标）")
+        self.rec_title = SubtitleLabel(self.tr("推荐（覆盖达标）"))
         # 选择对话框行名不可划选（用户拍板「除外」2026-10-29）：名是
         # picker 行宽最大的点击目标，可选化会吃掉单击选中/双击接受
         self.rec_list = FontListWidget(worker, self.pvm, self._preview,
@@ -78,9 +78,9 @@ class FontPickerDialog(MessageBoxBase):
         self.all_list.setMinimumHeight(120)
         self.all_list.count_changed.connect(self.bar.set_count)
 
-        self.hint = CaptionLabel("未选择")
-        self.empty_label = CaptionLabel(
-            "字体库为空：先到「字体库」页添加目录并建立索引，再回到这里选择。")
+        self.hint = CaptionLabel(self.tr("未选择"))
+        self.empty_label = CaptionLabel(self.tr(
+            "字体库为空：先到「字体库」页添加目录并建立索引，再回到这里选择。"))
         self.empty_label.setWordWrap(True)
         self.empty_label.hide()
         if not self.pvm.entities:
@@ -116,9 +116,9 @@ class FontPickerDialog(MessageBoxBase):
             h = max(min(self.height() - 48, 280), 220)
         self.widget.setFixedHeight(h)
         self.widget.setFixedWidth(min(720, max(self.width() - 48, 320)))
-        self.yesButton.setText("选定")
+        self.yesButton.setText(self.tr("选定"))
         self.yesButton.setEnabled(False)
-        self.cancelButton.setText("取消")
+        self.cancelButton.setText(self.tr("取消"))
 
         self._reload_all()
 
@@ -159,7 +159,8 @@ class FontPickerDialog(MessageBoxBase):
 
     def _pick(self, e):
         self.selected = e
-        self.hint.setText(f"已选：{pick_display_name(e, ui_lang(self._settings))}")
+        self.hint.setText(self.tr("已选：{0}").format(
+            pick_display_name(e, ui_lang(self._settings))))
         self.yesButton.setEnabled(True)
 
     def _accept_pick(self, e):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shiboken6
+from PySide6.QtCore import QT_TRANSLATE_NOOP
 from PySide6.QtCore import QEvent
 from PySide6.QtCore import QObject
 from PySide6.QtCore import QPoint
@@ -41,6 +42,7 @@ from qfluentwidgets import qconfig
 from qfluentwidgets import setCustomStyleSheet
 from qfluentwidgets import themeColor
 
+from ass_font_substitute.gui import vm_text
 from ass_font_substitute.gui.subs_vm import KEEP
 from ass_font_substitute.gui.subs_vm import Card
 from ass_font_substitute.gui.tip import SHOW_DELAY
@@ -56,7 +58,7 @@ def _pill(text: str) -> PillLabel:
     return pill(text)
 
 
-_TAG_STYLE = {"原": ("#757575", "#9a9a9a"), "孪": ("#0f7b0f", "#6ccb5f")}
+_TAG_STYLE = {"orig": ("#757575", "#9a9a9a"), "twin": ("#0f7b0f", "#6ccb5f")}
 
 # 选项行左列定宽（用户拍板 2026-10-29：预览条起点一致、各行预览同宽）
 _NAME_W = 200       # 名称（超宽省略号）
@@ -64,18 +66,18 @@ _TEXT_W = 380       # 文本列宽：真机雅黑 12px 容下常见指标行；�
                     # （相似+覆盖+未覆盖+相对大小，offscreen 实测 516）超出
                     # 部分省略号+tooltip 全文。左列每胖 1px 预览条瘦 1px
                     # （150% 缩放小窗左列 554 曾把预算压到 250 < 旧上限 360）
-_PS_PREFIX = "PostScript 名："   # 同名碰撞副行前缀（用户拍板 2026-10-31）
+_PS_PREFIX = QT_TRANSLATE_NOOP("FontCard", "PostScript 名：")   # 同名碰撞副行前缀（用户拍板 2026-10-31）
 _LEFT_W = 24 + 10 + _TEXT_W   # 勾选框 24 + 列距 10 + 文本列
 
 
-def _char_tag(ch: str) -> QWidget:
+def _char_tag(style: str, ch: str) -> QWidget:
     """名前单字圆角框标签（无底色）：亮暗各一份描边/文字色，经 qfw
     setCustomStyleSheet 随主题切换。裸 QLabel 须先 apply 一个 qfw 样式表
     挂上 CustomStyleSheetWatcher——否则自定义 QSS 只写属性无人应用。
     壳层 margin 不对称（上 3 下 0）把框相对名行中心下压 1.5px：字体名
     字形带在其 label 矩形里偏下，框按行居中会整体偏高（实测上差 2px、
     下差 1px，取中对齐）。"""
-    light, dark = _TAG_STYLE[ch]
+    light, dark = _TAG_STYLE[style]
     lab = QLabel(ch)
     lab.setAlignment(Qt.AlignCenter)
     lab.setFixedSize(15, 15)
@@ -101,9 +103,10 @@ _KIND_STYLE = {
     "missing": ("CANCEL", "#c42b1c", "#ff99a4"),
     "zero":    (None,     "#757575", "#9a9a9a"),
 }
-_STATUS_TEXT = {"keep": "保留（覆盖足够）",
-                "replace": "需替换", "missing": "库中没有",
-                "zero": "保留（无对白用字）"}   # twin 随方向，_build_head 现拼
+_STATUS_TEXT = {"keep": QT_TRANSLATE_NOOP("FontCard", "保留（覆盖足够）"),
+                "replace": QT_TRANSLATE_NOOP("FontCard", "需替换"),
+                "missing": QT_TRANSLATE_NOOP("FontCard", "库中没有"),
+                "zero": QT_TRANSLATE_NOOP("FontCard", "保留（无对白用字）")}   # twin 随方向，_build_head 现拼
 _BADGE_MAKER = {"replace": InfoBadge.warning, "missing": InfoBadge.error}
 
 _ROW_QSS = """
@@ -222,7 +225,7 @@ class _MissingFlyoutView(FlyoutViewBase):
         btn = TransparentToolButton(FIF.COPY, self)   # 收 FluentIconBase：逐 paint 取主题色
         btn.setIconSize(QSize(14, 14))
         btn.setFixedSize(22, 22)
-        install_tip(btn, "复制未覆盖字符")
+        install_tip(btn, self.tr("复制未覆盖字符"))
         btn.clicked.connect(self._copy)
         h.addWidget(btn, 0, Qt.AlignVCenter)
 
@@ -414,7 +417,7 @@ class FontCard(CardWidget):
                     lab.setFullText(t)
                 # PS 名副行就地显隐/换文（碰撞集随候选增删变化，行不重建）
                 ps = self._psnames.get(o.key)
-                pt = _PS_PREFIX + (o.entity.psname or "") \
+                pt = self.tr(_PS_PREFIX) + (o.entity.psname or "") \
                     if o.entity is not None else ""
                 if ps is not None:
                     if ps.fullText() != pt:
@@ -489,17 +492,20 @@ class FontCard(CardWidget):
         raw_lab = StrongBodyLabel(self.card.raw_name)
         apply_selectable(raw_lab)
         h.addWidget(raw_lab)
-        h.addWidget(CaptionLabel(self.card.header))
+        h.addWidget(CaptionLabel(vm_text.header(
+            self.card.style_count, self.card.inline_count, self.card.n_chars)))
         h.addStretch(1)
         if kind in ("zero", "keep"):
             # 保留两档同灰药丸（用户拍板 2026-10-30：保留是无事发生态，
             # 绿徽章太抢眼）；零字档白字浅底隐形问题本就走自绘药丸
-            h.addWidget(_pill(_STATUS_TEXT[kind]))
+            h.addWidget(_pill(self.tr(_STATUS_TEXT[kind])))
         elif kind == "twin":
-            twin = "找到孪生简体" if self._direction == "t2s" else "找到孪生繁体"
+            twin = (self.tr("找到孪生简体") if self._direction == "t2s"
+                    else self.tr("找到孪生繁体"))
             h.addWidget(padded_badge(InfoBadge.success, twin))   # 好结果给绿（同页头徽章）
         else:
-            h.addWidget(padded_badge(_BADGE_MAKER[kind], _STATUS_TEXT[kind]))
+            h.addWidget(padded_badge(_BADGE_MAKER[kind],
+                                     self.tr(_STATUS_TEXT[kind])))
         return head
 
     def _build_missing_strip(self) -> QFrame:
@@ -507,7 +513,8 @@ class FontCard(CardWidget):
         h = QHBoxLayout(box)
         h.setContentsMargins(10, 6, 10, 6)
         h.setSpacing(4)
-        h.addWidget(CaptionLabel(f"未覆盖 {self.card.n_missing} 字："),
+        h.addWidget(CaptionLabel(
+            self.tr("未覆盖 {0} 字：").format(self.card.n_missing)),
                     0, Qt.AlignVCenter)
         # 字符划选（用户需求 2026-10-29：只复制一部分）：独立标签装
         # 交互 flags，省略号另拆不入选区；前缀标签不吃交互，点它无动作
@@ -527,7 +534,7 @@ class FontCard(CardWidget):
         btn = TransparentToolButton(FIF.COPY, box)    # 收 FluentIconBase：逐 paint 取主题色
         btn.setIconSize(QSize(14, 14))
         btn.setFixedSize(22, 22)
-        install_tip(btn, "复制未覆盖字符")
+        install_tip(btn, self.tr("复制未覆盖字符"))
         btn.clicked.connect(
             lambda: self._copy_missing_chars("".join(self.card.missing)))
         h.addWidget(btn, 0, Qt.AlignVCenter)
@@ -536,7 +543,8 @@ class FontCard(CardWidget):
 
     def _copy_missing_chars(self, chars: str):
         QApplication.clipboard().setText(chars)
-        InfoBar.success("已复制", f"未覆盖 {len(chars)} 字",
+        InfoBar.success(self.tr("已复制"),
+                        self.tr("未覆盖 {0} 字").format(len(chars)),
                         duration=1500, parent=self.window())
 
     # ---- 选项行 ----
@@ -595,9 +603,9 @@ class FontCard(CardWidget):
         name_row.setSpacing(6)
         # 原字体/孪生对应 → 名前单字框标签（原=灰、孪=绿，无底色）
         if "原字体" in o.badges:
-            name_row.addWidget(_char_tag("原"))
+            name_row.addWidget(_char_tag("orig", self.tr("原")))
         elif "孪生对应" in o.badges:
-            name_row.addWidget(_char_tag("孪"))
+            name_row.addWidget(_char_tag("twin", self.tr("孪")))
         # 不走带文字构造：qfw FluentLabelBase singledispatch 对子类会重派发
         # 回本构造（同 PreviewBar 坑），且 mixin _full 需经 setFullText 立账
         name_lab = _NameLabel()
@@ -606,13 +614,14 @@ class FontCard(CardWidget):
         # 名区 press 被 QLabel 消费不再触发行切换（同字符标签区）
         name_lab.setMaximumWidth(_NAME_W)
         apply_selectable(name_lab)
-        name_lab.setFullText(o.display_name)
+        name_lab.setFullText(vm_text.opt_name(o.key, o.display_name))
         name_row.addWidget(name_lab)
         for b in o.badges:
             if b == "上次使用":                     # 记忆回放仍走主题徽章
-                name_row.addWidget(padded_badge(InfoBadge.info, b))
+                name_row.addWidget(padded_badge(InfoBadge.info,
+                                                vm_text.text(b)))
         for m in o.meta:
-            name_row.addWidget(_pill(m))            # 简繁/字重等：中性灰
+            name_row.addWidget(_pill(vm_text.text(m)))   # 简繁/字重等：中性灰
         name_row.addStretch(1)
         text.addLayout(name_row)
         # 同名碰撞行 PS 名副行：台版/港版等真不同字体同中文名（2026-10-31
@@ -623,7 +632,7 @@ class FontCard(CardWidget):
         ps_lab = _MetricsLabel()
         ps_lab.setObjectName("psname")
         ps_lab.setFixedWidth(_TEXT_W)
-        ps_lab.setFullText(_PS_PREFIX + (o.entity.psname or "")
+        ps_lab.setFullText(self.tr(_PS_PREFIX) + (o.entity.psname or "")
                            if o.entity is not None else "")
         ps_lab.setVisible(bool(o.entity and o.entity.psname)
                           and o.display_name in self._dups)
@@ -701,42 +710,45 @@ class FontCard(CardWidget):
         if o.key == KEEP:
             if self.card.kind == "missing":
                 # 内嵌字体随字幕分发，播放器直接可用，不存在回退
-                return ("已内嵌，播放器直接可用" if self.card.embedded
-                        else "播放时由播放器自行回退处理")
-            return "无对白用字，无需处理"
+                return (self.tr("已内嵌，播放器直接可用") if self.card.embedded
+                        else self.tr("播放时由播放器自行回退处理"))
+            return self.tr("无对白用字，无需处理")
         if "原字体" in o.badges:
             n_missing = round(self.card.n_chars * (1 - (o.coverage or 0)))
-            tail = " · 有内嵌" if self.card.embedded else ""   # [Fonts] 段已带此字体
+            tail = self.tr(" · 有内嵌") if self.card.embedded else ""   # [Fonts] 段已带此字体
             if n_missing > 0:
-                return f"覆盖 {_pct(o.coverage)} · 未覆盖 {n_missing} 字{tail}"
-            return f"覆盖 {_pct(o.coverage)} · 无需替换{tail}"
+                return self.tr("覆盖 {0} · 未覆盖 {1} 字").format(
+                    _pct(o.coverage), n_missing) + tail
+            return self.tr("覆盖 {0} · 无需替换").format(_pct(o.coverage)) + tail
         parts = [p for p in (
-            f"相似 {_pct(o.similarity)}" if o.similarity is not None else None,
-            f"覆盖 {_pct(o.coverage)}" if o.coverage is not None else None,
+            self.tr("相似 {0}").format(_pct(o.similarity))
+            if o.similarity is not None else None,
+            self.tr("覆盖 {0}").format(_pct(o.coverage))
+            if o.coverage is not None else None,
         ) if p]
         # 孪生对应：行首注明来由（用户拍板 2026-10-29），后接覆盖/未覆盖；
         # 孪生行无相似率/相对大小评分
         if "孪生对应" in o.badges:
-            text = "原字体名称对应的简体名称"
+            text = self.tr("原字体名称对应的简体名称")
             if o.coverage is not None:
-                text += f" · 覆盖 {_pct(o.coverage)}"
+                text += self.tr(" · 覆盖 {0}").format(_pct(o.coverage))
                 n_missing = round(self.card.n_chars * (1 - o.coverage))
                 if n_missing > 0:
-                    text += f" · 未覆盖 {n_missing} 字"
+                    text += self.tr(" · 未覆盖 {0} 字").format(n_missing)
             return text
         # 次序（用户拍板 2026-10-29）：相似 → 覆盖 → 未覆盖 → 相对大小
-        text = " · ".join(parts) if parts else "已选"
+        text = " · ".join(parts) if parts else self.tr("已选")
         if o.coverage is not None:
             n_missing = round(self.card.n_chars * (1 - o.coverage))
             if n_missing > 0:
-                text += f" · 未覆盖 {n_missing} 字"
+                text += self.tr(" · 未覆盖 {0} 字").format(n_missing)
         if o.size_ratio is not None:
-            text += f" · 相对大小 {_pct(o.size_ratio)}"
+            text += self.tr(" · 相对大小 {0}").format(_pct(o.size_ratio))
         return text
 
     # ---- 底部随状态 ----
     def _pick_btn(self) -> TransparentPushButton:
-        btn = TransparentPushButton(FIF.SEARCH_MIRROR, "从字体库手动选择")
+        btn = TransparentPushButton(FIF.SEARCH_MIRROR, self.tr("从字体库手动选择"))
         btn.setObjectName("pickBtn")
         # 搜索中禁用：评分任务会排在搜索片后迟迟不回，选择结果也易被
         # 回填的候选行冲掉
@@ -764,17 +776,17 @@ class FontCard(CardWidget):
         card = self.card
         if card.searching:
             s = card.searcher
-            text = (f"寻找中… {s.compared}/{s.pool_size}"
-                    if s is not None and s.pool_size else "寻找中…")
+            text = (self.tr("寻找中… {0}/{1}").format(s.compared, s.pool_size)
+                    if s is not None and s.pool_size else self.tr("寻找中…"))
             state = "searching"
         elif card.search_state == "exhausted":
-            text, state = "无更多符合要求的相似字体", "exhausted"
+            text, state = self.tr("无更多符合要求的相似字体"), "exhausted"
         elif card.search_state == "target_error":
-            text, state = "原字体无法渲染，无法比较相似度", "target_error"
+            text, state = self.tr("原字体无法渲染，无法比较相似度"), "target_error"
         elif card.search_state == "paused":
-            text, state = "继续寻找更多相似字体", "idle"
+            text, state = self.tr("继续寻找更多相似字体"), "idle"
         else:
-            text, state = "开始寻找相似字体", "idle"
+            text, state = self.tr("开始寻找相似字体"), "idle"
         if btn.property("state") != state:
             enabled = state in ("searching", "idle")
             # 禁用前交焦点：钮带焦被禁时 Qt 把焦点塞给任意下一焦点控件，

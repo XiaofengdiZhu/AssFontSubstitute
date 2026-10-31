@@ -90,6 +90,8 @@ class Card:
 
     @property
     def header(self) -> str:
+        # 源语言镜像：界面渲染走 vm_text.header（同模板经翻译），此处
+        # 零 Qt 供测试直喂；改模板须两处同改
         return f"{self.style_count} 样式 · {self.inline_count} 行内 · {self.n_chars} 字"
 
     @property

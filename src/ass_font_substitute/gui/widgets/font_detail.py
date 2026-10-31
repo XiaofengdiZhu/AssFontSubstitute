@@ -5,6 +5,8 @@ import sys
 from datetime import datetime
 
 from babel import Locale
+from PySide6.QtCore import QT_TRANSLATE_NOOP
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtCore import QSize
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFormLayout
@@ -29,6 +31,7 @@ from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.core.fontindex.library import load_name_records
 from ass_font_substitute.core.fontindex.library import normalize_name
 from ass_font_substitute.core.fontindex.parser import RECORD_IDS
+from ass_font_substitute.gui import vm_text
 from ass_font_substitute.gui.name_lang import _UI_LANG_ORDER
 from ass_font_substitute.gui.name_lang import pick_display_name
 from ass_font_substitute.gui.name_lang import ui_lang
@@ -42,24 +45,58 @@ from ass_font_substitute.gui.widgets.selectable import apply_selectable
 BAR_H = 48                 # 详情预览条高（列表行内条是 32，这里给大号）
 LIST_BAR_H = 32            # 列表行内预览条高（与预览页行内条一致）
 FACE_ROW_H = 68            # 列表行估高兜底：首行 sizeHint 校准只增
-WIDTH_NAMES = {1: "超窄", 2: "特窄", 3: "窄", 4: "半窄", 5: "常规",
-               6: "半宽", 7: "宽", 8: "特宽", 9: "超宽"}  # usWidthClass
+WIDTH_NAMES = {  # usWidthClass
+    1: QT_TRANSLATE_NOOP("FontDetailDialog", "超窄"),
+    2: QT_TRANSLATE_NOOP("FontDetailDialog", "特窄"),
+    3: QT_TRANSLATE_NOOP("FontDetailDialog", "窄"),
+    4: QT_TRANSLATE_NOOP("FontDetailDialog", "半窄"),
+    5: QT_TRANSLATE_NOOP("FontDetailDialog", "常规"),
+    6: QT_TRANSLATE_NOOP("FontDetailDialog", "半宽"),
+    7: QT_TRANSLATE_NOOP("FontDetailDialog", "宽"),
+    8: QT_TRANSLATE_NOOP("FontDetailDialog", "特宽"),
+    9: QT_TRANSLATE_NOOP("FontDetailDialog", "超宽"),
+}
 
 # Windows LCID → 语言标注静态兜底表：babel 解析失败（非
 # Windows/极偏 LCID）时用；未收录回退 0x 编码显示
 LCID_LANGS = {
-    0x409: "英语 - 美国", 0x804: "中文 - 简体", 0x404: "中文 - 繁体（台湾）",
-    0xC04: "中文 - 繁体（香港）", 0x1004: "中文 - 简体（新加坡）",
-    0x411: "日语", 0x412: "韩语", 0x407: "德语", 0x40C: "法语",
-    0x410: "意大利语", 0x40A: "西班牙语", 0x80A: "西班牙语（墨西哥）",
-    0xC0A: "西班牙语（国际排序）",
-    0x416: "葡萄牙语 - 巴西", 0x816: "葡萄牙语", 0x419: "俄语",
-    0x415: "波兰语", 0x41D: "瑞典语", 0x413: "荷兰语", 0x406: "丹麦语",
-    0x40B: "芬兰语", 0x414: "挪威语", 0x405: "捷克语", 0x41B: "斯洛伐克语",
-    0x424: "斯洛文尼亚语", 0x40E: "匈牙利语", 0x408: "希腊语",
-    0x41F: "土耳其语", 0x401: "阿拉伯语", 0x40D: "希伯来语", 0x42D: "巴斯克语",
-    0x425: "爱沙尼亚语", 0x426: "拉脱维亚语", 0x427: "立陶宛语",
-    0x42A: "越南语", 0x41E: "泰语", 0x421: "印尼语",
+    0x409: QT_TRANSLATE_NOOP("FontDetailDialog", "英语 - 美国"),
+    0x804: QT_TRANSLATE_NOOP("FontDetailDialog", "中文 - 简体"),
+    0x404: QT_TRANSLATE_NOOP("FontDetailDialog", "中文 - 繁体（台湾）"),
+    0xC04: QT_TRANSLATE_NOOP("FontDetailDialog", "中文 - 繁体（香港）"),
+    0x1004: QT_TRANSLATE_NOOP("FontDetailDialog", "中文 - 简体（新加坡）"),
+    0x411: QT_TRANSLATE_NOOP("FontDetailDialog", "日语"),
+    0x412: QT_TRANSLATE_NOOP("FontDetailDialog", "韩语"),
+    0x407: QT_TRANSLATE_NOOP("FontDetailDialog", "德语"),
+    0x40C: QT_TRANSLATE_NOOP("FontDetailDialog", "法语"),
+    0x410: QT_TRANSLATE_NOOP("FontDetailDialog", "意大利语"),
+    0x40A: QT_TRANSLATE_NOOP("FontDetailDialog", "西班牙语"),
+    0x80A: QT_TRANSLATE_NOOP("FontDetailDialog", "西班牙语（墨西哥）"),
+    0xC0A: QT_TRANSLATE_NOOP("FontDetailDialog", "西班牙语（国际排序）"),
+    0x416: QT_TRANSLATE_NOOP("FontDetailDialog", "葡萄牙语 - 巴西"),
+    0x816: QT_TRANSLATE_NOOP("FontDetailDialog", "葡萄牙语"),
+    0x419: QT_TRANSLATE_NOOP("FontDetailDialog", "俄语"),
+    0x415: QT_TRANSLATE_NOOP("FontDetailDialog", "波兰语"),
+    0x41D: QT_TRANSLATE_NOOP("FontDetailDialog", "瑞典语"),
+    0x413: QT_TRANSLATE_NOOP("FontDetailDialog", "荷兰语"),
+    0x406: QT_TRANSLATE_NOOP("FontDetailDialog", "丹麦语"),
+    0x40B: QT_TRANSLATE_NOOP("FontDetailDialog", "芬兰语"),
+    0x414: QT_TRANSLATE_NOOP("FontDetailDialog", "挪威语"),
+    0x405: QT_TRANSLATE_NOOP("FontDetailDialog", "捷克语"),
+    0x41B: QT_TRANSLATE_NOOP("FontDetailDialog", "斯洛伐克语"),
+    0x424: QT_TRANSLATE_NOOP("FontDetailDialog", "斯洛文尼亚语"),
+    0x40E: QT_TRANSLATE_NOOP("FontDetailDialog", "匈牙利语"),
+    0x408: QT_TRANSLATE_NOOP("FontDetailDialog", "希腊语"),
+    0x41F: QT_TRANSLATE_NOOP("FontDetailDialog", "土耳其语"),
+    0x401: QT_TRANSLATE_NOOP("FontDetailDialog", "阿拉伯语"),
+    0x40D: QT_TRANSLATE_NOOP("FontDetailDialog", "希伯来语"),
+    0x42D: QT_TRANSLATE_NOOP("FontDetailDialog", "巴斯克语"),
+    0x425: QT_TRANSLATE_NOOP("FontDetailDialog", "爱沙尼亚语"),
+    0x426: QT_TRANSLATE_NOOP("FontDetailDialog", "拉脱维亚语"),
+    0x427: QT_TRANSLATE_NOOP("FontDetailDialog", "立陶宛语"),
+    0x42A: QT_TRANSLATE_NOOP("FontDetailDialog", "越南语"),
+    0x41E: QT_TRANSLATE_NOOP("FontDetailDialog", "泰语"),
+    0x421: QT_TRANSLATE_NOOP("FontDetailDialog", "印尼语"),
 }
 # 语言展示序：en-US → 简中 → 繁中（台湾/香港）→ 其余按 LCID 升序，
 # 与 Windows 字体查看器一致（英文名在前、本地化名随后）
@@ -87,9 +124,14 @@ def _lang_display_name(lcid: int, ui: str) -> str | None:
 
 def _lang_label(platform: int, lang: int, ui: str = "zh_CN") -> str:
     if platform == 1:                       # Macintosh 平台 langID 自成体系
-        return "英语 - Mac" if lang == 0 else f"Mac 语言 {lang}"
-    return (_lang_display_name(lang, ui) or LCID_LANGS.get(lang)
-            or f"语言 0x{lang:04x}")
+        return (QCoreApplication.translate("FontDetailDialog", "英语 - Mac")
+                if lang == 0 else QCoreApplication.translate(
+                    "FontDetailDialog", "Mac 语言 {0}").format(lang))
+    name = _lang_display_name(lang, ui) or LCID_LANGS.get(lang)
+    if name is None:
+        return QCoreApplication.translate("FontDetailDialog",
+                                          "语言 0x{0:04x}").format(lang)
+    return QCoreApplication.translate("FontDetailDialog", name)
 
 
 def group_names(records: list[tuple[int, int, int, str]]
@@ -110,8 +152,12 @@ def group_names(records: list[tuple[int, int, int, str]]
                 (_LANG_PRIO.get(lang, 10 + lang), plat, lang, text))
     id1_texts = {t for (_p, _pl, _l, t) in by_id.get(1, [])}
     out: list[tuple[str, list[tuple[str, int, int]]]] = []
-    for nid, label in ((1, "字体系"), (16, "版式字体系"), (4, "字体全名"),
-                       (2, "样式映射字体系"), (3, "唯一字体标识符")):
+    for nid, label in (
+            (1, QCoreApplication.translate("FontDetailDialog", "字体系")),
+            (16, QCoreApplication.translate("FontDetailDialog", "版式字体系")),
+            (4, QCoreApplication.translate("FontDetailDialog", "字体全名")),
+            (2, QCoreApplication.translate("FontDetailDialog", "样式映射字体系")),
+            (3, QCoreApplication.translate("FontDetailDialog", "唯一字体标识符"))):
         seen: set[str] = set()
         rows: list[tuple[str, int, int]] = []
         for _prio, plat, lang, text in sorted(by_id.get(nid, [])):
@@ -200,7 +246,7 @@ class _FaceRow(QWidget):
         # 时显；同文件节附 face 序号区分 TTC 内位置，家族节不再缀文件（太长）
         items = meta_items(f)
         if show_face:
-            items.append(f"face {f.face_index}")
+            items.append(self.tr("face {0}").format(f.face_index))
         row = PillRow()
         row.set_items(items)
         top.addWidget(row)
@@ -249,7 +295,9 @@ def _multi_lang_widget(rows: list[tuple[str, str]]) -> QWidget:
     va.setContentsMargins(0, 0, 0, 0)
     va.setSpacing(2)
     for text, lang in rows:
-        lab = BodyLabel(f"{text} ({lang})" if lang else text)
+        shown = (QCoreApplication.translate("FontDetailDialog", "{0} ({1})")
+                 .format(text, lang) if lang else text)
+        lab = BodyLabel(shown)
         lab.setWordWrap(True)
         apply_selectable(lab, keyboard=False)   # 弹窗内不夺焦点，仅鼠标划选
         va.addWidget(lab)
@@ -300,9 +348,10 @@ class FontDetailDialog(MessageBoxBase):
         self._name_v.setSpacing(6)
         head = QHBoxLayout()
         head.setSpacing(8)
-        head.addWidget(StrongBodyLabel("命名"))
+        head.addWidget(StrongBodyLabel(self.tr("命名")))
         head.addStretch(1)
-        self._lang_btn = TransparentDropDownPushButton("语言", name_card)
+        self._lang_btn = TransparentDropDownPushButton(self.tr("语言"),
+                                                       name_card)
         # 语言设置同款图标（settings_page 语言卡 FIF.LANGUAGE）
         self._lang_btn.setIcon(FluentIcon.LANGUAGE.icon())
         self._lang_btn.setFixedHeight(28)
@@ -322,23 +371,28 @@ class FontDetailDialog(MessageBoxBase):
             self._fill_names_fallback()
 
         # ---- 属性卡 ----
-        attr_card, av = _card("属性")
+        attr_card, av = _card(self.tr("属性"))
         ver = ".".join(map(str, e.version)) if e.version else "—"
-        wd = WIDTH_NAMES.get(e.width, str(e.width))
+        wd = WIDTH_NAMES.get(e.width)
+        wd = self.tr(wd) if wd is not None else str(e.width)
         _form(av, [
-            ("版本", _simple_val(ver)),
-            ("字重", _simple_val(f"{weight_tag(e.weight)}（{e.weight}）")),
-            ("宽度", _simple_val(f"{wd}（{e.width}）")),
-            ("斜体", _simple_val("是" if e.italic else "否")),
+            (self.tr("版本"), _simple_val(ver)),
+            (self.tr("字重"),
+             _simple_val(self.tr("{0}（{1}）").format(
+                 weight_tag(e.weight), e.weight))),
+            (self.tr("宽度"),
+             _simple_val(self.tr("{0}（{1}）").format(wd, e.width))),
+            (self.tr("斜体"),
+             _simple_val(self.tr("是") if e.italic else self.tr("否"))),
             # 详情卡=全量事实：「未标注」也上屏（行 meta 才隐藏空值，
             # 见 font_list.meta_items）
-            ("简繁", pill(e.script)),
-            ("分类", pill(e.category)),
-            ("字符覆盖", _simple_val(f"{e.cmap.total_chars():,}")),
+            (self.tr("简繁"), pill(vm_text.text(e.script))),
+            (self.tr("分类"), pill(vm_text.text(e.category))),
+            (self.tr("字符覆盖"), _simple_val(f"{e.cmap.total_chars():,}")),
         ])
 
         # ---- 文件卡 ----
-        file_card, fv = _card("文件")
+        file_card, fv = _card(self.tr("文件"))
         path = BodyLabel(f"{e.dir_path}/{e.rel_path}")
         path.setWordWrap(True)
         # 路径可选中复制：长路径手抄不现实；IBeam 提示可复制
@@ -346,18 +400,18 @@ class FontDetailDialog(MessageBoxBase):
         mtime = (datetime.fromtimestamp(e.mtime_ns / 1e9).strftime(
             "%Y-%m-%d %H:%M") if e.mtime_ns else "—")
         _form(fv, [
-            ("文件路径", path),
-            ("face 序号", _simple_val(str(e.face_index))),
-            ("大小", _simple_val(_human_size(e.size) if e.size else "—")),
-            ("修改时间", _simple_val(mtime)),
+            (self.tr("文件路径"), path),
+            (self.tr("face 序号"), _simple_val(str(e.face_index))),
+            (self.tr("大小"), _simple_val(_human_size(e.size) if e.size else "—")),
+            (self.tr("修改时间"), _simple_val(mtime)),
         ])
 
         # ---- 两节列表卡 ----
         file_faces = same_file_faces(entities, e)
-        file_list_card, fv2 = _card("同文件其他字体")
+        file_list_card, fv2 = _card(self.tr("同文件其他字体"))
         file_list = self._fill_list(fv2, file_faces, show_face=True)
         fam_faces = same_family_faces(entities, e)
-        fam_card, gv2 = _card("同字体系其他字体")
+        fam_card, gv2 = _card(self.tr("同字体系其他字体"))
         fam_list = self._fill_list(gv2, fam_faces, show_face=False)
 
         body = QWidget()
@@ -397,7 +451,7 @@ class FontDetailDialog(MessageBoxBase):
             self.widget.setMaximumHeight(win_h - 32)
         self.hideYesButton()
         # hideYesButton 后取消钮独占按钮行会被拉满整宽
-        self.cancelButton.setText("关闭")
+        self.cancelButton.setText(self.tr("关闭"))
         self.cancelButton.setFixedWidth(140)
         self._sections = (file_list, fam_list)
         # 关闭即 cancel 在途渲染 + 销毁：详情可反复开关，不回收则隐藏
@@ -456,7 +510,7 @@ class FontDetailDialog(MessageBoxBase):
         self._grouped = []
         self._lang = None
         self._lang_btn.hide()
-        self._swap_names([("全部别名", _simple_val(
+        self._swap_names([(self.tr("全部别名"), _simple_val(
             "、".join(self._e.aliases) or "—", wrap=True))])
 
     def _rebuild_lang_menu(self):
@@ -511,7 +565,7 @@ class FontDetailDialog(MessageBoxBase):
         rows = [(label, _multi_lang_widget(pairs))
                 for label, pairs in visible_name_rows(self._grouped,
                                                       self._lang)]
-        rows.append(("PostScript 名",
+        rows.append((self.tr("PostScript 名"),
                      _simple_val(self._e.psname or "—", selectable=True)))
         self._swap_names(rows)
 

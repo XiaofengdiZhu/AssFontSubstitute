@@ -6,9 +6,10 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
+from PySide6.QtCore import QT_TRANSLATE_NOOP
 from PySide6.QtCore import QEvent
-from PySide6.QtCore import QTimer
 from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer
 from PySide6.QtCore import QUrl
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor
@@ -52,8 +53,14 @@ REPO_URL = "https://github.com/XiaofengdiZhu/AssFontSubstitute"
 _SPACING = 24          # 控件与卡片右缘间距（Ghost Downloader 同款）
 
 _LANG_LABELS = {
-    "zh-Hans": ("简体中文", "繁体中文"),
-    "zh-Hant": ("简体中文", "正體中文"),
+    "zh-Hans": (
+        QT_TRANSLATE_NOOP("SettingsPage", "简体中文"),
+        QT_TRANSLATE_NOOP("SettingsPage", "繁体中文"),
+    ),
+    "zh-Hant": (
+        QT_TRANSLATE_NOOP("SettingsPage", "简体中文"),
+        QT_TRANSLATE_NOOP("SettingsPage", "正體中文"),
+    ),
 }
 _THEME_VALUES = ("auto", "light", "dark")
 _BG_VALUES = ("mica", "mica_alt", "acrylic", "aero", "none")
@@ -184,14 +191,13 @@ class _SampleEditBox(MessageBoxBase):
 
     def __init__(self, text: str, parent=None):
         super().__init__(parent)
-        self.titleLabel = SubtitleLabel("编辑相似度对比文字")
-        warn = CaptionLabel("保存后已有的相似度结果将全部失效，"
-                            "下次使用时自动按新文字重新计算。")
+        self.titleLabel = SubtitleLabel(self.tr("编辑相似度对比文字"))
+        warn = CaptionLabel(self.tr("保存后已有的相似度结果将全部失效，下次使用时自动按新文字重新计算。"))
         warn.setWordWrap(True)
         # 重置为默认：警告行右端普通按钮（SYNC 图标）——试过按钮行最左
         # （三钮等宽被读成同级主操作）与透明小字链（用户均否）；
         # 回填内置默认文字，仍须点「保存」才落盘
-        self.resetButton = PushButton(FIF.SYNC, "重置为默认", self)
+        self.resetButton = PushButton(FIF.SYNC, self.tr("重置为默认"), self)
         self.resetButton.clicked.connect(self._reset_default)
         warn_row = QHBoxLayout()
         warn_row.setContentsMargins(0, 0, 0, 0)
@@ -203,8 +209,8 @@ class _SampleEditBox(MessageBoxBase):
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addLayout(warn_row)
         self.viewLayout.addWidget(self.edit)
-        self.yesButton.setText("保存")
-        self.cancelButton.setText("取消")
+        self.yesButton.setText(self.tr("保存"))
+        self.cancelButton.setText(self.tr("取消"))
         self.widget.setFixedWidth(min(720, max(self.width() - 48, 320)))
         # 窄窗（MaskDialogBase 覆盖页宽）下固定最小宽会横向溢出，
         # 与 FontPickerDialog/_FailuresDialog 同款钳制；高度同款封顶，
@@ -252,13 +258,17 @@ class SettingsPage(ScrollArea):
         v.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # ── 常规 ─────────────────────────────────────────────
-        g0 = SettingCardGroup("常规", self.view)
-        # 繁体模式下「繁体中文」选项以繁方惯称「正體中文」显示
+        g0 = SettingCardGroup(self.tr("常规"), self.view)
+        # 选项名跟随运行中的界面语言（繁体界面「繁体中文」显繁方惯称
+        # 「正體中文」）；切换后重启生效，本会话选项名不变
         lang = settings.get("language")
+        self._boot_lang = lang
         self.lang_card = _WheelFreeCard(
-            FIF.LANGUAGE, "语言", "设置界面语言（国际化尚未完成，暂只保存选择）", self)
+            FIF.LANGUAGE, self.tr("语言"),
+            self.tr("设置界面语言（重启应用后生效）"), self)
         self.lang_combo = ComboBox(self.lang_card)
-        self.lang_combo.addItems(list(_LANG_LABELS[lang]))
+        self.lang_combo.addItems(
+            [self.tr(t) for t in _LANG_LABELS[lang]])
         self.lang_combo.setCurrentIndex(0 if lang == "zh-Hans" else 1)
         self.lang_combo.setFixedWidth(150)
         self.lang_combo.installEventFilter(self.lang_card)
@@ -267,9 +277,10 @@ class SettingsPage(ScrollArea):
                                             Qt.AlignmentFlag.AlignRight)
         self.lang_card.hBoxLayout.addSpacing(_SPACING)
         self.theme_card = _WheelFreeCard(
-            FIF.BRUSH, "主题", "更改应用程序的外观", self)
+            FIF.BRUSH, self.tr("主题"), self.tr("更改应用程序的外观"), self)
         self.theme_combo = ComboBox(self.theme_card)
-        self.theme_combo.addItems(["跟随系统设置", "浅色", "深色"])
+        self.theme_combo.addItems(
+            [self.tr("跟随系统设置"), self.tr("浅色"), self.tr("深色")])
         self.theme_combo.setCurrentIndex(_THEME_VALUES.index(settings.get("theme")))
         self.theme_combo.setFixedWidth(150)
         self.theme_combo.installEventFilter(self.theme_card)
@@ -278,10 +289,13 @@ class SettingsPage(ScrollArea):
                                              Qt.AlignmentFlag.AlignRight)
         self.theme_card.hBoxLayout.addSpacing(_SPACING)
         self.bg_card = _WheelFreeCard(
-            FIF.TRANSPARENT, "窗口背景", "设置窗口背景的透明材质"
-            "（Win10 不支持 Mica 类材质，自动退化为实色）", self)
+            FIF.TRANSPARENT, self.tr("窗口背景"),
+            self.tr("设置窗口背景的透明材质（Win10 不支持 Mica 类材质，自动退化为实色）"),
+            self)
         self.bg_combo = ComboBox(self.bg_card)
-        self.bg_combo.addItems(["Mica", "MicaAlt", "Acrylic", "Aero", "无"])
+        self.bg_combo.addItems([self.tr("Mica"), self.tr("MicaAlt"),
+                                self.tr("Acrylic"), self.tr("Aero"),
+                                self.tr("无")])
         self.bg_combo.setCurrentIndex(
             _BG_VALUES.index(settings.get("bg_effect")))
         self.bg_combo.setFixedWidth(150)
@@ -291,10 +305,10 @@ class SettingsPage(ScrollArea):
                                           Qt.AlignmentFlag.AlignRight)
         self.bg_card.hBoxLayout.addSpacing(_SPACING)
         self.accent_card = _WheelFreeCard(
-            FIF.PALETTE, "强调色",
-            "界面控件的强调色；跟随系统取 Windows 主题色，或自定义", self)
+            FIF.PALETTE, self.tr("强调色"),
+            self.tr("界面控件的强调色；跟随系统取 Windows 主题色，或自定义"), self)
         self.accent_combo = ComboBox(self.accent_card)
-        self.accent_combo.addItems(["跟随系统", "自定义…"])
+        self.accent_combo.addItems([self.tr("跟随系统"), self.tr("自定义…")])
         self.accent_combo.setCurrentIndex(
             0 if not settings.get("theme_color") else 1)
         self._sync_accent_content()
@@ -314,11 +328,10 @@ class SettingsPage(ScrollArea):
         v.addWidget(g0)
 
         # ── 相似候选（处理字幕页初始值）──────────────────────────
-        g1 = SettingCardGroup("相似候选", self.view)
+        g1 = SettingCardGroup(self.tr("相似候选"), self.view)
         self.cov_card = _SliderSpinCard(
-            FIF.FILTER, "覆盖率门槛",
-            "字体支持的字符，覆盖字幕所需字符的比例，达到此门槛时，"
-            "才会加入候选",
+            FIF.FILTER, self.tr("覆盖率门槛"),
+            self.tr("字体支持的字符，覆盖字幕所需字符的比例，达到此门槛时，才会加入候选"),
             _pct(COV_BOUNDS[0]), _pct(COV_BOUNDS[1]), 1,
             _pct(settings.get("cov_threshold")),
             lambda x: self.settings.set("cov_threshold", x / 100),
@@ -326,8 +339,8 @@ class SettingsPage(ScrollArea):
         # 2026-10 下限 50 收到 70：存量 <70 显示钳 70，存储保留旧值
         # （构造不提交约定）
         self.sim_card = _SliderSpinCard(
-            FIF.SPEED_HIGH, "相似率门槛",
-            "字体与原字体的相似率，达到此门槛时，才会加入候选",
+            FIF.SPEED_HIGH, self.tr("相似率门槛"),
+            self.tr("字体与原字体的相似率，达到此门槛时，才会加入候选"),
             _pct(SIM_BOUNDS[0]), _pct(SIM_BOUNDS[1]), 1,
             _pct(settings.get("min_sim")),
             lambda x: self.settings.set("min_sim", x / 100),
@@ -336,14 +349,13 @@ class SettingsPage(ScrollArea):
         # 2026-10 滑杆化时上限 50 收到 10：存量 11–50 显示钳 10，存储
         # 保留旧值（构造不提交约定）
         self.pause_card = _SliderSpinCard(
-            FIF.PAUSE, "相似字体暂停数量",
-            "每找到该数量（可能超出）的相似字体就暂停等待选择，"
-            "之后可继续搜索",
+            FIF.PAUSE, self.tr("相似字体暂停数量"),
+            self.tr("每找到该数量（可能超出）的相似字体就暂停等待选择，之后可继续搜索"),
             1, 10, 1, int(settings.get("n_pause")),
             lambda x: self.settings.set("n_pause", x))
         self.threads_card = _SliderSpinCard(
-            FIF.IOT, "最大使用线程数",
-            "寻找相似字体和建立字体库索引时使用的 CPU 线程数上限",
+            FIF.IOT, self.tr("最大使用线程数"),
+            self.tr("寻找相似字体和建立字体库索引时使用的 CPU 线程数上限"),
             1, max(1, os.cpu_count() or 4), 1,
             int(settings.get("max_threads")),
             lambda x: self.settings.set("max_threads", x))
@@ -355,18 +367,21 @@ class SettingsPage(ScrollArea):
         # 对比文字归「相似候选」组最下面：改动使相似度结果全部失效，
         # 与保存方式/后缀（输出行为）不同类
         self.sample_card = PushSettingCard(
-            "编辑…", FIF.FONT, "对比文字", _sample_brief(settings.get("sample_text")), self)
+            self.tr("编辑…"), FIF.FONT, self.tr("对比文字"),
+            _sample_brief(settings.get("sample_text")), self)
         self.sample_card.clicked.connect(self._edit_sample)
         g1.addSettingCard(self.sample_card)
         self._add_sim_pending_hint(g1)
         v.addWidget(g1)
 
         # ── 输出 ─────────────────────────────────────────────
-        g2 = SettingCardGroup("输出", self.view)
+        g2 = SettingCardGroup(self.tr("输出"), self.view)
         self.save_mode_card = _WheelFreeCard(
-            FIF.SAVE, "保存方式", "替换结果写回方式（与处理字幕页同步）", self)
+            FIF.SAVE, self.tr("保存方式"),
+            self.tr("替换结果写回方式（与处理字幕页同步）"), self)
         self.save_mode_combo = ComboBox(self.save_mode_card)
-        self.save_mode_combo.addItems(["另存为新文件", "覆盖原文件"])
+        self.save_mode_combo.addItems(
+            [self.tr("另存为新文件"), self.tr("覆盖原文件")])
         self.save_mode_combo.setFixedWidth(150)
         self.save_mode_combo.setCurrentIndex(
             1 if settings.get("overwrite_default") else 0)
@@ -376,8 +391,8 @@ class SettingsPage(ScrollArea):
             self.save_mode_combo, 0, Qt.AlignmentFlag.AlignRight)
         self.save_mode_card.hBoxLayout.addSpacing(_SPACING)
         self.suffix_card = _WheelFreeCard(
-            FIF.SAVE, "另存后缀", "替换结果另存的文件名后缀，须以点开头",
-            self)
+            FIF.SAVE, self.tr("另存后缀"),
+            self.tr("替换结果另存的文件名后缀，须以点开头"), self)
         # qfluentwidgets 1.11.3：LineEdit 只接受 parent，文字经 setText
         self.suffix_edit = LineEdit(self.suffix_card)
         self.suffix_edit.setText(settings.get("save_suffix"))
@@ -391,30 +406,31 @@ class SettingsPage(ScrollArea):
         v.addWidget(g2)
 
         # ── 相似度缓存 ────────────────────────────────────────
-        g3 = SettingCardGroup("相似度缓存", self.view)
+        g3 = SettingCardGroup(self.tr("相似度缓存"), self.view)
         self._cache_path = str(default_cache_path())   # cachestat 回执更新
-        self.cache_card = SettingCard(FIF.ALBUM, "缓存状态", "…", self)
+        self.cache_card = SettingCard(FIF.ALBUM, self.tr("缓存状态"), "…", self)
         # 缓存位置不可再选（绿色软件定死 <运行目录>/Data/cache.db，2026-10-29）：
         # 卡右只剩打开所在位置，看文件/手动备份用
-        self.btn_open_cache = PushButton(FIF.FOLDER, "打开所在位置",
+        self.btn_open_cache = PushButton(FIF.FOLDER, self.tr("打开所在位置"),
                                          self.cache_card)
         self.btn_open_cache.clicked.connect(self._open_cache_dir)
         self.cache_card.hBoxLayout.addWidget(self.btn_open_cache, 0,
                                              Qt.AlignmentFlag.AlignRight)
         self.cache_card.hBoxLayout.addSpacing(_SPACING)
         self.clear_card = PrimaryPushSettingCard(
-            "清除", FIF.DELETE, "清除缓存",
-            "删除全部字形预览与相似度记录，下次搜索重新计算", self)
+            self.tr("清除"), FIF.DELETE, self.tr("清除缓存"),
+            self.tr("删除全部字形预览与相似度记录，下次搜索重新计算"), self)
         self.clear_card.clicked.connect(self._clear_cache)
         g3.addSettingCard(self.cache_card)
         g3.addSettingCard(self.clear_card)
         v.addWidget(g3)
 
         # ── 关于 ─────────────────────────────────────────────
-        g4 = SettingCardGroup("关于", self.view)
-        ver_card = SettingCard(FIF.INFO, "版本", _app_version(), self)
-        repo_card = HyperlinkCard(REPO_URL, "打开", FIF.GITHUB, "项目仓库",
-                                  "获取更新 / 反馈问题（GitHub）", self)
+        g4 = SettingCardGroup(self.tr("关于"), self.view)
+        ver_card = SettingCard(FIF.INFO, self.tr("版本"), _app_version(), self)
+        repo_card = HyperlinkCard(REPO_URL, self.tr("打开"), FIF.GITHUB,
+                                  self.tr("项目仓库"),
+                                  self.tr("获取更新 / 反馈问题（GitHub）"), self)
         g4.addSettingCard(ver_card)
         g4.addSettingCard(repo_card)
         v.addWidget(g4)
@@ -429,9 +445,9 @@ class SettingsPage(ScrollArea):
         self._refresh_cache_stats()
 
     def _make_size_card(self):
-        card = _WheelFreeCard(FIF.TILES, "相对大小区间",
-                              "字体相对于原字体的大小，在此范围内时，"
-                              "才会加入候选", self)
+        card = _WheelFreeCard(FIF.TILES, self.tr("相对大小区间"),
+                              self.tr("字体相对于原字体的大小，在此范围内时，才会加入候选"),
+                              self)
         self.range_slider = RangeSlider(
             _pct(SIZE_BOUNDS[0]), _pct(SIZE_BOUNDS[1]),
             _pct(self.settings.get("size_min")),
@@ -497,7 +513,7 @@ class SettingsPage(ScrollArea):
         head = QHBoxLayout()
         head.addWidget(group.titleLabel)
         head.addStretch(1)
-        self.sim_pending_hint = CaptionLabel("下次寻找相似时生效")
+        self.sim_pending_hint = CaptionLabel(self.tr("下次寻找相似时生效"))
         self.sim_pending_hint.setStyleSheet("color: #c42b1c; font-weight: 600;")
         self.sim_pending_hint.hide()
         head.addWidget(self.sim_pending_hint)
@@ -537,15 +553,11 @@ class SettingsPage(ScrollArea):
     def _on_language(self, index):
         lang = "zh-Hant" if index == 1 else "zh-Hans"
         self.settings.set("language", lang)
-        # 繁体模式下选项名换成简方/繁方惯称：重灌选项文案（索引不变）
-        labels = list(_LANG_LABELS[lang])
-        if labels != [self.lang_combo.itemText(i)
-                      for i in range(self.lang_combo.count())]:
-            self.lang_combo.blockSignals(True)
-            self.lang_combo.clear()
-            self.lang_combo.addItems(labels)
-            self.lang_combo.setCurrentIndex(index)
-            self.lang_combo.blockSignals(False)
+        # translator 只在启动时装（窗口建成后热切需重建全部界面）：
+        # 选了非当前运行语言即提示重启；切回运行语言无需提示
+        if lang != self._boot_lang:
+            InfoBar.info(self.tr("语言已更改"), self.tr("重启应用后生效"),
+                         duration=3000, parent=self)
 
     def _on_theme(self, index):
         self.settings.set("theme", _THEME_VALUES[index])   # 窗口经 valueChanged 应用
@@ -561,7 +573,8 @@ class SettingsPage(ScrollArea):
         else:
             # 跟随系统：展示当前生效色（窗口已解析的系统色/qfw 出厂色）
             self.accent_card.setContent(
-                f"跟随系统（当前 {QColor(qconfig.themeColor.value).name()}）")
+                self.tr("跟随系统（当前 {0}）").format(
+                    QColor(qconfig.themeColor.value).name()))
 
     def _on_accent(self, index):
         if index == 0:
@@ -571,7 +584,7 @@ class SettingsPage(ScrollArea):
         # 自定义：fluent 取色器。accept 后直接从 dlg.color 落 store——
         # 不依赖 colorChanged（确认与当前色相同时上游不发信号，「钉住
         # 当前色」意图会丢）；取消（reject）不写
-        dlg = ColorDialog(QColor(qconfig.themeColor.value), "选择强调色",
+        dlg = ColorDialog(QColor(qconfig.themeColor.value), self.tr("选择强调色"),
                           self.window())
         accepted = dlg.exec()
         chosen = dlg.color.name()
@@ -608,7 +621,8 @@ class SettingsPage(ScrollArea):
         try:
             self.settings.set("save_suffix", text)
         except ValueError:
-            InfoBar.error("后缀无效", "必须以点开头且非空，如 .substituted.ass",
+            InfoBar.error(self.tr("后缀无效"),
+                          self.tr("必须以点开头且非空，如 .substituted.ass"),
                           parent=self)
             self.suffix_edit.setText(self.settings.get("save_suffix"))
             return
@@ -621,7 +635,7 @@ class SettingsPage(ScrollArea):
                 self.settings.set("sample_text", dlg.edit.toPlainText())
                 self.sample_card.setContent(_sample_brief(dlg.edit.toPlainText()))
             except ValueError:
-                InfoBar.error("对比文字不能为空", "", parent=self)
+                InfoBar.error(self.tr("对比文字不能为空"), "", parent=self)
 
     def _refresh_cache_stats(self):
         self.worker.submit("cachestat", _stat_job)
@@ -629,11 +643,12 @@ class SettingsPage(ScrollArea):
     def _on_result(self, tag, payload):
         if tag == "cachestat":
             mb = payload["render_bytes"] / 1024 / 1024
-            self.cache_card.setContent(
-                f"字形预览 {mb:.1f} MB · 相似度记录 {payload['pair_count']} 条")
+            self.cache_card.setContent(self.tr(
+                "字形预览 {0:.1f} MB · 相似度记录 {1} 条").format(
+                mb, payload['pair_count']))
             self._cache_path = payload["path"]
         elif tag == "cacheclear":
-            InfoBar.success("缓存已清除", "", parent=self)
+            InfoBar.success(self.tr("缓存已清除"), "", parent=self)
             self._refresh_cache_stats()
 
     def _open_cache_dir(self):
@@ -646,14 +661,14 @@ class SettingsPage(ScrollArea):
         # 缓存类任务失败浮泡（初始化/统计/清除）；其它页签的任务由
         # 各自页面的 failed 处理器负责，这里不重复弹
         if tag in ("worker:init", "cachestat", "cacheclear"):
-            InfoBar.error("缓存操作失败", f"{tag}: {err}", parent=self)
+            InfoBar.error(self.tr("缓存操作失败"), f"{tag}: {err}", parent=self)
 
     def _clear_cache(self):
-        w = MessageBox("清除相似度缓存",
-                       "确认清除全部字体的相似度记录和对比文字渲染缓存？"
-                       "下次寻找相似字体时会再次产生", self.window())
-        w.yesButton.setText("确认")
-        w.cancelButton.setText("取消")
+        w = MessageBox(self.tr("清除相似度缓存"),
+                       self.tr("确认清除全部字体的相似度记录和对比文字渲染缓存？下次寻找相似字体时会再次产生"),
+                       self.window())
+        w.yesButton.setText(self.tr("确认"))
+        w.cancelButton.setText(self.tr("取消"))
         if w.exec():
             self.worker.submit("cacheclear", _clear_job)
 

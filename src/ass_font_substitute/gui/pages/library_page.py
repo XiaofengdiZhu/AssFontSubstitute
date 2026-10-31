@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QT_TRANSLATE_NOOP
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtCore import QRectF
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
@@ -51,19 +53,26 @@ from ass_font_substitute.gui.pages.subs_page import _ElidedLabel
 from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.workers import IndexWorker
 
-_STAT_KEYS = [("dirs", "字体目录"), ("files", "文件总数"), ("fonts", "字体总数"),
-              ("support_sc", "支持简体"), ("support_tc", "支持繁体")]
+_STAT_KEYS = [("dirs", QT_TRANSLATE_NOOP("LibraryPage", "字体目录")),
+              ("files", QT_TRANSLATE_NOOP("LibraryPage", "文件总数")),
+              ("fonts", QT_TRANSLATE_NOOP("LibraryPage", "字体总数")),
+              ("support_sc", QT_TRANSLATE_NOOP("LibraryPage", "支持简体")),
+              ("support_tc", QT_TRANSLATE_NOOP("LibraryPage", "支持繁体"))]
 
 # 目录行状态写进行内按钮：进行时「更新中/检查中」，静态词「已最新/需更新/
 # 不可用」；stale 另配琥珀底提示可点更新
 _STATUS_TEXT = {
-    "ok": "已最新", "stale": "需更新", "indexing": "更新中",
-    "pending": "检查中", "offline": "不可用"}
+    "ok": QT_TRANSLATE_NOOP("LibraryPage", "已最新"),
+    "stale": QT_TRANSLATE_NOOP("LibraryPage", "需更新"),
+    "indexing": QT_TRANSLATE_NOOP("LibraryPage", "更新中"),
+    "pending": QT_TRANSLATE_NOOP("LibraryPage", "检查中"),
+    "offline": QT_TRANSLATE_NOOP("LibraryPage", "不可用")}
 
 
 def _progress_text(done: int, total: int) -> str:
     """行内进度文案；total=0 表示还没收到首笔回执（扫描中）。"""
-    return f"{round(done * 100 / total)}% · {done}/{total}" if total else "准备中…"
+    return (f"{round(done * 100 / total)}% · {done}/{total}" if total
+            else QCoreApplication.translate("LibraryPage", "准备中…"))
 
 
 # 统计行定宽模板（文件/字体 5 位、简繁/失败 4 位封顶）：各行左块等宽，
@@ -201,7 +210,7 @@ class LibraryPage(ScrollArea):
         v.setSpacing(0)
 
         # BodyLabel 而非裸 QLabel：LABEL qss 黑/白随主题（裸 QLabel 黑字死调色板）
-        self.page_title = BodyLabel("字体库管理")
+        self.page_title = BodyLabel(self.tr("字体库管理"))
         setFont(self.page_title, 20)   # qfw setFont：20px Normal 字重不变
         v.addWidget(self.page_title)
         v.addSpacing(12)
@@ -219,7 +228,7 @@ class LibraryPage(ScrollArea):
                 stat_row.addWidget(sep, 0, Qt.AlignVCenter)
             col = QVBoxLayout()
             col.setSpacing(2)
-            title = CaptionLabel(label)
+            title = CaptionLabel(self.tr(label))
             title.setAlignment(Qt.AlignCenter)
             val = BodyLabel("—")
             val.setAlignment(Qt.AlignCenter)
@@ -233,12 +242,12 @@ class LibraryPage(ScrollArea):
 
         # 按钮初始无布局，_rebuild_dir_rows 时装进分组卡标题栏/失败卡。
         # 添加目录=主色（引导首次使用的正事），更新全部=普通（日常少点）
-        self.btn_add = PrimaryPushButton(FIF.FOLDER_ADD, "添加目录")
-        install_tip(self.btn_add, "选择一个字体目录加入列表")
+        self.btn_add = PrimaryPushButton(FIF.FOLDER_ADD, self.tr("添加目录"))
+        install_tip(self.btn_add, self.tr("选择一个字体目录加入列表"))
         self.btn_refresh = TransparentToolButton(FIF.SYNC)
-        install_tip(self.btn_refresh, "刷新状态")
-        self.btn_update = PushButton(FIF.UPDATE, "更新全部")
-        install_tip(self.btn_update, "更新全部目录的索引")
+        install_tip(self.btn_refresh, self.tr("刷新状态"))
+        self.btn_update = PushButton(FIF.UPDATE, self.tr("更新全部"))
+        install_tip(self.btn_update, self.tr("更新全部目录的索引"))
 
         # 更新态：按钮原地变「[旋转环]取消更新」，宽度锁定防文字变短塌缩
         self._busy_timer = QTimer(self)
@@ -253,8 +262,9 @@ class LibraryPage(ScrollArea):
         v.addLayout(self.dirs_box)
         v.addSpacing(16)
 
-        self.failures_card = PushSettingCard("打开", FIF.INFO, "查看失败清单",
-                                             "暂无失败文件")
+        self.failures_card = PushSettingCard(
+            self.tr("打开"), FIF.INFO, self.tr("查看失败清单"),
+            self.tr("暂无失败文件"))
         v.addWidget(self.failures_card)
         v.addStretch(1)
 
@@ -277,7 +287,7 @@ class LibraryPage(ScrollArea):
         # 一张 GroupHeaderCardWidget 框住全部目录行（行间分隔线由组件管）；
         # 标题栏当工具条：左=标题+刷新图标，右=更新全部+添加目录
         card = GroupHeaderCardWidget(self)
-        card.setTitle("字体目录")
+        card.setTitle(self.tr("字体目录"))
         card.headerLayout.addWidget(self.btn_refresh)
         card.headerLayout.addStretch(1)
         card.headerLayout.addWidget(self.btn_update)
@@ -287,7 +297,8 @@ class LibraryPage(ScrollArea):
             rh = QHBoxLayout(right)
             rh.setContentsMargins(0, 0, 0, 0)
             rh.setSpacing(8)
-            hint = CaptionLabel(f"新增 {d.added} · 修改 {d.changed}")
+            hint = CaptionLabel(
+                self.tr("新增 {0} · 修改 {1}").format(d.added, d.changed))
             rh.addWidget(hint, 0, Qt.AlignVCenter)
             # 先入父再 setVisible：无父 setVisible(True) 即成顶层窗口上屏
             # （默认尺寸+标题栏），addWidget 重挂父再触发原生重建——取消
@@ -295,38 +306,39 @@ class LibraryPage(ScrollArea):
             hint.setVisible(d.state == "stale")
             # 状态即按钮：非 indexing 挂更新图标（与「更新全部索引」同款），
             # indexing 换暂停=可单停；stale 可点启动更新，其余纯展示
-            btn = PushButton(FIF.UPDATE, _STATUS_TEXT.get(d.state, d.state))
+            btn = PushButton(FIF.UPDATE,
+                             self.tr(_STATUS_TEXT.get(d.state, d.state)))
             if d.state == "stale":
                 btn.setEnabled(self._index_worker is None)
-                install_tip(btn, "点击更新该目录索引")
+                install_tip(btn, self.tr("点击更新该目录索引"))
                 setCustomStyleSheet(btn, _AMBER_QSS_LIGHT, _AMBER_QSS_DARK)
                 btn.clicked.connect(
                     lambda _=False, p=d.path: self._start_update_dir(p))
             elif d.state == "indexing":
                 btn.setIcon(FIF.PAUSE)
-                install_tip(btn, "点击停止该目录的索引更新")
+                install_tip(btn, self.tr("点击停止该目录的索引更新"))
                 btn.clicked.connect(
                     lambda _=False, p=d.path: self._stop_dir(p))
             elif d.state == "ok":
                 # 已最新也保留更新入口：增量门只看 size+mtime，索引内容
                 # 坏了它判定不了——点击弹确认后清库强制重建
                 btn.setEnabled(self._index_worker is None)
-                install_tip(btn, "点击删除旧索引并强制重建")
+                install_tip(btn, self.tr("点击删除旧索引并强制重建"))
                 btn.clicked.connect(
                     lambda _=False, p=d.path: self._force_update_dir(p))
             else:
                 btn.setEnabled(False)
             rh.addWidget(btn, 0, Qt.AlignVCenter)
-            rm = PushButton(FIF.DELETE, "删除")
+            rm = PushButton(FIF.DELETE, self.tr("删除"))
             # 更新在途禁删：索引线程正写该目录 db，删后状态失配
             rm.setEnabled(self._index_worker is None)
             rm.clicked.connect(lambda _=False, p=d.path: self._remove_dir(p))
             rh.addWidget(rm, 0, Qt.AlignVCenter)
 
-            group = card.addGroup(FIF.FOLDER, "",
-                                  f"文件 {d.files} · 字体 {d.fonts}"
-                                  f" · 支持简体 {d.sc} · 支持繁体 {d.tc}"
-                                  f" · 失败/重复 {d.fail}", right)
+            group = card.addGroup(
+                FIF.FOLDER, "",
+                self.tr("文件 {0} · 字体 {1} · 支持简体 {2} · 支持繁体 {3} · 失败/重复 {4}").format(
+                    d.files, d.fonts, d.sc, d.tc, d.fail), right)
             # 标题位放路径（组件 titleLabel 不省略，换 _ElidedLabel 防窄窗顶飞）
             path_lbl = _ElidedLabel(d.path)
             install_tip(path_lbl, d.path)
@@ -340,7 +352,7 @@ class LibraryPage(ScrollArea):
             if d.state == "indexing":
                 self._build_progress_strip(group, d.path)
         if not self.vm.dirs:
-            ph = CaptionLabel("（请添加字体目录）")
+            ph = CaptionLabel(self.tr("（请添加字体目录）"))
             ph.setAlignment(Qt.AlignCenter)
             wrap = QWidget()
             wh = QHBoxLayout(wrap)
@@ -385,15 +397,17 @@ class LibraryPage(ScrollArea):
         bad = sum(d.bad for d in self.vm.dirs)
         skipped = sum(d.skipped for d in self.vm.dirs)
         self.failures_card.setContent(
-            f"坏文件 {bad} · 重复跳过 {skipped}" if bad or skipped
-            else "暂无失败文件")
+            self.tr("坏文件 {0} · 重复跳过 {1}").format(bad, skipped)
+            if bad or skipped else self.tr("暂无失败文件"))
 
     def _add_dir(self):
-        d = pick_existing_dir(self, self.settings, "选择字体目录", "library")
+        d = pick_existing_dir(self, self.settings, self.tr("选择字体目录"),
+                              "library")
         if not d:
             return
         if not self.add_dirs([d]):
-            InfoBar.warning("提示", "该目录已在列表中", parent=self)
+            InfoBar.warning(self.tr("提示"), self.tr("该目录已在列表中"),
+                            parent=self)
 
     def add_dirs(self, paths: list[str]) -> list[str]:
         """逐个加入目录列表并持久化，返回实际新增路径（调用方据此提示）。
@@ -423,25 +437,26 @@ class LibraryPage(ScrollArea):
         dirs, _ = split_dropped(paths)
         for d in dirs:
             if any(Path(x.path) == Path(d) for x in self.vm.dirs):
-                InfoBar.warning("提示", "该目录已在列表中", parent=self)
+                InfoBar.warning(self.tr("提示"), self.tr("该目录已在列表中"),
+                                parent=self)
                 continue
-            box = MessageBox("加入字体库", f"确认将 {d} 加入字体库？",
+            box = MessageBox(self.tr("加入字体库"),
+                             self.tr("确认将 {0} 加入字体库？").format(d),
                              self.window())
-            box.yesButton.setText("加入")
-            box.cancelButton.setText("取消")
+            box.yesButton.setText(self.tr("加入"))
+            box.cancelButton.setText(self.tr("取消"))
             if box.exec():
                 self.add_dirs([d])
 
     def _remove_dir(self, path):
         """二次确认后移除：手滑即删太危险（目录行删除按钮紧邻更新按钮）。"""
         box = MessageBox(
-            "删除字体目录",
+            self.tr("删除字体目录"),
             _box_content(
-                f"确定从列表移除以下目录吗？\n\n{path}\n\n"
-                "仅移出列表：字体文件与已建索引不会被删除。"),
+                self.tr("确定从列表移除以下目录吗？\n\n{0}\n\n仅移出列表：字体文件与已建索引不会被删除。").format(path)),
             self.window())
-        box.yesButton.setText("删除")
-        box.cancelButton.setText("取消")
+        box.yesButton.setText(self.tr("删除"))
+        box.cancelButton.setText(self.tr("取消"))
         if box.exec():
             self._remove_dir_confirmed(path)
 
@@ -498,7 +513,8 @@ class LibraryPage(ScrollArea):
         DELETE+重解析，与 IndexWorker 并发写同一 fontindex.db → 锁冲突
         /重复重建）。"""
         if self._index_worker is not None:
-            InfoBar.warning("索引更新中", "请等索引更新完成后再重试失败文件",
+            InfoBar.warning(self.tr("索引更新中"),
+                            self.tr("请等索引更新完成后再重试失败文件"),
                             parent=self)
             return
         self._retry_outstanding += 1
@@ -513,15 +529,15 @@ class LibraryPage(ScrollArea):
 
     def _on_failed(self, tag, err):
         if tag == "lib":
-            InfoBar.error("字体库加载失败", err, parent=self)
+            InfoBar.error(self.tr("字体库加载失败"), err, parent=self)
             self._report_loaded()           # 失败也要收启动画面，不能卡死在盖板后
         elif tag == "failures":
             self._pending_failures = None      # 允许再次点开失败清单
-            InfoBar.error("失败清单读取失败", err, parent=self)
+            InfoBar.error(self.tr("失败清单读取失败"), err, parent=self)
         elif tag == "libdetail":
-            InfoBar.warning("目录状态探测失败", err, parent=self)
+            InfoBar.warning(self.tr("目录状态探测失败"), err, parent=self)
         elif isinstance(tag, str) and tag.startswith("retry:"):
-            InfoBar.error("重试失败", err, parent=self)
+            InfoBar.error(self.tr("重试失败"), err, parent=self)
             self._retry_settled()
 
     def _apply_stats(self, stats):
@@ -530,9 +546,11 @@ class LibraryPage(ScrollArea):
 
     def _warn_overlaps(self):
         if self.vm.overlaps:
-            InfoBar.warning("目录重叠", "；".join(self.vm.overlaps), parent=self)
+            InfoBar.warning(self.tr("目录重叠"), "；".join(self.vm.overlaps),
+                            parent=self)
         if self.vm.failed_dirs:
-            InfoBar.warning("目录不可用", "；".join(self.vm.failed_dirs), parent=self)
+            InfoBar.warning(self.tr("目录不可用"),
+                            "；".join(self.vm.failed_dirs), parent=self)
 
     # ---- 索引更新 ----
     def _on_update_clicked(self):
@@ -557,13 +575,12 @@ class LibraryPage(ScrollArea):
         """「已最新」行的更新入口：增量无活可干，确认后清库强制重建。
         重建耗时与首建相当，必须让用户显式知情。"""
         box = MessageBox(
-            "强制更新索引",
+            self.tr("强制更新索引"),
             _box_content(
-                f'是否删除 "{path}" 的已有索引数据库，'
-                "然后强制更新索引？这将花费一些时间。"),
+                self.tr('是否删除 "{0}" 的已有索引数据库，然后强制更新索引？这将花费一些时间。').format(path)),
             self.window())
-        box.yesButton.setText("确定")
-        box.cancelButton.setText("取消")
+        box.yesButton.setText(self.tr("确定"))
+        box.cancelButton.setText(self.tr("取消"))
         if box.exec():
             # 旧索引即清：行内派生统计（字体/简繁/失败重复）与总统计卡
             # 同步减去旧值，不带旧数字跑完全程
@@ -577,7 +594,8 @@ class LibraryPage(ScrollArea):
         if self._retry_outstanding:
             # 重试门反向：retry_bad rw 开库与 IndexWorker 并发写同库曾锁
             # 冲突——重试在途时不启动索引更新
-            InfoBar.warning("重试进行中", "请等失败文件重试完成后再更新索引",
+            InfoBar.warning(self.tr("重试进行中"),
+                            self.tr("请等失败文件重试完成后再更新索引"),
                             parent=self)
             return
         for d in dirs:
@@ -597,7 +615,9 @@ class LibraryPage(ScrollArea):
     def _on_index_progress(self, d, done, total, res):
         self._index_progress[d] = (done, total)
         # 宽度锁定期间计数不进文字（会撑宽/塌缩），进度走 tooltip
-        self.btn_update.setToolTip(f"正在更新索引（{done}/{total}），点击取消")  # 过滤器建时已装
+        self.btn_update.setToolTip(
+            self.tr("正在更新索引（{0}/{1}），点击取消").format(
+                done, total))  # 过滤器建时已装
         w = self._progress_widgets.get(d)
         if w is None or not total:
             return                        # 首笔回执前不定态条自转，无需动
@@ -629,7 +649,7 @@ class LibraryPage(ScrollArea):
         self._index_progress.pop(d, None)
         self.vm.mark_pending(d)
         self._rebuild_dir_rows()
-        InfoBar.error("索引更新失败", f"{d}: {err}", parent=self)
+        InfoBar.error(self.tr("索引更新失败"), f"{d}: {err}", parent=self)
 
     def _on_index_all_done(self):
         self._index_worker = None
@@ -649,14 +669,14 @@ class LibraryPage(ScrollArea):
             w = max(self.btn_update.width(),
                     self.btn_update.sizeHint().width())
             self.btn_update.setFixedWidth(w)
-            self.btn_update.setText("取消更新")
+            self.btn_update.setText(self.tr("取消更新"))
             self._busy_i = 0
             self.btn_update.setIcon(self._busy_frames()[0])
             self._busy_timer.start()
-            self.btn_update.setToolTip("正在更新索引，点击取消")  # 同上
+            self.btn_update.setToolTip(self.tr("正在更新索引，点击取消"))  # 同上
         else:
             self._busy_timer.stop()
-            self.btn_update.setText("更新全部")
+            self.btn_update.setText(self.tr("更新全部"))
             self.btn_update.setIcon(FIF.UPDATE)
             # 16777215 = QWIDGETSIZE_MAX（PySide6 未导出该常量）
             self.btn_update.setMinimumWidth(0)
@@ -731,22 +751,23 @@ class _FailuresDialog(MessageBoxBase):
         self._retry = retry
         self._bad = data.get("bad", {}) or {}
 
-        self.titleLabel = SubtitleLabel("失败清单")
-        hint = CaptionLabel("重试全部会重新解析下列文件；对目录重新索引同样有效。")
+        self.titleLabel = SubtitleLabel(self.tr("失败清单"))
+        hint = CaptionLabel(
+            self.tr("重试全部会重新解析下列文件；对目录重新索引同样有效。"))
         hint.setWordWrap(True)
         text = TextEdit()
         text.setReadOnly(True)
         text.setMinimumHeight(140)
         lines = []
         if not self._bad:
-            lines.append("各目录暂无解析失败文件。")
+            lines.append(self.tr("各目录暂无解析失败文件。"))
         for d, rows in self._bad.items():
             lines.append(f"【{d}】")
             for rel, reason in rows:
                 lines.append(f"  {rel} —— {reason}")
         skipped = data.get("skipped", [])
         if skipped:
-            lines.append("【跳过的重复版本】")
+            lines.append(self.tr("【跳过的重复版本】"))
             lines.extend(f"  {s}" for s in skipped)
         text.setPlainText("\n".join(lines))
         self.viewLayout.addWidget(self.titleLabel)
@@ -759,11 +780,11 @@ class _FailuresDialog(MessageBoxBase):
         if win_h > 350:
             self.widget.setMaximumHeight(win_h - 32)
         if self._bad:
-            self.yesButton.setText("重试全部")
-            self.cancelButton.setText("关闭")
+            self.yesButton.setText(self.tr("重试全部"))
+            self.cancelButton.setText(self.tr("关闭"))
         else:
             self.hideYesButton()
-            self.cancelButton.setText("关闭")
+            self.cancelButton.setText(self.tr("关闭"))
 
     def validate(self) -> bool:
         if self._bad:

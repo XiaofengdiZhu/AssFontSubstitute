@@ -209,7 +209,7 @@ class PreviewBar(CaptionLabel):
             self._connected = False
         self._inflight = False
         if err is not None:
-            self.setText("（渲染失败）")
+            self.setText(self.tr("（渲染失败）"))
             self.setToolTip(err)        # hover 可见具体异常，排查怪字体
             return
         if strip is None:
@@ -224,7 +224,7 @@ class PreviewBar(CaptionLabel):
         dpr = self.devicePixelRatioF() or 1.0
         pm = strip_to_pixmap(strip, dpr)
         if pm.isNull():
-            self.setText("（无可渲染字形）")
+            self.setText(self.tr("（无可渲染字形）"))
             return
         self._strip = strip
         # 条带是超采样位图：缩到本行物理高度（逻辑 28 × DPR），标 DPR 后
