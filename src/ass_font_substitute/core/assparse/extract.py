@@ -8,6 +8,7 @@ from light_ass import Document
 from light_ass.curly.parsed_line import TextNode
 from light_ass.curly.tags import FontNameTag
 from light_ass.curly.tags import ResetStyleTag
+from light_ass.curly.tags import TransformTag
 
 from ass_font_substitute.core.assparse.encoding import ALIAS_BOM
 from ass_font_substitute.core.assparse.encoding import EncodingDetectError
@@ -22,6 +23,26 @@ class ExtractResult:
     unknown_styles: list[str] = field(default_factory=list)
     invalid_styles: list[str] = field(default_factory=list)  # Fontname 为空的样式
     parse_error: str | None = None
+
+
+def _transform_fns(tag) -> list:
+    """\t(0,1000,\fnX\fscx120)：light_ass 把动画参数解析进 modifier，
+    内嵌 \fn 与顶层 FontNameTag 同类，但解析失败的项回退成 RawTag
+    （无 tag_name 属性）——按 tag_name=='fn' 甄别可一并滤掉；
+    _raw 串在位，_fn_name 照常恢复 "(P)" 伪字体名全称。
+    只下钻一层：\t 内再嵌 \t 的字体引用不支持（libass 支持存疑）。
+    解析失败按无引用处理。"""
+    try:
+        mod = tag.get_params().get("modifier")
+    except Exception:
+        return []
+    if mod is None:
+        return []
+    # modifier 是 light_ass 自定义序列（repr 像 list 但非 list 子类），
+    # 只能按可迭代性归一，勿按 isinstance 包层
+    mods = [mod] if isinstance(mod, (str, bytes)) or not hasattr(mod, "__iter__") \
+        else list(mod)
+    return [x for x in mods if getattr(x, "tag_name", None) == "fn"]
 
 
 def _fn_name(tag: FontNameTag) -> str:
@@ -89,6 +110,8 @@ def _extract(doc: Document) -> ExtractResult:
             continue
         current = style_font
         is_comment = ev.comment
+        tf_names: set[str] = set()    # \t(...) 动画内嵌 \fn 引用的字体
+        line_chars: set[str] = set()  # 整行文本（保守归入动画字体）
         for node in ev.parse_tags(doc, parse_escape_nodes=True).parsed:
             if isinstance(node, FontNameTag):
                 value = _fn_name(node)
@@ -102,9 +125,26 @@ def _extract(doc: Document) -> ExtractResult:
                     current = style_font  # \fn0 / \fn 空 = 还原样式字体
             elif isinstance(node, ResetStyleTag):
                 current = lookup_style(node.value) or style_font if node.value else style_font
+            elif isinstance(node, TransformTag):
+                # 动画参数内的 \fn 也是引用：建桶计 inline 次数；顶层字体
+                # 状态不被动画切换影响（正文仍归样式/原字体）
+                for it in _transform_fns(node):
+                    name = _fn_name(it)
+                    if name:
+                        tf_names.add(name)
+                        usage = bucket(name)
+                        if not is_comment:
+                            usage.inline_count += 1
             elif isinstance(node, TextNode) and not is_comment and current:
                 bucket(current).chars.update(node.text)
+                line_chars.update(node.text)
             # DrawingNode / EscapeNode / RawTag / CommentNode 不计
+
+        # 动画进行时这些字以动画字体渲染：整行文字保守计入其用字集
+        # （覆盖率低报会放行缺字候选，宁多勿少）；Comment 行不计字
+        if tf_names and not is_comment:
+            for name in tf_names:
+                bucket(name).chars.update(line_chars)
 
     return ExtractResult(usages=list(buckets.values()),
                          unknown_styles=sorted(used_styles),

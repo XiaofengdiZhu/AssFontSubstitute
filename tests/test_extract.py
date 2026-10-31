@@ -91,3 +91,39 @@ def test_style_name_case_insensitive(tmp_path):
         "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,永和的中文字", line)))
     by2 = {u.norm_name: u for u in r2.usages}
     assert {"天", "氣"} <= by2["華康副體w7"].chars
+
+
+def test_transform_nested_fn(tmp_path):
+    # \\t(...) 动画内嵌 \\fn：此前 TransformTag 不下钻，该字体静默漏提取
+    # （不建卡 → build_mapping 无此键 → rewrite 漏替）
+    line = ("Dialogue: 0,0:00:12.00,0:00:14.00,Main,,0,0,0,,"
+            "{\\t(0,1000,\\fn華康變換體)}動畫甲{\\t(\\fn華康變換體)}乙")
+    r = extract_usages(_write(tmp_path, ASS + line + "\n"))
+    by = {u.norm_name: u for u in r.usages}
+    u = by["華康變換體"]
+    assert u.inline_count == 2
+    # 保守口径：整行文字归动画字体（动画进行时这些字以该字体渲染）
+    assert {"動", "畫", "甲", "乙"} <= set(u.chars)
+    # 顶层字体状态不被动画切换影响：后续文本仍归样式字体
+    assert {"動", "畫", "甲", "乙"} <= set(by["華康主體w5"].chars)
+
+
+def test_transform_fn0_no_phantom_bucket(tmp_path):
+    # \\t(\\fn0) 是还原信号：不得产生 "0" 幽灵桶
+    line = ("Dialogue: 0,0:00:12.00,0:00:14.00,Main,,0,0,0,,"
+            "{\\t(0,1000,\\fn0)}動畫")
+    r = extract_usages(_write(tmp_path, ASS + line + "\n"))
+    by = {u.norm_name: u for u in r.usages}
+    assert "0" not in by
+    assert {"動", "畫"} <= set(by["華康主體w5"].chars)
+
+
+def test_transform_fn_comment_reference_only(tmp_path):
+    # Comment 行的 \\t(\\fn)：引用建桶但不计行内次数与字（与顶层 \\fn 同口径）
+    line = ("Comment: 0,0:00:12.00,0:00:14.00,Main,,0,0,0,,"
+            "{\\t(0,1000,\\fn華康註解換體)}註解")
+    r = extract_usages(_write(tmp_path, ASS + line + "\n"))
+    by = {u.norm_name: u for u in r.usages}
+    assert "華康註解換體" in by
+    assert by["華康註解換體"].inline_count == 0
+    assert len(by["華康註解換體"].chars) == 0

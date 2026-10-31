@@ -110,10 +110,12 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
     # 键」时链式误替（{SimSun→宋体, 宋体→思源} 把 {\fnSimSun} 写成思源）。
     # 长键优先——正则交替取先中，短键是长键前缀时会截胡。
     # 两侧空白容忍（\s→pad 原样保留）：extract 把「\fn名字 」strip 后建桶
-    # 而 libass 对尾随空格 trim，不宽容则「提得到、改不掉」静默漏替
+    # 而 libass 对尾随空格 trim，不宽容则「提得到、改不掉」静默漏替。
+    # lookahead 容 "}" 与 "\\" 之外还容 ")"——\t(...) 动画参数里的 \fn
+    # 名字后随右括号（extract 已下钻提取，见 _transform_fns）
     alt = "|".join(re.escape(old)
                    for old in sorted(m, key=len, reverse=True))
-    fn_re = (re.compile(r"\\fn([ \t]*)(" + alt + r")([ \t]*)(?=[\\}])")
+    fn_re = (re.compile(r"\\fn([ \t]*)(" + alt + r")([ \t]*)(?=[\\})])")
              if alt else None)
 
     for i, line in enumerate(lines):

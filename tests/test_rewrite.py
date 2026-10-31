@@ -202,3 +202,21 @@ def test_atomic_overwrite(tmp_path):
     assert "思源黑体" in text
     assert p.read_bytes() != before
     assert not list(tmp_path.glob("*.tmp*"))
+
+
+def test_transform_inner_fn_replaced(tmp_path):
+    # \\t(...) 动画内嵌 \\fn：名字后随 ")" 时 lookahead 须容右括号，
+    # 否则提得到改不掉（extract 已建卡、rewrite 漏替=静默漏替换）
+    extra = ("Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,"
+             "{\\t(0,1000,\\fn華康主體W5\\fscx110)}甲\r\n"
+             "Dialogue: 0,0:00:05.00,0:00:06.00,Main,,0,0,0,,"
+             "{\\t(\\fn華康主體W5)}乙\r\n")
+    p = tmp_path / "in.ass"
+    p.write_bytes((ASS + extra).encode("utf-8-sig"))
+    out = tmp_path / "out.ass"
+    r = rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out)
+    text = out.read_text(encoding="utf-8-sig")
+    assert "{\\t(0,1000,\\fn思源黑体\\fscx110)}甲" in text
+    assert "{\\t(\\fn思源黑体)}乙" in text
+    # 模板自带 3 行命中（Style Main + Dialogue + Comment）+ 新增 2 行
+    assert len(r.changed_lines) == 5
