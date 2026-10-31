@@ -32,6 +32,9 @@ from qfluentwidgets import TransparentToolButton
 from qfluentwidgets import setCustomStyleSheet
 from qfluentwidgets import setFont
 
+from ass_font_substitute.gui.drop import accepts
+from ass_font_substitute.gui.drop import local_paths
+from ass_font_substitute.gui.drop import split_dropped
 from ass_font_substitute.gui.jobs import apply_to_file
 from ass_font_substitute.gui.jobs import classify_one
 from ass_font_substitute.gui.jobs import ensure_library
@@ -74,6 +77,7 @@ class SubsPage(QWidget):
         super().__init__(parent)
         self.settings, self.worker = settings, worker
         self.setObjectName("subsPage")
+        self.setAcceptDrops(True)   # 拖入字幕文件/目录静默加载（_apply_dropped）
         db = decisions_path()
         db.parent.mkdir(parents=True, exist_ok=True)   # 首启无 afs 目录：决策库随用随建
         self.vm = SubsVM(settings, db)
@@ -243,7 +247,7 @@ class SubsPage(QWidget):
     # ---- 文件层 ----
     def _add_files(self):
         paths = pick_open_files(self, self.settings, "添加字幕文件",
-                                "ASS 字幕 (*.ass *.ssa)", "subs")
+                                "ASS 字幕 (*.ass)", "subs")
         self._add_paths(paths)
 
     def _add_dir(self):
@@ -259,6 +263,24 @@ class SubsPage(QWidget):
         self._parsing.update(paths)
         for p in paths:
             self.worker.submit(f"parse:{p}", _parse_job, p)
+
+    # ---- 拖拽入：文件/目录静默加载，不弹确认 ----
+
+    def dragEnterEvent(self, e):
+        if accepts(local_paths(e.mimeData()), dirs_only=False):
+            e.acceptProposedAction()
+        else:
+            e.ignore()
+
+    def dropEvent(self, e):
+        self._apply_dropped(local_paths(e.mimeData()))
+
+    def _apply_dropped(self, paths: list[str]) -> None:
+        dirs, files = split_dropped(paths)
+        for d in dirs:
+            self.worker.submit(f"scandir:{d}", _scan_dir_job, d)
+        self._add_paths([f for f in files
+                         if Path(f).suffix.lower() == ".ass"])
 
     def _remove_all_files(self):
         """一键清空文件列表（用户拍板 2026-10-30，替代「重新载入」）：
@@ -897,9 +919,10 @@ def _parse_job(ctx, p):
 
 
 def _scan_dir_job(ctx, d):
-    """递归列目录下的 .ass/.ssa（工作线程做，大目录不卡 UI）。"""
+    """递归列目录下的 .ass（工作线程做，大目录不卡 UI）。
+    .ssa 不收：light_ass 不认 SSA v4 样式段，收进来是静默半残结果。"""
     return sorted(str(p) for p in Path(d).rglob("*")
-                  if p.suffix.lower() in (".ass", ".ssa"))
+                  if p.suffix.lower() == ".ass")
 
 
 def _lib_job(ctx, dirs):

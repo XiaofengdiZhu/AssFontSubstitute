@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QVBoxLayout
 from qfluentwidgets import BodyLabel
 from qfluentwidgets import InfoBar
+from qfluentwidgets import MessageBox
 from qfluentwidgets import ScrollArea
 from qfluentwidgets import setFont
 
+from ass_font_substitute.gui.drop import accepts
+from ass_font_substitute.gui.drop import local_paths
+from ass_font_substitute.gui.drop import split_dropped
 from ass_font_substitute.gui.jobs import ensure_library
 from ass_font_substitute.gui.jobs import lib_key
 from ass_font_substitute.gui.preview_vm import PreviewVM
@@ -19,10 +26,14 @@ from ass_font_substitute.gui.widgets.font_list import FontListWidget
 
 
 class BrowsePage(ScrollArea):
+    dirsAdded = Signal(list)
+    """拖入文件夹确认加入后发射（路径列表）；app 转发给库管理页落列表"""
+
     def __init__(self, settings, worker, parent=None):
         super().__init__(parent)
         self.settings, self.worker = settings, worker
         self.setObjectName("browsePage")
+        self.setAcceptDrops(True)   # 拖入字体目录：确认后交库管理页加
         self.pvm = PreviewVM(settings)
 
         self.view = _inner_view(self)
@@ -130,6 +141,35 @@ class BrowsePage(ScrollArea):
         # 快照视图，可接受；基嵌套弹窗共用同一份 entities 引用）
         FontDetailDialog(e, self.pvm.entities, self.worker, self.pvm,
                          settings=self.settings, parent=self).exec()
+
+    # ---- 拖拽入：只认文件夹，确认框后交库管理页加（dirsAdded） ----
+
+    def dragEnterEvent(self, e):
+        if accepts(local_paths(e.mimeData()), dirs_only=True):
+            e.acceptProposedAction()
+        else:
+            e.ignore()
+
+    def dropEvent(self, e):
+        self._apply_dropped(local_paths(e.mimeData()))
+
+    def _apply_dropped(self, paths: list[str]) -> None:
+        dirs, _ = split_dropped(paths)
+        have = {Path(x) for x in self.settings.get("font_dirs")}
+        for d in dirs:
+            if Path(d) in have:
+                InfoBar.warning("提示", "该目录已在列表中", parent=self)
+                continue
+            box = MessageBox("加入字体库", f"确认将 {d} 加入字体库？",
+                             self.window())
+            box.yesButton.setText("加入")
+            box.cancelButton.setText("取消")
+            if not box.exec():
+                continue
+            self.dirsAdded.emit([d])
+            InfoBar.success("已加入字体库",
+                            "在「字体库管理」页更新全部索引后生效",
+                            parent=self, duration=3000)
 
 
 def _lib_job(ctx, dirs):

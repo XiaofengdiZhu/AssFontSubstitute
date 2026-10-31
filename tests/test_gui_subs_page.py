@@ -1672,8 +1672,8 @@ def test_add_dir_scans_and_parses(qapp, tmp_path, monkeypatch):
     tag, fn, args, _ = page.worker.submits[0]
     assert tag == f"scandir:{d}" and fn is m._scan_dir_job
     paths = fn(None, *args)          # 假 worker：手动执行扫描任务
-    assert set(paths) == {str(d / "a.ass"), str(d / "b.SSA"),
-                          str(d / "nested" / "c.ass")}   # 递归+剔除非字幕
+    # 递归+剔除非字幕；.ssa 不收（light_ass 不认 SSA v4 样式段，静默半残）
+    assert set(paths) == {str(d / "a.ass"), str(d / "nested" / "c.ass")}
     page._on_result(tag, paths)
     parse_tags = [t.split(":", 1)[1] for t, *_ in page.worker.submits[1:]
                   if t.startswith("parse:")]

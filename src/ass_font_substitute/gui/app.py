@@ -186,6 +186,8 @@ class AFSWindow(FluentWindow):
             self.browse_page.on_library_changed)
         self.library_page.libraryChanged.connect(
             self.subs_page.on_library_changed)
+        # 预览页拖入字体目录确认后交库管理页落列表（本页无 vm）
+        self.browse_page.dirsAdded.connect(self.library_page.add_dirs)
         # 保存方式/另存后缀双向同步：任一页改动回灌另一页（setter 不回写）
         self.subs_page.saveModeChanged.connect(
             self.settings_page.set_save_mode)

@@ -38,6 +38,9 @@ from qfluentwidgets import isDarkTheme
 from qfluentwidgets import setCustomStyleSheet
 from qfluentwidgets import setFont
 
+from ass_font_substitute.gui.drop import accepts
+from ass_font_substitute.gui.drop import local_paths
+from ass_font_substitute.gui.drop import split_dropped
 from ass_font_substitute.gui.jobs import ensure_library
 from ass_font_substitute.gui.jobs import probe_dir_status
 from ass_font_substitute.gui.jobs import read_failures
@@ -175,6 +178,7 @@ class LibraryPage(ScrollArea):
         super().__init__(parent)
         self.settings, self.worker = settings, worker
         self.setObjectName("libraryPage")
+        self.setAcceptDrops(True)   # 拖入字体目录：确认框后加库（_apply_dropped）
         self.vm = LibraryVM(settings)
         self._index_worker: IndexWorker | None = None
         self._retry_outstanding = 0        # 在途重试笔数：收尾去抖用
@@ -388,11 +392,45 @@ class LibraryPage(ScrollArea):
         d = pick_existing_dir(self, self.settings, "选择字体目录", "library")
         if not d:
             return
-        if not self.vm.add_dir(d):
+        if not self.add_dirs([d]):
             InfoBar.warning("提示", "该目录已在列表中", parent=self)
-            return
-        self._rebuild_dir_rows()
-        self.refresh_status()
+
+    def add_dirs(self, paths: list[str]) -> list[str]:
+        """逐个加入目录列表并持久化，返回实际新增路径（调用方据此提示）。
+        供本页与拖拽（预览页 dirsAdded 信号转发）共用；全部处理完只重建
+        一次行卡 + 刷新一次状态。"""
+        added: list[str] = []
+        for p in paths:
+            if self.vm.add_dir(p):
+                added.append(p)
+        if added:
+            self._rebuild_dir_rows()
+            self.refresh_status()
+        return added
+
+    # ---- 拖拽入：只认文件夹，逐个确认框后加库 ----
+
+    def dragEnterEvent(self, e):
+        if accepts(local_paths(e.mimeData()), dirs_only=True):
+            e.acceptProposedAction()
+        else:
+            e.ignore()
+
+    def dropEvent(self, e):
+        self._apply_dropped(local_paths(e.mimeData()))
+
+    def _apply_dropped(self, paths: list[str]) -> None:
+        dirs, _ = split_dropped(paths)
+        for d in dirs:
+            if any(Path(x.path) == Path(d) for x in self.vm.dirs):
+                InfoBar.warning("提示", "该目录已在列表中", parent=self)
+                continue
+            box = MessageBox("加入字体库", f"确认将 {d} 加入字体库？",
+                             self.window())
+            box.yesButton.setText("加入")
+            box.cancelButton.setText("取消")
+            if box.exec():
+                self.add_dirs([d])
 
     def _remove_dir(self, path):
         """二次确认后移除：手滑即删太危险（目录行删除按钮紧邻更新按钮）。"""
