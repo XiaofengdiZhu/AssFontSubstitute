@@ -7,7 +7,18 @@ set ROOT=%~dp0..
 cd /d "%ROOT%"
 
 rem --- MSVC 环境（dumpbin 用于插件依赖分析，必须 vcvarsall 注入 PATH） ---
-call "D:\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+rem vswhere 定位最新 VS 安装（官方入口，装 VS 即自带），不写死盘符/版本
+set VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe
+if not exist "%VSWHERE%" (
+    echo [build_portable] 未找到 vswhere：请安装 Visual Studio 2022（含 C++ 生成工具）1>&2
+    exit /b 1
+)
+for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSROOT=%%i"
+if not defined VSROOT (
+    echo [build_portable] vswhere 未找到含 x64 C++ 工具链的 VS 实例 1>&2
+    exit /b 1
+)
+call "%VSROOT%\VC\Auxiliary\Build\vcvarsall.bat" x64
 if errorlevel 1 exit /b 1
 
 uv run pyside6-deploy -f --no-install --keep-deployment-files --no-warn
