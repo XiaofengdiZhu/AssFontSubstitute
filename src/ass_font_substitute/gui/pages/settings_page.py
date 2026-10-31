@@ -59,7 +59,7 @@ _LANG_LABELS = {
     ),
     "zh-Hant": (
         QT_TRANSLATE_NOOP("SettingsPage", "简体中文"),
-        QT_TRANSLATE_NOOP("SettingsPage", "正體中文"),
+        QT_TRANSLATE_NOOP("SettingsPage", "繁體中文"),
     ),
 }
 _THEME_VALUES = ("auto", "light", "dark")
@@ -259,8 +259,8 @@ class SettingsPage(ScrollArea):
 
         # ── 常规 ─────────────────────────────────────────────
         g0 = SettingCardGroup(self.tr("常规"), self.view)
-        # 选项名跟随运行中的界面语言（繁体界面「繁体中文」显繁方惯称
-        # 「正體中文」）；切换后重启生效，本会话选项名不变
+        # 选项名跟随运行中的界面语言（繁体界面显「繁體中文」）；
+        # 切换后重启生效，本会话选项名不变
         lang = settings.get("language")
         self._boot_lang = lang
         self.lang_card = _WheelFreeCard(

@@ -1924,7 +1924,6 @@ def test_sync_rows_removes_dropped_options(qapp):
     assert set(fc._metrics) == {"o1", "o3"}
     assert set(fc._boxes) == {"o1", "o3"}
     # 布局里行真的没了（不是藏起来）
-    from ass_font_substitute.gui.widgets.font_card import QFrame
     laid = [fc._opt_layout.itemAt(i).widget() for i in range(fc._opt_layout.count())]
     assert all(w is None or w not in [fc._rows.get(k) for k in ("o2",)] for w in laid)
     assert fc._opt_layout.count() == 2
@@ -2008,8 +2007,8 @@ def test_psname_subline_on_same_name_collision(qapp):
     from PySide6.QtWidgets import QLabel
 
     def ps_labels(key):
-        return [l for l in fc._rows[key].findChildren(QLabel)
-                if l.objectName() == "psname"]
+        return [x for x in fc._rows[key].findChildren(QLabel)
+                if x.objectName() == "psname"]
 
     ps1, ps2, ps3 = (ps_labels(k) for k in ("o1", "o2", "o3"))
     assert len(ps1) == len(ps2) == len(ps3) == 1
@@ -2073,3 +2072,27 @@ def test_embedded_metrics_and_keep_title(qapp, tmp_path, monkeypatch):
     metrics = [lab.fullText() for lab in mfc.findChildren(_MetricsLabel)]
     assert any(t == "已内嵌，播放器直接可用" for t in metrics), metrics
     page.deleteLater()
+
+
+def test_direction_default_follows_language(qapp, tmp_path, monkeypatch):
+    # 拍板 2026-11-01：孪生检测方向默认随界面语言——简体界面繁转简、
+    # 繁体界面简转繁（文案「简 → 繁」）
+    from ass_font_substitute.gui.settings_store import Settings
+
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    from ass_font_substitute.gui.pages.subs_page import SubsPage
+
+    s_hans = Settings(tmp_path / "a.json")
+    page = SubsPage(s_hans, _FakeWorker())
+    assert page._direction == "t2s"
+    assert page.seg_dir.currentRouteKey() == "t2s"
+    assert "简 → 繁" in [page.seg_dir.items[k].text()
+                         for k in page.seg_dir.items]
+    page.deleteLater()
+
+    s_hant = Settings(tmp_path / "b.json")
+    s_hant.set("language", "zh-Hant")
+    page2 = SubsPage(s_hant, _FakeWorker())
+    assert page2._direction == "s2t"
+    assert page2.seg_dir.currentRouteKey() == "s2t"
+    page2.deleteLater()

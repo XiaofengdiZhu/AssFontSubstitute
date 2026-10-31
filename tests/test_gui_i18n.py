@@ -119,7 +119,7 @@ def test_widgets_render_translated_after_install(qapp, tmp_path, monkeypatch):
         assert page.lang_card.titleLabel.text() == "語言"
         assert page.lang_card.contentLabel.text() == "設定介面語言（重新啟動應用程式後生效）"
         assert [page.lang_combo.itemText(i)
-                for i in range(page.lang_combo.count())] == ["簡體中文", "正體中文"]
+                for i in range(page.lang_combo.count())] == ["簡體中文", "繁體中文"]
         page.deleteLater()
     finally:
         qapp.removeTranslator(t)

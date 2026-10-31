@@ -14,7 +14,7 @@ from qfluentwidgets import FluentTranslator
 LANG_ZH_HANS = "zh-Hans"
 LANG_ZH_HANT = "zh-Hant"
 
-# 繁体拍板：台湾正體（与译文 opencc s2twp 同源）；简体用 China
+# 繁体拍板：台湾繁體（与译文 opencc s2twp 同源）；简体用 China
 _LOCALES = {
     LANG_ZH_HANS: QLocale(QLocale.Chinese, QLocale.China),
     LANG_ZH_HANT: QLocale(QLocale.Chinese, QLocale.Taiwan),

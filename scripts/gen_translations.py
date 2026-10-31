@@ -3,7 +3,7 @@ pyside6-lrelease 编译 .qm。
 
     uv run python scripts/gen_translations.py
 
-源语言 = 简体（代码里的中文即源文案），目标 = 台湾正體（s2twp 带
+源语言 = 简体（代码里的中文即源文案），目标 = 台湾繁體（s2twp 带
 台湾惯用词：字体→字型、文件→檔案 等）。可重复跑：lupdate 增量合并，
 已有且非 unfinished 的译文保留——手工改过的条目（去掉 unfinished
 标记）不会被自动译文覆盖；源文案变了的条目由 lupdate 重标 unfinished

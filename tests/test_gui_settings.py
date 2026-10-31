@@ -492,11 +492,11 @@ def test_general_group_language_theme_bg(qapp, tmp_path, monkeypatch):
     assert len(infos) == 1
     page.deleteLater()
 
-    # 繁体启动：选项名繁方惯称「正體中文」
+    # 繁体启动：第二选项显「繁體中文」
     s.set("language", "zh-Hant")
     page2 = SettingsPage(s, _FakeWorker())
     assert [page2.lang_combo.itemText(i)
-            for i in range(page2.lang_combo.count())] == ["简体中文", "正體中文"]
+            for i in range(page2.lang_combo.count())] == ["简体中文", "繁體中文"]
     assert page2.lang_combo.currentIndex() == 1
     page2.deleteLater()
 

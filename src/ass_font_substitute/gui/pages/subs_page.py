@@ -85,7 +85,10 @@ class SubsPage(QWidget):
         self._cards_ui: dict[str, FontCard] = {}
         self._cancels: dict[str, dict] = {}        # norm → 取消标志（pull 任务读）
         self._parsing: set[str] = set()            # 批次解析中（收齐才重算）
-        self._direction = "t2s"
+        # 孪生检测方向默认随界面语言（拍板 2026-11-01）：简体界面按繁转
+        # 简，繁体界面按简转繁——各自主流字幕方向
+        self._direction = ("s2t" if settings.get("language") == "zh-Hant"
+                           else "t2s")
         self._gen = 0                              # 分类代次：弃置旧代结果
         self._apply_total = 0
         self._apply_results: list = []
@@ -151,7 +154,7 @@ class SubsPage(QWidget):
                              lambda: self._set_direction("t2s"))
         self.seg_dir.addItem("s2t", self.tr("简 → 繁"),
                              lambda: self._set_direction("s2t"))
-        self.seg_dir.setCurrentItem("t2s")
+        self.seg_dir.setCurrentItem(self._direction)
         pl.addWidget(_fld(self.tr("孪生检测方向"), self.seg_dir))
         ph.addWidget(flow_wrap, 1)
         # 强制等宽（settings 键 preview_mono，两页同键互通）：预览统一格宽

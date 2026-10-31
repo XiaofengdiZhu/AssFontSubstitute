@@ -879,8 +879,8 @@
             <translation>繁體中文</translation>
         </message>
         <message>
-            <source>正體中文</source>
-            <translation>正體中文</translation>
+            <source>繁體中文</source>
+            <translation>繁體中文</translation>
         </message>
         <message>
             <source>常规</source>
