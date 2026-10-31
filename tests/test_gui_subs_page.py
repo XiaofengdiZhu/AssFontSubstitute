@@ -1870,3 +1870,66 @@ def test_sync_rows_removal_cancels_preview_bar(qapp):
     assert set(fc._bar_by_key) == {"o1"}
     assert all(b.key != "o2" if hasattr(b, "key") else True for b in fc._bars)
     fc.deleteLater()
+
+
+def test_psname_subline_on_same_name_collision(qapp):
+    """同名碰撞行显 PS 名副行（用户 2026-10-31：台版/港版同中文名不同
+    PS 名——去重是错案已 reset，真不同字体须 UI 区分）；无碰撞行零噪音；
+    碰撞消解（同名候选被删）副行随 apply 隐藏。"""
+    from ass_font_substitute.gui.subs_vm import Card
+    from ass_font_substitute.gui.subs_vm import OptionItem
+    from ass_font_substitute.gui.widgets.font_card import FontCard
+    from tests.test_gui_subs_page import _ent
+
+    e1 = _ent("fp1", "華康中特圓體")
+    e1 = e1.__class__(**{**e1.__dict__, "psname": "DFPNYuanMXBold-B5"})
+    e2 = _ent("fp2", "華康中特圓體")
+    e2 = e2.__class__(**{**e2.__dict__, "psname": "DFPNYuanMXBold-B5.HK"})
+    e3 = _ent("fp3", "別の字体")
+    c = Card(norm_name="a", raw_name="a", kind="replace", n_chars=1,
+             options=[OptionItem(key="o1", display_name="華康中特圓體",
+                                 entity=e1),
+                      OptionItem(key="o2", display_name="華康中特圓體",
+                                 entity=e2),
+                      OptionItem(key="o3", display_name="別の字体",
+                                 entity=e3)],
+             checked_key="o1")
+
+    class _W(QObject):
+        result = Signal(object, object)
+        failed = Signal(object, str)
+
+        def submit(self, *a, **k):
+            return SimpleNamespace(cancelled=False)
+
+    pvm = SimpleNamespace(mono_cells=lambda: False, get_tiles=lambda k: None)
+    fc = FontCard(c, _W(), pvm, lambda: "")
+    fc.show()
+    qapp.processEvents()
+
+    from PySide6.QtWidgets import QLabel
+
+    def ps_labels(key):
+        return [l for l in fc._rows[key].findChildren(QLabel)
+                if l.objectName() == "psname"]
+
+    ps1, ps2, ps3 = (ps_labels(k) for k in ("o1", "o2", "o3"))
+    assert len(ps1) == len(ps2) == len(ps3) == 1
+    # 断言走 fullText()（elide 前）：offscreen 字体下 text() 已是省略号截断
+    assert ps1[0].isVisible()
+    assert ps1[0].fullText() == "PostScript 名：DFPNYuanMXBold-B5"
+    assert ps2[0].isVisible()
+    assert ps2[0].fullText() == "PostScript 名：DFPNYuanMXBold-B5.HK"
+    assert not ps3[0].isVisible()                        # 无碰撞零噪音
+    # 碰撞消解：同名候选删除 → 剩行副行隐藏（apply 就地更新，不重建）
+    c.options = [o for o in c.options if o.key != "o2"]
+    fc.apply()
+    qapp.processEvents()
+    assert not ps1[0].isVisible()
+    # 碰撞重现：同名行回卡 → 副行重显
+    c.options.append(OptionItem(key="o2", display_name="華康中特圓體",
+                                entity=e2))
+    fc.apply()
+    qapp.processEvents()
+    assert ps1[0].isVisible()
+    fc.deleteLater()

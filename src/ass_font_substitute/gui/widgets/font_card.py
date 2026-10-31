@@ -64,6 +64,7 @@ _TEXT_W = 380       # 文本列宽：真机雅黑 12px 容下常见指标行；�
                     # （相似+覆盖+未覆盖+相对大小，offscreen 实测 516）超出
                     # 部分省略号+tooltip 全文。左列每胖 1px 预览条瘦 1px
                     # （150% 缩放小窗左列 554 曾把预算压到 250 < 旧上限 360）
+_PS_PREFIX = "PostScript 名："   # 同名碰撞副行前缀（用户拍板 2026-10-31）
 _LEFT_W = 24 + 10 + _TEXT_W   # 勾选框 24 + 列距 10 + 文本列
 
 
@@ -397,18 +398,29 @@ class FontCard(CardWidget):
             row.deleteLater()
             self._boxes.pop(k, None)
             self._metrics.pop(k, None)
+            self._psnames.pop(k, None)
             bar = self._bar_by_key.pop(k, None)
             if bar is not None:
                 bar.cancel()
                 if bar in self._bars:
                     self._bars.remove(bar)
         old_rows = dict(self._rows)
+        self._recompute_dups()
         for i, o in enumerate(self.card.options):
             if o.key in old_rows:
                 lab = self._metrics.get(o.key)
                 t = self._metrics_text(o)
                 if lab is not None and lab.fullText() != t:
                     lab.setFullText(t)
+                # PS 名副行就地显隐/换文（碰撞集随候选增删变化，行不重建）
+                ps = self._psnames.get(o.key)
+                pt = _PS_PREFIX + (o.entity.psname or "") \
+                    if o.entity is not None else ""
+                if ps is not None:
+                    if ps.fullText() != pt:
+                        ps.setFullText(pt)
+                    ps.setVisible(bool(o.entity and o.entity.psname)
+                                  and o.display_name in self._dups)
                 continue
             row = self._build_option_row(o)
             anchor = next((self._rows[x.key] for x in self.card.options[i + 1:]
@@ -536,10 +548,19 @@ class FontCard(CardWidget):
         self._rows: dict[str, QFrame] = {}        # key → 行（reconcile 用）
         self._boxes: dict[str, CheckBox] = {}     # key → 勾选框
         self._metrics: dict[str, CaptionLabel] = {}   # key → 指标文案
+        self._psnames: dict[str, CaptionLabel] = {}   # key → PS 名副行
+        self._dups: set[str] = set()              # 卡内同名碰撞的 display_name
         self._bar_by_key: dict[str, PreviewBar] = {}
+        self._recompute_dups()
         for o in self.card.options:
             self._opt_layout.addWidget(self._build_option_row(o))
         return wrap
+
+    def _recompute_dups(self):
+        counts: dict[str, int] = {}
+        for o in self.card.options:
+            counts[o.display_name] = counts.get(o.display_name, 0) + 1
+        self._dups = {n for n, c in counts.items() if c > 1}
 
     def _build_option_row(self, o) -> QFrame:
         row = QFrame(self)
@@ -594,6 +615,20 @@ class FontCard(CardWidget):
             name_row.addWidget(_pill(m))            # 简繁/字重等：中性灰
         name_row.addStretch(1)
         text.addLayout(name_row)
+        # 同名碰撞行 PS 名副行：台版/港版等真不同字体同中文名（2026-10-31
+        # 用户澄清：PostScript 名不同=不同字体，去重是错案 5f3de6a 已
+        # reset）——卡内 ≥2 行同 display_name 时该行名下显 PostScript 名
+        # （规范身份，版本去重拍板口径）；无碰撞零噪音不占行高。碰撞集
+        # 变化由 _sync_rows 已建行分支就地显隐
+        ps_lab = _MetricsLabel()
+        ps_lab.setObjectName("psname")
+        ps_lab.setFixedWidth(_TEXT_W)
+        ps_lab.setFullText(_PS_PREFIX + (o.entity.psname or "")
+                           if o.entity is not None else "")
+        ps_lab.setVisible(bool(o.entity and o.entity.psname)
+                          and o.display_name in self._dups)
+        self._psnames[o.key] = ps_lab
+        text.addWidget(ps_lab)
         m_lab = _MetricsLabel()
         m_lab.setFixedWidth(_TEXT_W)
         m_lab.setFullText(self._metrics_text(o))
