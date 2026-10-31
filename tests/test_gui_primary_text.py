@@ -132,7 +132,7 @@ def test_primary_icon_follows_accent(qapp):
         return darks, lights
 
     patch_primary_icon()                          # 幂等，main() 同款调用点
-    b = PrimaryPushButton(FIF.PLAY, "替换并保存")
+    b = PrimaryPushButton(FIF.SAVE, "替换并保存")
     b.resize(150, 34)
     icon_rect = QRect(10, 9, 20, 16)              # 图标绘制区（左 padding）
     try:

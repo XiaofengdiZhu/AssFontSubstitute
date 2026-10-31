@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from importlib.resources import files
+from pathlib import Path
 
 import darkdetect
 from PySide6.QtCore import QEvent
@@ -95,8 +95,12 @@ def app_icon() -> QIcon:
     任务栏、启动画面共用；单实例缓存避免重复解码。"""
     global _ICON
     if _ICON is None:
-        _ICON = QIcon(str(files("ass_font_substitute.gui")
-                           .joinpath("assets/icon.ico")))
+        # __file__ 相对路径（与 i18n.translations_dir 同式）：Nuitka
+        # standalone 下 compiled 模块 __file__ 落 dist 内同名相对位置，
+        # 配合 spec 的 include-data-files 即可命中；importlib.resources
+        # files() 对 compiled 包解析不可靠（图标缺失教训 2026-11-01）
+        _ICON = QIcon(str(Path(__file__).resolve().parent
+                          / "assets" / "icon.ico"))
     return _ICON
 
 

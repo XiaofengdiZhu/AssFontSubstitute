@@ -101,7 +101,7 @@ macos.permissions =
 mode = standalone
 
 # specify any extra nuitka arguments
-extra_args = --assume-yes-for-downloads --noinclude-qt-translations --windows-console-mode=disable --noinclude-dlls=qt6quick*.dll --noinclude-dlls=qt6qml*.dll --noinclude-dlls=qt6pdf*.dll --noinclude-dlls=qt6virtualkeyboard*.dll --noinclude-dlls=qt6network*.dll --noinclude-dlls=libcrypto*.dll --noinclude-dlls=libssl*.dll --include-data-files=src/ass_font_substitute/gui/translations/afs_zh-Hant.qm=ass_font_substitute/gui/translations/afs_zh-Hant.qm
+extra_args = --assume-yes-for-downloads --noinclude-qt-translations --windows-console-mode=disable --noinclude-dlls=qt6quick*.dll --noinclude-dlls=qt6qml*.dll --noinclude-dlls=qt6pdf*.dll --noinclude-dlls=qt6virtualkeyboard*.dll --noinclude-dlls=qt6network*.dll --noinclude-dlls=libcrypto*.dll --noinclude-dlls=libssl*.dll --include-data-files=src/ass_font_substitute/gui/translations/afs_zh-Hant.qm=ass_font_substitute/gui/translations/afs_zh-Hant.qm --include-data-files=src/ass_font_substitute/gui/assets/icon.ico=ass_font_substitute/gui/assets/icon.ico
 
 [buildozer]
 

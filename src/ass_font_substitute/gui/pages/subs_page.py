@@ -209,7 +209,7 @@ class SubsPage(QWidget):
         bottom.addStretch(1)
         self.replace_label = CaptionLabel(self.tr("将替换 0 / 0 种字体"))
         bottom.addWidget(self.replace_label)
-        self.btn_apply = PrimaryPushButton(FIF.PLAY, self.tr("替换并保存"))
+        self.btn_apply = PrimaryPushButton(FIF.SAVE, self.tr("替换并保存"))
         self.btn_apply.setEnabled(False)
         self.btn_apply.clicked.connect(self._apply)
         bottom.addWidget(self.btn_apply)
