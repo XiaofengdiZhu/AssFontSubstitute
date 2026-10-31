@@ -11,7 +11,6 @@ name = "ass-font-substitute"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "babel" },
     { name = "fonttools" },
     { name = "freetype-py" },
     { name = "light-ass" },
@@ -23,6 +22,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "babel" },
     { name = "nuitka" },
     { name = "py7zr" },
     { name = "pytest" },
@@ -31,7 +31,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "babel", specifier = ">=2.18.0" },
     { name = "fonttools", specifier = ">=4.53" },
     { name = "freetype-py", specifier = ">=2.4" },
     { name = "light-ass", specifier = ">=0.3" },
@@ -43,6 +42,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "babel", specifier = ">=2.18.0" },
     { name = "nuitka", specifier = ">=4.3.3" },
     { name = "py7zr", specifier = ">=1.1.4" },
     { name = "pytest", specifier = ">=8.0" },

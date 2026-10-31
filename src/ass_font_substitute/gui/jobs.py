@@ -14,8 +14,8 @@ from ass_font_substitute.core.fontindex.store import open_db
 from ass_font_substitute.core.fontindex.store import scan_dir
 from ass_font_substitute.core.fontindex.store import update_index
 from ass_font_substitute.core.models import FontUsage
-from ass_font_substitute.core.similarity.render import render_text_strip
 from ass_font_substitute.core.similarity import search as search_mod
+from ass_font_substitute.core.similarity.render import render_text_strip
 from ass_font_substitute.core.similarity.search import FontSearcher
 
 

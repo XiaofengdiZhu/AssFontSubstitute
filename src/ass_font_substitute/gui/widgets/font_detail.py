@@ -4,7 +4,6 @@ import functools
 import sys
 from datetime import datetime
 
-from babel import Locale
 from PySide6.QtCore import QT_TRANSLATE_NOOP
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtCore import QSize
@@ -31,6 +30,7 @@ from ass_font_substitute.core.fontindex.library import FontEntity
 from ass_font_substitute.core.fontindex.library import load_name_records
 from ass_font_substitute.core.fontindex.library import normalize_name
 from ass_font_substitute.core.fontindex.parser import RECORD_IDS
+from ass_font_substitute.gui import lang_names
 from ass_font_substitute.gui import vm_text
 from ass_font_substitute.gui.name_lang import _UI_LANG_ORDER
 from ass_font_substitute.gui.name_lang import pick_display_name
@@ -105,8 +105,8 @@ _LANG_PRIO = {0x409: 0, 0x804: 1, 0x404: 2, 0xC04: 3}
 
 @functools.cache
 def _lang_display_name(lcid: int, ui: str) -> str | None:
-    """LCID → 以界面语言显示的语言名。babel(CLDR) 跨语言显示名，随
-    app 设置语言而非系统显示语言（GetLocaleInfoW 跟系统走，英文系统
+    """LCID → 以界面语言显示的语言名。CLDR 显示名（lang_names，随
+    app 设置语言而非系统显示语言——GetLocaleInfoW 跟系统走，英文系统
     上中文 UI 会出英文名）；LCID→BCP47 用系统 LCIDToLocaleName 免手
     抄映射。非 Windows/未知 LCID 返回 None 走静态表兜底。"""
     if sys.platform != "win32":
@@ -115,11 +115,7 @@ def _lang_display_name(lcid: int, ui: str) -> str | None:
     buf = ctypes.create_unicode_buffer(64)
     if not ctypes.windll.kernel32.LCIDToLocaleName(lcid, buf, len(buf), 0):
         return None
-    try:
-        loc = Locale.parse(buf.value.replace("-", "_").lower())
-    except Exception:
-        return None
-    return loc.get_display_name(ui) or None
+    return lang_names.display_name(buf.value, ui)
 
 
 def _lang_label(platform: int, lang: int, ui: str = "zh_CN") -> str:
