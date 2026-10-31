@@ -44,7 +44,9 @@ from ass_font_substitute.core.models import FontRecord
 # 此前键直取是几万伪码点：探针判「未标注」、覆盖率全错（文鼎系老字库
 # 实锤，GDI 认这类表所以 Windows 查看器能正常预览）。渲染侧同步按码页
 # 回退（similarity/render.py 自解析 cmap2），不改库结构、只改区间语义。
-SCHEMA_VERSION = 9
+# 绿色软件发布基线重置为 1（拍板 2026-11-01）：旧版本库（v9 及以前）
+# 首启按版本不符走 .bak 备份+全量重建
+SCHEMA_VERSION = 1
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 

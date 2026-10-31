@@ -3,3 +3,8 @@ refs/
 __pycache__/
 .zcode/
 /Data/
+
+# pyside6-deploy 产物
+/deployment/
+/AssFontSubstitute.dist/
+/build.log

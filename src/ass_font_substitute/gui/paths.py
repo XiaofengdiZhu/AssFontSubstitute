@@ -13,7 +13,10 @@ def appdata_dir() -> Path:
     env = os.environ.get("AFS_DATA_DIR")
     if env:
         return Path(env)
-    if getattr(sys, "frozen", False):
+    # 打包判定双口径：PyInstaller 设 sys.frozen；Nuitka standalone 不设
+    # （用各编译模块 globals 的 __compiled__ 标记），漏判会掉进源码分支
+    # 按编译模块 __file__ 数上级——Data 落 exe 目录外一层，不可移植
+    if getattr(sys, "frozen", False) or "__compiled__" in globals():
         return Path(sys.executable).resolve().parent / "Data"
     return Path(__file__).resolve().parents[3] / "Data"
 
