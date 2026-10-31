@@ -79,6 +79,7 @@ class Card:
     variants: set[str] = field(default_factory=set)
     missing: list[str] = field(default_factory=list)   # 未覆盖字符全列（预览截 30 在 UI 层）
     n_missing: int = 0                                # 未覆盖总字数
+    embedded: bool = False                            # 原字体已内嵌进字幕（[Fonts] 段）
     options: list[OptionItem] = field(default_factory=list)
     checked_key: str | None = None
     searching: bool = False
@@ -173,10 +174,16 @@ class SubsVM:
         card = Card(norm_name=usage.norm_name, raw_name=usage.raw_name,
                     kind=cls.kind, style_count=usage.style_count,
                     inline_count=usage.inline_count, n_chars=len(usage.chars),
-                    variants=set(usage.variants))
+                    variants=set(usage.variants),
+                    embedded=usage.embedded)
         self.chars_by_norm[usage.norm_name] = set(usage.chars)
         if cls.kind in ("zero", "missing"):
-            card.options = [OptionItem(KEEP, "保留原字体名")]
+            # missing 卡原字体实际由内嵌字体兜底：标题注「（有内嵌）」
+            # 提醒保留即可，不必从库换（zero 卡无事发生，不加噪音）
+            keep_title = ("保留原字体名（有内嵌）"
+                          if cls.kind == "missing" and usage.embedded
+                          else "保留原字体名")
+            card.options = [OptionItem(KEEP, keep_title)]
             return card
         opts = [self._entity_option(e, usage) for e in cls.entities]
         if cls.kind == "twin" and cls.twin_hit is not None:

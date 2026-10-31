@@ -2031,3 +2031,45 @@ def test_psname_subline_on_same_name_collision(qapp):
     qapp.processEvents()
     assert ps1[0].isVisible()
     fc.deleteLater()
+
+
+def test_embedded_metrics_and_keep_title(qapp, tmp_path, monkeypatch):
+    # 内嵌标注上 UI：keep 卡原字体行第二行尾「· 有内嵌」；missing 卡
+    # 保留行标题「保留原字体名（有内嵌）」
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    from ass_font_substitute.gui.widgets.font_card import _MetricsLabel
+
+    ent = _ent("fp1", "甲字体")
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=1, chars=set("永宇"), variants={"甲字体"},
+                      embedded=True)
+    page._on_result("parse:p.ass", FileParse("p.ass", None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0",
+                    (usage, UsageClass(kind="keep", entities=[ent], coverage=1.0)))
+    card = page.vm.cards[0]
+    assert card.embedded is True
+    fc = page._cards_ui["甲字体"]
+    row = fc._rows["fp1"]
+    fulls = [lab.fullText() for lab in row.findChildren(_MetricsLabel)]
+    assert any(t.endswith("· 有内嵌") for t in fulls), fulls
+
+    # missing 卡：保留行标题带（有内嵌）
+    m_usage = FontUsage(raw_name="乙字体", norm_name="乙字体", style_count=1,
+                        inline_count=0, chars=set("永宇"), variants={"乙字体"},
+                        embedded=True)
+    page._on_result("parse:q.ass", FileParse("q.ass", None, [m_usage], [], []))
+    page._on_result(f"classify:{page._gen}:1",
+                    (m_usage, UsageClass(kind="missing", entities=[], coverage=0.0,
+                                         missing_chars=["永"])))
+    mfc = page._cards_ui["乙字体"]
+    from ass_font_substitute.gui.widgets.font_card import _MetricsLabel
+    from ass_font_substitute.gui.widgets.font_card import _NameLabel
+    names = [lab.fullText() for lab in mfc.findChildren(_NameLabel)]
+    assert any("保留原字体名（有内嵌）" in t for t in names), names
+    # 第二行不与标题矛盾（审查 P1）：内嵌字体播放器直接可用，无回退
+    metrics = [lab.fullText() for lab in mfc.findChildren(_MetricsLabel)]
+    assert any(t == "已内嵌，播放器直接可用" for t in metrics), metrics
+    page.deleteLater()

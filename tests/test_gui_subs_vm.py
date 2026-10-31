@@ -512,3 +512,26 @@ def test_option_display_uses_chain_but_mapping_writes_legacy(vm, tmp_path):
     card.variants = {"Legacy", "legacy"}
     vm.cards = [card]
     assert vm.build_mapping() == {"Legacy": "Legacy", "legacy": "Legacy"}
+
+
+def test_embedded_flag_on_cards(vm_full):
+    # 内嵌标注：missing 卡 KEEP 行标题带（有内嵌）；keep/replace 卡
+    # Card.embedded=True 供指标行追加「· 有内嵌」；zero 卡不带标题后缀
+    vm, ents = _vm_full(vm_full)
+    usage = _usage("不知名字体", "永宇")
+    usage.embedded = True
+    card = vm.make_card(usage, UsageClass("missing", [], 0.0, list("永宇")))
+    assert card.options[0].display_name == "保留原字体名（有内嵌）"
+
+    zero = vm.make_card(usage, UsageClass("zero", [], 1.0, []))
+    assert zero.options[0].display_name == "保留原字体名"
+
+    keep_usage = _usage("黑体", FULL)
+    keep_usage.embedded = True
+    keep_card = vm.make_card(keep_usage, UsageClass("keep", [ents[0]], 1.0, []))
+    assert keep_card.embedded is True
+    assert keep_card.options[0].display_name == "黑体"   # 原字体行标题不带后缀
+
+    plain = _usage("黑体", FULL)
+    plain_card = vm.make_card(plain, UsageClass("keep", [ents[0]], 1.0, []))
+    assert plain_card.embedded is False

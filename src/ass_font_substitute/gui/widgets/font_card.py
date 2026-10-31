@@ -699,13 +699,17 @@ class FontCard(CardWidget):
 
     def _metrics_text(self, o) -> str:
         if o.key == KEEP:
-            return ("播放时由播放器自行回退处理" if self.card.kind == "missing"
-                    else "无对白用字，无需处理")
+            if self.card.kind == "missing":
+                # 内嵌字体随字幕分发，播放器直接可用，不存在回退
+                return ("已内嵌，播放器直接可用" if self.card.embedded
+                        else "播放时由播放器自行回退处理")
+            return "无对白用字，无需处理"
         if "原字体" in o.badges:
             n_missing = round(self.card.n_chars * (1 - (o.coverage or 0)))
+            tail = " · 有内嵌" if self.card.embedded else ""   # [Fonts] 段已带此字体
             if n_missing > 0:
-                return f"覆盖 {_pct(o.coverage)} · 未覆盖 {n_missing} 字"
-            return f"覆盖 {_pct(o.coverage)} · 无需替换"
+                return f"覆盖 {_pct(o.coverage)} · 未覆盖 {n_missing} 字{tail}"
+            return f"覆盖 {_pct(o.coverage)} · 无需替换{tail}"
         parts = [p for p in (
             f"相似 {_pct(o.similarity)}" if o.similarity is not None else None,
             f"覆盖 {_pct(o.coverage)}" if o.coverage is not None else None,

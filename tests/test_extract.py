@@ -127,3 +127,59 @@ def test_transform_fn_comment_reference_only(tmp_path):
     assert "華康註解換體" in by
     assert by["華康註解換體"].inline_count == 0
     assert len(by["華康註解換體"].chars) == 0
+
+
+def test_embedded_font_flagged(tmp_path):
+    # [Fonts] 段 fontname: 行=内嵌字体：命中引用桶标 embedded=True，
+    # 未引用的内嵌字体不建桶（无卡可标）；段外 "fontname:" 字样不算
+    emb = ("\n[Fonts]\n"
+           "fontname: 華康內嵌體W5.TTF\n"
+           "AAAB3NzaC1kc3MAAA\n"
+           "fontname: 無人引用.ttf\n"
+           "BBB\n")
+    line = "Dialogue: 0,0:00:12.00,0:00:14.00,Main,,0,0,0,,{\\fn華康內嵌體W5}嵌字"
+    r = extract_usages(_write(tmp_path, ASS + line + "\n" + emb))
+    by = {u.norm_name: u for u in r.usages}
+    assert by["華康內嵌體w5"].embedded is True
+    assert by["華康主體w5"].embedded is False
+    assert by["華康內嵌體w5"].inline_count == 1   # 引用计数照常
+
+
+def test_embedded_scan_section_gated(tmp_path):
+    # 非 [Fonts] 段的 fontname: 字样不算内嵌（如 [Events] 正文）
+    line = ("Dialogue: 0,0:00:12.00,0:00:14.00,Main,,0,0,0,,"
+            "fontname: 華康主體W5.TTF")
+    r = extract_usages(_write(tmp_path, ASS + line + "\n"))
+    by = {u.norm_name: u for u in r.usages}
+    assert by["華康主體w5"].embedded is False
+
+
+def test_merge_embedded_or(tmp_path):
+    # 跨文件合并：任一文件内嵌即 True（OR 口径）
+    a = extract_usages(_write(tmp_path, ASS, name="a.ass"))
+    b = extract_usages(_write(tmp_path, ASS, name="b.ass"))
+    assert all(u.embedded is False for u in merge_usages([a, b]))
+    emb = ("\n[Fonts]\nfontname: 華康主體W5.TTF\nAA\n")
+    c = extract_usages(_write(tmp_path, ASS + emb, name="c.ass"))
+    m = {u.norm_name: u for u in merge_usages([a, c])}
+    assert m["華康主體w5"].embedded is True
+
+
+def test_merge_embedded_or_order_independent(tmp_path):
+    # 审查 P0：merge 首建桶分支曾丢 embedded——内嵌文件排前/单文件都丢
+    emb = "\n[Fonts]\nfontname: 華康主體W5.TTF\nAA\n"
+    c = extract_usages(_write(tmp_path, ASS + emb, name="c.ass"))
+    a = extract_usages(_write(tmp_path, ASS, name="a.ass"))
+    single = {u.norm_name: u for u in merge_usages([c])}    # 单文件
+    assert single["華康主體w5"].embedded is True
+    m = {u.norm_name: u for u in merge_usages([c, a])}          # 内嵌在前
+    assert m["華康主體w5"].embedded is True
+
+
+def test_embedded_extension_strip_known_only(tmp_path):
+    # 只剥已知字体扩展：含点号版本名（"X 1.02"）不得被截成 "X 1"
+    emb = "\n[Fonts]\nfontname: Version Font 1.02.ttf\nAA\n"
+    line = "Dialogue: 0,0:00:12.00,0:00:14.00,Main,,0,0,0,,{\\fnVersion Font 1.02}嵌字"
+    r = extract_usages(_write(tmp_path, ASS + line + "\n" + emb))
+    by = {u.norm_name: u for u in r.usages}
+    assert by["version font 1.02"].embedded is True

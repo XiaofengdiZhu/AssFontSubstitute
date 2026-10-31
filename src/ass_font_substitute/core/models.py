@@ -131,6 +131,7 @@ class FontUsage:
     inline_count: int
     chars: set[str] = field(default_factory=set)
     variants: set[str] = field(default_factory=set)   # 同桶全部原始拼写（写回映射键全集）
+    embedded: bool = False                            # 该字体已内嵌进字幕 [Fonts] 段
 
 
 @dataclass

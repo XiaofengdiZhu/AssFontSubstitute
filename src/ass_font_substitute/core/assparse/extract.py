@@ -13,6 +13,7 @@ from light_ass.curly.tags import TransformTag
 from ass_font_substitute.core.assparse.encoding import ALIAS_BOM
 from ass_font_substitute.core.assparse.encoding import EncodingDetectError
 from ass_font_substitute.core.assparse.encoding import detect_encoding
+from ass_font_substitute.core.assparse.rewrite import _bom_and_codec
 from ass_font_substitute.core.fontindex.library import normalize_name
 from ass_font_substitute.core.models import FontUsage
 
@@ -61,22 +62,51 @@ def _fn_name(tag: FontNameTag) -> str:
     return "" if name == "0" else name  # 模板原有 value != "0" 守卫
 
 
+def _embedded_fonts(data: bytes, enc: str) -> list[str]:
+    """扫 [Fonts] 段 fontname: 行（内嵌字体名，剥扩展、归一、去重）。
+    只认该段内行——正文的 "fontname:" 字样不算。解码失败按无内嵌。"""
+    bom_b, codec = _bom_and_codec(data, enc)
+    try:
+        text = data[len(bom_b):].decode(codec)
+    except UnicodeDecodeError:
+        return []
+    section = ""
+    out: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        low = s.lower()
+        if s.startswith("[") and s.endswith("]"):
+            section = low
+            continue
+        if section != "[fonts]" or not low.startswith("fontname:"):
+            continue
+        name = s[len("fontname:"):].strip()
+        # 只剥已知字体扩展：含点号的名字（"X 1.02" 无扩展）不得被截
+        if name.lower().endswith((".ttf", ".otf", ".ttc")):
+            name = name.rsplit(".", 1)[0]
+        if name:
+            out.append(normalize_name(name))
+    return list(dict.fromkeys(out))
+
+
 def extract_usages(path: Path) -> ExtractResult:
     path = Path(path)
+    data = path.read_bytes()
     try:
-        enc = detect_encoding(path.read_bytes())
+        enc = detect_encoding(data)
     except EncodingDetectError as e:
         return ExtractResult(parse_error=str(e))
+    embedded = _embedded_fonts(data, enc)
     try:
         # 畸形的 Style/Event 行在 strict=False 下仍可能抛错，记录而非中断（批量场景）
         doc = Document.load(str(path), encoding=ALIAS_BOM.get(enc, enc),
                             strict=False)
     except Exception as e:
         return ExtractResult(parse_error=f"{type(e).__name__}: {e}")
-    return _extract(doc)
+    return _extract(doc, embedded)
 
 
-def _extract(doc: Document) -> ExtractResult:
+def _extract(doc: Document, embedded: list[str] | None = None) -> ExtractResult:
     buckets: dict[str, FontUsage] = {}
     style_fonts = {name: st.fontname for name, st in doc.styles.items()}
     # VSFilter/libass 对样式名不敏感匹配：`main` 引用 `Main` 样式按
@@ -146,6 +176,12 @@ def _extract(doc: Document) -> ExtractResult:
             for name in tf_names:
                 bucket(name).chars.update(line_chars)
 
+    if embedded:
+        emb = set(embedded)
+        for u in buckets.values():
+            if u.norm_name in emb:
+                u.embedded = True
+
     return ExtractResult(usages=list(buckets.values()),
                          unknown_styles=sorted(used_styles),
                          invalid_styles=invalid_styles)
@@ -160,11 +196,13 @@ def merge_usages(results: list[ExtractResult | list[FontUsage]]) -> list[FontUsa
             if u.norm_name not in out:
                 out[u.norm_name] = FontUsage(u.raw_name, u.norm_name,
                                              u.style_count, u.inline_count,
-                                             set(u.chars), set(u.variants))
+                                             set(u.chars), set(u.variants),
+                                             u.embedded)
             else:
                 m = out[u.norm_name]
                 m.style_count += u.style_count
                 m.inline_count += u.inline_count
                 m.chars |= u.chars
                 m.variants |= u.variants
+                m.embedded = m.embedded or u.embedded
     return list(out.values())
