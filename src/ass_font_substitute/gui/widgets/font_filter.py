@@ -152,18 +152,39 @@ class FontFilterBar(QWidget):
         self.fill()
 
     def fill(self):
-        """按 pvm 现有实体重填下拉选项（实体集装载/变化后由页面调用）。"""
+        """按 pvm 现有实体重填下拉选项（实体集装载/变化后由页面调用）。
+
+        重填后按 pvm 现值回选（审查二轮 P1）：blockSignals 清空重填会把
+        显示复位到「全部」而 pvm 筛选保留——列表按旧值筛、下拉显示失步，
+        用户再动任意下拉时 _apply 全量回写把保留的筛选静默清掉。pvm 值
+        已不在新选项集（实体变化后选项收窄）时回「全部」并复位对应 pvm
+        字段（调用方 fill 后自行重载列表，无需发 filtersChanged）。"""
         # 显示译文、userData 存源值（显示串随界面语言变，筛选按源值）；
         # 首项「全部」无 userData = 不筛
-        for cb, values in ((self.cb_cat, self.pvm.categories()),
-                           (self.cb_script, script_filter.options(self.pvm)),
-                           (self.cb_weight, self.pvm.weight_buckets())):
+        for cb, values, cur in (
+                (self.cb_cat, self.pvm.categories(), self.pvm.category),
+                (self.cb_script, script_filter.options(self.pvm),
+                 script_filter.option_of(self.pvm.script)),
+                (self.cb_weight, self.pvm.weight_buckets(),
+                 None if self.pvm.weight is None else int(self.pvm.weight))):
             cb.blockSignals(True)
             cb.clear()
             cb.addItem(self.tr("全部"))
             for v in values:
                 cb.addItem(vm_text.text(str(v)), userData=v)
+            idx = cb.findData(cur) if cur is not None else 0
+            cb.setCurrentIndex(idx if idx >= 0 else 0)
             cb.blockSignals(False)
+            if cur is not None and idx < 0:     # 失效筛选值随显示复位
+                if cb is self.cb_cat:
+                    self.pvm.category = None
+                elif cb is self.cb_script:
+                    self.pvm.script = None
+                else:
+                    self.pvm.weight = None
+        # 回选/复位期间 currentTextChanged 被 block——简繁按钮删除线字体
+        # 显式补同步（复位到「全部」曾残留删除线）
+        self.cb_script.sync_strike()
 
     def _apply(self):
         self.pvm.category = self.cb_cat.currentData()

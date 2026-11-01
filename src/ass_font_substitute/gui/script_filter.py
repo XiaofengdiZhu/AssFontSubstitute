@@ -36,6 +36,12 @@ class StrikeTailComboBox(_ComboBox):
             f.setStrikeOut(on)
             self.setFont(f)
 
+    def sync_strike(self) -> None:
+        """按当前按钮文本补一次删除线同步：fill() 重填回选/复位期间信号
+        被 block、clear/setText 也不发 currentTextChanged——曾留「全部」
+        带删除线的残留（审查二轮 P1 审查发现）。"""
+        self._sync_button_strike(self.currentText())
+
     def _createComboMenu(self):
         menu = super()._createComboMenu()
         view = menu.view
@@ -64,3 +70,11 @@ def pick(cb) -> str | None:
     键取 userData（源值）；无 userData 的项（全部/裸 addItems）按文本兜底。"""
     data = cb.currentData()
     return _SCRIPT_VALUES.get(data if data is not None else cb.currentText())
+
+
+def option_of(filter_value: str | None) -> str | None:
+    """pvm.script 筛选值 → 下拉选项源值（pick 的反向；全部/空 → None，
+    未知值 → None）。fill() 重填后按 pvm 现值回选用。"""
+    if filter_value is None:
+        return None
+    return {v: k for k, v in _SCRIPT_VALUES.items()}.get(filter_value)

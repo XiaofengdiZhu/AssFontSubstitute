@@ -296,3 +296,145 @@ def test_reco_job_executes_pull_loop(qapp, tmp_path):
     out2 = _reco_job(ctx, set("永中"), 0.8, "t2s",
                      cancel={"cancelled": True})
     assert out2 is None
+
+
+def test_filter_bar_fill_reselects_pvm_filters(qapp):
+    # 审查二轮 P1：fill() blockSignals 清空重填曾把显示复位「全部」而
+    # pvm 筛选保留——列表按旧值筛、下拉失步，再动任意下拉时 _apply 全量
+    # 回写把保留筛选静默清掉。重填后按 pvm 现值回选；值失效（选项收窄）
+    # 时回「全部」并复位 pvm 字段
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.core.fontindex.library import FontEntity
+    from ass_font_substitute.core.models import CmapRanges
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_filter import FontFilterBar
+
+    def mk(fp, name, cat, script, weight):
+        return FontEntity(fingerprint=fp, display_name=name, aliases=(name,),
+                          psname=name, version=(1,), weight=weight, width=5,
+                          italic=False, script=script, category=cat,
+                          cmap=CmapRanges.from_chars([ord("永"), ord("宇")]),
+                          dir_path="d", rel_path=fp + ".ttf", face_index=0)
+
+    pvm = PreviewVM()
+    host = QWidget()
+    bar = FontFilterBar(pvm, parent=host, weight_filter=True)
+    # 回选/复位都只落 pvm，不发 filtersChanged（调用方 fill 后自行重载）
+    fired = []
+    bar.filtersChanged.connect(lambda: fired.append(1))
+    pvm.set_entities([mk("a", "甲", "黑", "简", 400),
+                      mk("b", "乙", "宋", "繁", 700)])
+    bar.fill()
+    assert not fired
+    fired.clear()
+    # 用户筛选：宋 / 繁 / 700（currentIndexChanged 即写 pvm）
+    bar.cb_cat.setCurrentIndex(bar.cb_cat.findData("宋"))
+    bar.cb_script.setCurrentIndex(bar.cb_script.findData("繁"))
+    bar.cb_weight.setCurrentIndex(bar.cb_weight.findData(700))
+    assert (pvm.category, pvm.script, pvm.weight) == ("宋", "繁", 700)
+    # 实体集重填（同集重灌）：显示回选 pvm 现值，不再失步
+    fired.clear()
+    bar.fill()
+    assert not fired
+    assert bar.cb_cat.currentData() == "宋"
+    assert bar.cb_script.currentData() == "繁"
+    assert bar.cb_weight.currentData() == 700
+    assert (pvm.category, pvm.script, pvm.weight) == ("宋", "繁", 700)
+    # 选项收窄（宋类消失，繁/700 仍在）：category 显示回「全部」并复位
+    # pvm；script/weight 保留回选
+    pvm.set_entities([mk("b", "乙", "黑", "繁", 700)])
+    bar.fill()
+    assert not fired
+    assert bar.cb_cat.currentIndex() == 0
+
+
+def test_filter_bar_fill_unlabeled_reselect_and_filter_reset(qapp):
+    # 「未标注」筛选值经 option_of 反查回选（userData=NO_SCRIPT 源值）；
+    # script/weight 筛选值失效（选项收窄）时同 category 复位
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.core.fontindex.library import FontEntity
+    from ass_font_substitute.core.models import CmapRanges
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.widgets.font_filter import FontFilterBar
+
+    def mk(fp, name, script, weight):
+        return FontEntity(fingerprint=fp, display_name=name, aliases=(name,),
+                          psname=name, version=(1,), weight=weight, width=5,
+                          italic=False, script=script, category="黑",
+                          cmap=CmapRanges.from_chars([ord("永"), ord("宇")]),
+                          dir_path="d", rel_path=fp + ".ttf", face_index=0)
+
+    host = QWidget()
+
+    # 未标注选项在集内：fill 重灌后按 pvm.script="未标注" 回选「简/繁」项
+    pvm = PreviewVM()
+    bar = FontFilterBar(pvm, parent=host, weight_filter=True)
+    pvm.set_entities([mk("a", "甲", "未标注", 400),
+                      mk("b", "乙", "繁", 700)])
+    bar.fill()
+    bar.cb_script.setCurrentIndex(bar.cb_script.findData("简/繁"))
+    assert pvm.script == "未标注"
+    bar.fill()
+    assert bar.cb_script.currentData() == "简/繁"
+    assert pvm.script == "未标注"
+
+    # 简筛被收窄掉（简实体消失）：显示回「全部」并复位 pvm.script
+    pvm2 = PreviewVM()
+    bar2 = FontFilterBar(pvm2, parent=host, weight_filter=True)
+    pvm2.set_entities([mk("a", "甲", "简", 400),
+                       mk("b", "乙", "繁", 700)])
+    bar2.fill()
+    pvm2.script = "简"
+    bar2.cb_script.setCurrentIndex(bar2.cb_script.findData("简"))
+    pvm2.set_entities([mk("b", "乙", "繁", 700)])
+    bar2.fill()
+    assert bar2.cb_script.currentIndex() == 0
+    assert pvm2.script is None
+
+    # 字重桶被收窄掉：显示回「全部」并复位 pvm.weight
+    pvm3 = PreviewVM()
+    bar3 = FontFilterBar(pvm3, parent=host, weight_filter=True)
+    pvm3.set_entities([mk("a", "甲", "简", 400),
+                       mk("b", "乙", "繁", 700)])
+    bar3.fill()
+    pvm3.weight = 700
+    bar3.cb_weight.setCurrentIndex(bar3.cb_weight.findData(700))
+    pvm3.set_entities([mk("a", "甲", "简", 400)])
+    bar3.fill()
+    assert bar3.cb_weight.currentIndex() == 0
+    assert pvm3.weight is None
+
+
+def test_filter_bar_strike_resets_after_fill(qapp):
+    # 审查发现：fill 回选/复位期间 currentTextChanged 被 block，简繁按钮
+    # 删除线字体残留——「未标注」筛选后库重载未标注清零，「全部」曾带
+    # 删除线渲染
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.core.fontindex.library import FontEntity
+    from ass_font_substitute.core.models import CmapRanges
+    from ass_font_substitute.gui.preview_vm import PreviewVM
+    from ass_font_substitute.gui.script_filter import NO_SCRIPT
+    from ass_font_substitute.gui.widgets.font_filter import FontFilterBar
+
+    def mk(fp, name, script):
+        return FontEntity(fingerprint=fp, display_name=name, aliases=(name,),
+                          psname=name, version=(1,), weight=400, width=5,
+                          italic=False, script=script, category="黑",
+                          cmap=CmapRanges.from_chars([ord("永")]),
+                          dir_path="d", rel_path=fp + ".ttf", face_index=0)
+
+    pvm = PreviewVM()
+    host = QWidget()
+    bar = FontFilterBar(pvm, parent=host, weight_filter=False)
+    pvm.set_entities([mk("a", "甲", "未标注")])
+    bar.fill()
+    bar.cb_script.setCurrentIndex(bar.cb_script.findData(NO_SCRIPT))
+    assert bar.cb_script.font().strikeOut() is True
+    # 库重载后未标注消失：复位「全部」，删除线必须同步摘掉
+    pvm.set_entities([mk("b", "乙", "简")])
+    bar.fill()
+    assert bar.cb_script.currentIndex() == 0
+    assert bar.cb_script.font().strikeOut() is False
