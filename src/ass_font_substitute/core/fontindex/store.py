@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import sqlite3
+import struct
 import zlib
 from collections.abc import Callable
 from collections.abc import Iterator
@@ -45,8 +46,12 @@ from ass_font_substitute.core.models import FontRecord
 # 实锤，GDI 认这类表所以 Windows 查看器能正常预览）。渲染侧同步按码页
 # 回退（similarity/render.py 自解析 cmap2），不改库结构、只改区间语义。
 # 绿色软件发布基线重置为 1（拍板 2026-11-01）：旧版本库（v9 及以前）
-# 首启按版本不符走 .bak 备份+全量重建
-SCHEMA_VERSION = 1
+# 首启按版本不符走 .bak 备份+全量重建。
+# v2：fonts/fingerprints 加实例维度——fonts 表新增 inst_index（fvar 命名
+# 实例序号，静态行 0）与 var_axes BLOB（struct '<nf'，静态行 NULL），唯一
+# 键放宽为 (rel_path, face_index, inst_index)；fingerprints 主键同步三元组
+# （inst_index NOT NULL DEFAULT 0，缺列 INSERT 落 0 与静态行兼容）。
+SCHEMA_VERSION = 2
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 
@@ -64,12 +69,14 @@ CREATE TABLE IF NOT EXISTS fonts(
   version TEXT, aliases TEXT, weight INTEGER, width INTEGER, italic INTEGER,
   cmap_id INTEGER NOT NULL, script TEXT, category TEXT, display_name TEXT,
   family_names TEXT, name_langs TEXT, name_records BLOB,
-  UNIQUE(rel_path, face_index));
+  inst_index INTEGER NOT NULL DEFAULT 0, var_axes BLOB,
+  UNIQUE(rel_path, face_index, inst_index));
 CREATE TABLE IF NOT EXISTS bad(
   rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, reason TEXT);
 CREATE TABLE IF NOT EXISTS fingerprints(
-  rel_path TEXT, face_index INTEGER, mtime_ns INTEGER, algo INTEGER, fp TEXT,
-  PRIMARY KEY(rel_path, face_index));
+  rel_path TEXT, face_index INTEGER, inst_index INTEGER NOT NULL DEFAULT 0,
+  mtime_ns INTEGER, algo INTEGER, fp TEXT,
+  PRIMARY KEY(rel_path, face_index, inst_index));
 """
 
 
@@ -268,8 +275,8 @@ def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
             conn.execute(
                 "INSERT INTO fonts(rel_path,face_index,psname,version,aliases,"
                 "weight,width,italic,cmap_id,script,category,display_name,"
-                "family_names,name_langs,name_records) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "family_names,name_langs,name_records,inst_index,var_axes) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (rel, r.face_index, r.psname,
                  json.dumps(r.version) if r.version else None,
                  json.dumps(r.aliases, ensure_ascii=False),
@@ -279,10 +286,15 @@ def _apply_result(conn: sqlite3.Connection, rel: str, st: os.stat_result,
                  json.dumps(r.name_langs, ensure_ascii=False),
                  zlib.compress(
                      json.dumps(r.name_records, ensure_ascii=False)
-                     .encode("utf-8"), 1)))
+                     .encode("utf-8"), 1),
+                 r.inst_index,
+                 struct.pack(f"<{len(r.var_axes)}f", *r.var_axes)
+                 if r.var_axes else None))
             conn.execute(
-                "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
-                (rel, r.face_index, st.st_mtime_ns, FP_ALGO,
+                "INSERT OR REPLACE INTO fingerprints"
+                "(rel_path,face_index,inst_index,mtime_ns,algo,fp) "
+                "VALUES (?,?,?,?,?,?)",
+                (rel, r.face_index, r.inst_index, st.st_mtime_ns, FP_ALGO,
                  fps[i] if fps is not None else
                  fingerprint_of(r.aliases, r.cmap, r.weight, r.width,
                                 r.italic)))
@@ -455,14 +467,24 @@ def stats(conn: sqlite3.Connection) -> dict:
 
 def load_font_rows(conn: sqlite3.Connection) -> Iterator[tuple]:
     """cmap 列 = zlib 压缩的 CmapRanges.to_bytes()（v4 去重存储，
-    消费方解压；同 blob 解压多次的调用方建议 memo 化）。"""
-    yield from conn.execute(
+    消费方解压；同 blob 解压多次的调用方建议 memo 化）。
+    列序：rel_path(0) face_index(1) psname(2) version(3) aliases(4)
+    display_name(5) family_names(6) name_langs(7) weight(8) width(9)
+    italic(10) cmap blob(11) script(12) category(13) size(14) mtime(15)
+    inst_index(16) var_axes(17)——v2 追加行尾两列，var_axes BLOB（struct
+    '<nf'）还原 tuple，NULL（静态行）→ ()。"""
+    for row in conn.execute(
             "SELECT f.rel_path, f.face_index, f.psname, f.version, f.aliases, "
             "f.display_name, f.family_names, f.name_langs, f.weight, "
             "f.width, f.italic, "
-            "cd.data, f.script, f.category, fi.size, fi.mtime_ns FROM fonts f "
+            "cd.data, f.script, f.category, fi.size, fi.mtime_ns, "
+            "f.inst_index, f.var_axes FROM fonts f "
             "JOIN files fi USING(rel_path) "
-            "JOIN cmap_data cd ON cd.id = f.cmap_id")
+            "JOIN cmap_data cd ON cd.id = f.cmap_id"):
+        blob = row[17]
+        axes = (struct.unpack(f"<{len(blob) // 4}f", blob)
+                if blob is not None else ())
+        yield (*row[:17], axes)
 
 
 __all__ = [

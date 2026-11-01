@@ -138,12 +138,14 @@ class LibraryIndex:
         （坏块穿透到解压/JSON 层），故这里捕 Exception。"""
         conn = open_db(d / "fontindex.db")
         try:
-            cached = {(r[0], r[1]): (r[2], r[3]) for r in conn.execute(
-                "SELECT rel_path, face_index, mtime_ns, fp FROM fingerprints "
-                "WHERE algo=?", (FP_ALGO,))}
+            # v2：缓存键含 inst_index（同文件各实例行 face_index 相同，只按
+            # (rel, fi) 键会互相串指纹）；实例维度的实体接线在后续任务
+            cached = {(r[0], r[1], r[2]): (r[3], r[4]) for r in conn.execute(
+                "SELECT rel_path, face_index, inst_index, mtime_ns, fp "
+                "FROM fingerprints WHERE algo=?", (FP_ALGO,))}
             writeback = []
             for (rel, fi, ps, ver, al, disp, fam, nl, w, wd, it, cmb,
-                 script, cat, size, mtime) in load_font_rows(conn):
+                 script, cat, size, mtime, ix, _vax) in load_font_rows(conn):
                 aliases = tuple(json.loads(al))
                 version = tuple(json.loads(ver)) if ver else None
                 family = tuple(json.loads(fam)) if fam else ()
@@ -156,22 +158,24 @@ class LibraryIndex:
                 if cmap is None:
                     cmap = CmapRanges.from_bytes(zlib.decompress(cmb))
                     memo[cmb] = cmap
-                hit = cached.get((rel, fi))
+                hit = cached.get((rel, fi, ix))
                 if hit is not None and hit[0] == mtime:
                     fp = hit[1]
                 else:
                     # 缓存缺失（旧库/新文件/mtime 变化）→ 现算并回写
                     fp = fingerprint_of(list(aliases), cmap, w, wd, bool(it))
-                    writeback.append((rel, fi, mtime, fp))
+                    writeback.append((rel, fi, ix, mtime, fp))
                 raw.append((di, rel, fi, ps, version, aliases, disp, family,
                             name_langs, w, wd, bool(it), script, cat, cmap,
                             fp, size, mtime))
             if writeback:
                 with conn:
                     conn.executemany(
-                        "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
-                        [(rel, fi, mtime, FP_ALGO, fp)
-                         for rel, fi, mtime, fp in writeback])
+                        "INSERT OR REPLACE INTO fingerprints"
+                        "(rel_path,face_index,inst_index,mtime_ns,algo,fp) "
+                        "VALUES (?,?,?,?,?,?)",
+                        [(rel, fi, ix, mtime, FP_ALGO, fp)
+                         for rel, fi, ix, mtime, fp in writeback])
         finally:
             conn.close()
 

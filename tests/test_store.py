@@ -174,7 +174,9 @@ def test_schema_v2_with_xxh_column_migrates(tmp_path):
       rel_path TEXT, face_index INTEGER, xxh TEXT, algo INTEGER, fp TEXT,
       PRIMARY KEY(rel_path, face_index));
     """)
-    old.execute("INSERT INTO schema_version VALUES (2)")
+    # 历史编号 v2（xxh 时代）在新发布基线下属任意旧版（基线重置为 1 后
+    # 现行版本已用到 2），改标 1 触发版本不符——旧形状库照常备份重建
+    old.execute("INSERT INTO schema_version VALUES (1)")
     old.execute("INSERT INTO files VALUES ('v2.ttf', 1, 1, 'deadbeef')")
     old.commit()
     old.close()
@@ -187,6 +189,130 @@ def test_schema_v2_with_xxh_column_migrates(tmp_path):
     assert bak.execute("SELECT xxh FROM files").fetchone()[0] == "deadbeef"
     bak.close()
     conn.close()
+
+
+_VF_AXES = [{"name": "Weight", "tag": "wght",
+             "min": 300, "default": 400, "max": 900}]
+_VF_INSTANCES = [{"name": "Light", "location": {"wght": 300}},
+                 {"name": "Black", "location": {"wght": 900}}]
+
+
+def test_update_index_persists_instances(tmp_path):
+    # v2：VF 解析出的默认行+命名实例行连同 inst_index/var_axes 入库，
+    # fingerprints 主键三元组 (rel_path, face_index, inst_index) 齐备
+    import struct
+
+    from tests.fonts import build_vf
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_vf(d / "vf.ttf", "永", family="变化體", axes=_VF_AXES,
+             instances=_VF_INSTANCES)
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    rows = conn.execute(
+        "SELECT inst_index, weight, var_axes FROM fonts ORDER BY inst_index"
+    ).fetchall()
+    assert [r[0] for r in rows] == [0, 1, 2]
+    # 默认行：inst_index=0、var_axes 为 NULL（空元组不占库）
+    assert rows[0][2] is None
+    light = next(r for r in rows if r[0] == 1)
+    assert light[1] == 300
+    assert struct.unpack("<1f", light[2]) == (300.0,)
+    black = next(r for r in rows if r[0] == 2)
+    assert black[1] == 900
+    assert struct.unpack("<1f", black[2]) == (900.0,)
+    # 指纹预计算逐实例对齐（三行指纹互异）
+    fps = conn.execute(
+        "SELECT inst_index, fp FROM fingerprints WHERE rel_path='vf.ttf' "
+        "ORDER BY inst_index").fetchall()
+    assert [r[0] for r in fps] == [0, 1, 2]
+    assert len({r[1] for r in fps}) == 3
+
+
+def test_rescan_same_file_idempotent(tmp_path):
+    # 同文件重扫：UNIQUE(rel_path, face_index, inst_index) 冲突不炸，
+    # 行数不翻倍（_apply_result 先 DELETE 再插，天然幂等——回归锁）
+    from tests.fonts import build_vf
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_vf(d / "vf.ttf", "永", family="变化體", axes=_VF_AXES,
+             instances=_VF_INSTANCES)
+    conn = open_db(d / "fontindex.db")
+    assert update_index(d, conn).fonts == 3
+    import os
+    os.utime(d / "vf.ttf")          # mtime 变 → changed → 重灌
+    assert update_index(d, conn).changed == 1
+    assert stats(conn)["fonts"] == 3
+    assert conn.execute(
+        "SELECT COUNT(*) FROM fingerprints WHERE rel_path='vf.ttf'"
+    ).fetchone()[0] == 3
+    update_index(d, conn, force=True)   # 强制全量重灌同锁
+    assert stats(conn)["fonts"] == 3
+    assert conn.execute(
+        "SELECT COUNT(*) FROM fingerprints WHERE rel_path='vf.ttf'"
+    ).fetchone()[0] == 3
+
+
+def test_v1_db_backed_up_and_rebuilt(tmp_path):
+    # v1（无实例维度）旧库：版本不符 → .bak 备份（覆盖既有）+ v2 全量重建
+    d = tmp_path / "lib"
+    d.mkdir()
+    db = d / "fontindex.db"
+    old = sqlite3.connect(db)
+    old.executescript("""
+    CREATE TABLE IF NOT EXISTS schema_version(v INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS files(
+      rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER);
+    CREATE TABLE IF NOT EXISTS cmap_data(
+      id INTEGER PRIMARY KEY, data BLOB NOT NULL UNIQUE);
+    CREATE TABLE IF NOT EXISTS fonts(
+      id INTEGER PRIMARY KEY, rel_path TEXT, face_index INTEGER, psname TEXT,
+      version TEXT, aliases TEXT, weight INTEGER, width INTEGER, italic INTEGER,
+      cmap_id INTEGER NOT NULL, script TEXT, category TEXT, display_name TEXT,
+      family_names TEXT, name_langs TEXT, name_records BLOB,
+      UNIQUE(rel_path, face_index));
+    CREATE TABLE IF NOT EXISTS bad(
+      rel_path TEXT PRIMARY KEY, size INTEGER, mtime_ns INTEGER, reason TEXT);
+    CREATE TABLE IF NOT EXISTS fingerprints(
+      rel_path TEXT, face_index INTEGER, mtime_ns INTEGER, algo INTEGER, fp TEXT,
+      PRIMARY KEY(rel_path, face_index));
+    """)
+    old.execute("INSERT INTO schema_version VALUES (1)")
+    old.execute("INSERT INTO files VALUES ('old.ttf', 1, 1)")
+    old.commit()
+    old.close()
+    (d / "fontindex.db.bak").write_bytes(b"stale backup")
+    build_font(d / "a.ttf", chars="永", family="新體")
+    conn = open_db(db)                    # 不得抛 IndexSchemaError
+    assert conn.execute("SELECT v FROM schema_version").fetchone()[0] \
+        == SCHEMA_VERSION
+    assert update_index(d, conn).added == 1
+    assert stats(conn)["fonts"] == 1
+    bak = sqlite3.connect(d / "fontindex.db.bak")
+    assert bak.execute("SELECT v FROM schema_version").fetchone()[0] == 1
+    assert bak.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 1
+    bak.close()
+
+
+def test_load_font_rows_instance_columns(tmp_path):
+    # load_font_rows 行尾追加 inst_index(16)/var_axes(17)：var_axes BLOB
+    # 还原 tuple，NULL（静态行）→ ()
+    from ass_font_substitute.core.fontindex.store import load_font_rows
+    from tests.fonts import build_vf
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_vf(d / "vf.ttf", "永", family="变化體", axes=_VF_AXES,
+             instances=_VF_INSTANCES)
+    build_font(d / "s.ttf", chars="永", family="静體")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    got = {}
+    for row in load_font_rows(conn):
+        got[(row[0], row[16])] = row[17]
+    assert got[("vf.ttf", 1)] == (300.0,)
+    assert got[("vf.ttf", 2)] == (900.0,)
+    assert got[("vf.ttf", 0)] == ()
+    assert got[("s.ttf", 0)] == ()
 
 
 def test_whitelist_and_self_exclude(tmp_path):
