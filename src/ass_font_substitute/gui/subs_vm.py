@@ -573,10 +573,12 @@ class SubsVM:
         return Path(path).with_name(Path(path).stem + self._settings.get("save_suffix"))
 
     def pending_out_conflicts(self) -> list[str]:
-        """另存目标已存在的勾选文件（覆盖原文件模式无冲突）。"""
-        return [str(self._out_path(f.path)) for f in self.checked_parses()
+        """另存目标已存在的勾选文件（覆盖原文件模式无冲突）。目标与源
+        重合（后缀曾被设 .ass 的存量档）也算冲突，走确认流程兜底。"""
+        return [str(op) for f in self.checked_parses()
                 if not self._settings.get("overwrite_default")
-                and self._out_path(f.path).exists()]
+                and (op := self._out_path(f.path))
+                and (op.exists() or op == Path(f.path))]
 
     def apply_files(self, overwrite_confirm: bool = False) -> list:
         """逐勾选文件写回（jobs.apply_to_file）。另存目标已存在且未确认 →
@@ -585,8 +587,9 @@ class SubsVM:
         overwrite = bool(self._settings.get("overwrite_default"))
         out = []
         for f in self.checked_parses():
+            op = self._out_path(f.path)
             if not overwrite and not overwrite_confirm \
-                    and self._out_path(f.path).exists():
+                    and (op.exists() or op == Path(f.path)):
                 out.append(ApplyFileResult(f.path, error="exists"))
                 continue
             out.append(apply_to_file(f.path, mapping,

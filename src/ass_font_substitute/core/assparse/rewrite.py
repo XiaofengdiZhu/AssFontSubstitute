@@ -175,13 +175,17 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
         result_bytes = b"".join(chunks)
     else:
         result_bytes = bom_b + "".join(lines).encode(body_codec)
-    if overwrite_src:
-        tmp = src.with_name(src.name
+    if overwrite_src or out is not None:
+        # 两分支统一 tmp+os.replace 原子写（审查二轮 P0-2：另存分支曾
+        # write_bytes 直写——盘满/崩溃截断目标文件）；finally 清残骸，
+        # 替换失败（目标被播放器占用等）不留 .tmp<pid>
+        dst = src if overwrite_src else Path(out)
+        tmp = dst.with_name(dst.name
                             + f".tmp{os.getpid()}-{threading.get_ident()}")
-        tmp.write_bytes(result_bytes)
-        os.replace(tmp, src)
-        return RewriteResult(src, changed)
-    if out is not None:
-        Path(out).write_bytes(result_bytes)
-        return RewriteResult(Path(out), changed)
+        try:
+            tmp.write_bytes(result_bytes)
+            os.replace(tmp, dst)
+        finally:
+            tmp.unlink(missing_ok=True)
+        return RewriteResult(dst, changed)
     return RewriteResult(None, changed)  # dry-run

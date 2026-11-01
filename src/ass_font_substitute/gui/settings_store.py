@@ -58,6 +58,13 @@ _ENUM_KEYS = {
     "bg_effect": {"mica", "mica_alt", "acrylic", "aero", "none"},
 }
 _SUFFIX_RE = re.compile(r"^\..+$")
+
+
+def _suffix_ok(value) -> bool:
+    """另存后缀：以点开头非空，且不得为 .ass（不分大小写）——
+    stem +「.ass」与源路径重合，「另存」会写回原文件（审查二轮 P0-2）。"""
+    return (isinstance(value, str) and _SUFFIX_RE.match(value) is not None
+            and value.lower() != ".ass")
 # 强调色：空串=跟随系统；非空必须 #rrggbb（ColorDialog c.name() 出货格式）
 _THEME_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 # 旧版默认对比文字（隔字空格，2026-10-31 去除）：存量等于它=从未自定义，
@@ -142,8 +149,7 @@ class Settings(QObject):
                         dirty = True       # 旧默认空格版：留在新默认并净化
                     else:
                         self._data[k] = v
-                elif k == "save_suffix" and isinstance(v, str) \
-                        and _SUFFIX_RE.match(v):
+                elif k == "save_suffix" and _suffix_ok(v):
                     self._data[k] = v           # 存量后缀复验，与 set 同规则
                 elif k == "theme_color" and isinstance(v, str) \
                         and (v == "" or _THEME_COLOR_RE.match(v)):
@@ -196,8 +202,10 @@ class Settings(QObject):
             raise ValueError("last_dirs 必须是字典")
         if key == "sample_text" and (not isinstance(value, str) or not value.strip()):
             raise ValueError("对比文字不能为空")
-        if key == "save_suffix" and not (isinstance(value, str) and _SUFFIX_RE.match(value)):
-            raise ValueError("另存后缀必须以点开头且非空，如 .substituted.ass")
+        if key == "save_suffix" and not _suffix_ok(value):
+            raise ValueError(
+                "另存后缀必须以点开头且非空，如 .substituted.ass"
+                "（不能为 .ass，否则另存会写回原文件）")
         if key == "theme_color" and not (value == ""
                                          or (isinstance(value, str) and _THEME_COLOR_RE.match(value))):
             raise ValueError("强调色必须是 #rrggbb 十六进制色，留空跟随系统")

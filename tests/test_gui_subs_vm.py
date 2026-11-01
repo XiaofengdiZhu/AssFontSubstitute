@@ -535,3 +535,19 @@ def test_embedded_flag_on_cards(vm_full):
     plain = _usage("黑体", FULL)
     plain_card = vm.make_card(plain, UsageClass("keep", [ents[0]], 1.0, []))
     assert plain_card.embedded is False
+
+
+def test_out_path_self_overlap_treated_as_conflict(tmp_path):
+    # 审查二轮 P0-2 兜底：后缀曾存 .ass 的旧档即使漏过校验，
+    # 另存目标与源重合也必须走冲突确认，绝不静默写回原文件
+    v = SubsVM(Settings(tmp_path / "s.json"), tmp_path / "d.db")
+    v.add_files([_parse(str(tmp_path / "a.ass"), "甲")])
+    (tmp_path / "a.ass").write_text("[Script Info]", encoding="utf-8")
+    v._settings._data["save_suffix"] = ".ass"   # 直改内存：模拟存量旧档
+    f = v.files[0]
+    from pathlib import Path
+    assert v._out_path(f.path) == Path(f.path)
+    assert v.pending_out_conflicts() == [str(tmp_path / "a.ass")]
+    rs = v.apply_files()
+    assert rs[0].error == "exists"              # 未确认 → 跳过，原文件未动
+    assert (tmp_path / "a.ass").read_text(encoding="utf-8") == "[Script Info]"

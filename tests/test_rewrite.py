@@ -220,3 +220,33 @@ def test_transform_inner_fn_replaced(tmp_path):
     assert "{\\t(\\fn思源黑体)}乙" in text
     # 模板自带 3 行命中（Style Main + Dialogue + Comment）+ 新增 2 行
     assert len(r.changed_lines) == 5
+
+
+def test_out_branch_atomic_and_no_tmp_leftover(tmp_path, monkeypatch):
+    # 审查二轮 P0-2 顺带：另存分支原为 write_bytes 直写——盘满/崩溃截断
+    # 目标文件。现走 tmp+os.replace；替换失败时 finally 清 tmp 残骸
+    import contextlib
+    import os
+
+    import ass_font_substitute.core.assparse.rewrite as rw
+
+    p = _mk(tmp_path)
+    out = tmp_path / "out.ass"
+    rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out)
+    text = out.read_text(encoding="utf-8-sig")
+    assert "Style: Main,思源黑体,52" in text
+    assert not list(tmp_path.glob("*.tmp*"))   # 成功路径无残骸
+
+    # os.replace 失败（目标被占用等）：目标保持原样、tmp 被清理
+    real_replace = os.replace
+
+    def boom(a, b):
+        raise OSError(32, "被占用")
+    monkeypatch.setattr(rw.os, "replace", boom)
+    out2 = tmp_path / "out2.ass"
+    out2.write_text("旧内容", encoding="utf-8")
+    with contextlib.suppress(OSError):
+        rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out2)
+    monkeypatch.setattr(rw.os, "replace", real_replace)
+    assert out2.read_text(encoding="utf-8") == "旧内容"
+    assert not list(tmp_path.glob("*.tmp*"))

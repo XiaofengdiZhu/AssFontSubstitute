@@ -1020,3 +1020,30 @@ def test_detect_language_by_locale(monkeypatch):
             HongKong=QLocale.HongKong, Macao=QLocale.Macao)
         monkeypatch.setattr(ss, "QLocale", fake)
         assert ss._detect_language() == want, name
+
+
+def test_save_suffix_rejects_ass(tmp_path):
+    # 审查二轮 P0-2：后缀 .ass（不分大小写）使 stem+后缀与源路径重合，
+    # 「另存」写回原文件——set 拒收、存量档回落默认并回写净化
+    import json
+
+    from ass_font_substitute.gui.settings_store import DEFAULTS
+    from ass_font_substitute.gui.settings_store import Settings
+
+    s = Settings(tmp_path / "s.json")
+    for bad in (".ass", ".ASS", ".Ass"):
+        try:
+            s.set("save_suffix", bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f".ass 变体被放行: {bad}")
+    assert s.get("save_suffix") == ".substituted.ass"
+
+    # 存量档：reload 时按与 set 同规则复验，坏值回落默认并回写
+    f = tmp_path / "legacy.json"
+    f.write_text(json.dumps({"save_suffix": ".ASS"}), encoding="utf-8")
+    s2 = Settings(f)
+    assert s2.get("save_suffix") == DEFAULTS["save_suffix"]
+    assert json.loads(f.read_text("utf-8"))["save_suffix"] == \
+        DEFAULTS["save_suffix"]

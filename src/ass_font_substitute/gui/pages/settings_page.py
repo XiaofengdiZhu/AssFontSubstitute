@@ -622,7 +622,7 @@ class SettingsPage(ScrollArea):
             self.settings.set("save_suffix", text)
         except ValueError:
             InfoBar.error(self.tr("后缀无效"),
-                          self.tr("必须以点开头且非空，如 .substituted.ass"),
+                          self.tr("必须以点开头且非空，如 .substituted.ass（不能为 .ass，否则另存会写回原文件）"),
                           parent=self)
             self.suffix_edit.setText(self.settings.get("save_suffix"))
             return

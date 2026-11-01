@@ -1107,8 +1107,8 @@
             <translation>字尾無效</translation>
         </message>
         <message>
-            <source>必须以点开头且非空，如 .substituted.ass</source>
-            <translation>必須以點開頭且非空，如 .substituted.ass</translation>
+            <source>必须以点开头且非空，如 .substituted.ass（不能为 .ass，否则另存会写回原文件）</source>
+            <translation>必須以點開頭且非空，如 .substituted.ass（不能為 .ass，否則另存會寫回原檔案）</translation>
         </message>
         <message>
             <source>对比文字不能为空</source>
@@ -1322,8 +1322,8 @@
             <translation>字尾無效</translation>
         </message>
         <message>
-            <source>必须以点开头且非空，如 .substituted.ass</source>
-            <translation>必須以點開頭且非空，如 .substituted.ass</translation>
+            <source>必须以点开头且非空，如 .substituted.ass（不能为 .ass，否则另存会写回原文件）</source>
+            <translation>必須以點開頭且非空，如 .substituted.ass（不能為 .ass，否則另存會寫回原檔案）</translation>
         </message>
     </context>
     <context>
