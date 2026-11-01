@@ -192,6 +192,12 @@ class _FluentSpinMixin:
             if self._compact:
                 if self.spinButton is not None:
                     self.spinButton.setEnabled(on)
+                    if not on:
+                        # 按住期间被禁用：连发必须即刻停——禁用期 Qt 不再
+                        # 投递 release，isPressed 残留 True 会让 _repeat
+                        # 无人停；重新启用后恢复可步进（二轮审查 P2）
+                        self.spinButton._repeat.stop()
+                        self.spinButton.isPressed = False
             elif self.upButton is not None:
                 self.upButton.setEnabled(on)
                 self.downButton.setEnabled(on)
