@@ -138,6 +138,7 @@ def test_picker_preview_tools_and_filter_bar(qapp, tmp_path):
     host = QWidget()
     host.resize(780, 560)
     dlg = FontPickerDialog(s, w, ents, parent=host)
+    assert dlg.empty_label.isHidden()       # 非空态：空库提示保持隐藏
 
     # 预览文字：空=行退字体名（FontListWidget 兜底），非空进渲染通路
     assert dlg._preview() == ""
@@ -179,7 +180,10 @@ def test_picker_preview_tools_and_filter_bar(qapp, tmp_path):
 
 
 def test_picker_empty_library_hides_tools_and_bar(qapp, tmp_path):
-    # 空库态：工具组/筛选行与列表一起全隐，只剩标题+提示
+    # 空库态：工具组/筛选行与列表一起全隐，只剩标题+提示；构造期零顶层
+    # Show（旧码挂父前 empty_label.show() 曾成顶层窗口，审查二轮 P1）
+    from PySide6.QtCore import QEvent
+    from PySide6.QtCore import QObject
     from PySide6.QtWidgets import QWidget
 
     from ass_font_substitute.gui.settings_store import Settings
@@ -187,13 +191,41 @@ def test_picker_empty_library_hides_tools_and_bar(qapp, tmp_path):
 
     s = Settings(tmp_path / "s.json")
     host = QWidget()            # 持引用：临时对象被回收会连坐销毁弹窗内容
-    dlg = FontPickerDialog(s, _FakeWorker(), [], parent=host)
+
+    class Spy(QObject):
+        def __init__(self):
+            super().__init__()
+            self.flashed = []
+
+        def eventFilter(self, obj, ev):
+            if (ev.type() == QEvent.Type.Show and isinstance(obj, QWidget)
+                    and obj.isWindow() and obj is not host):
+                self.flashed.append(obj)
+            return False
+
+    spy = Spy()
+    qapp.installEventFilter(spy)
+    try:
+        dlg = FontPickerDialog(s, _FakeWorker(), [], parent=host)
+    finally:
+        qapp.removeEventFilter(spy)
     assert dlg.tools.isHidden()
     assert dlg.bar.isHidden()
     assert dlg.all_list.isHidden()
     assert dlg.hint.isHidden()
     assert not dlg.empty_label.isHidden()
+    assert spy.flashed == []        # 零顶层 Show：无孤儿控件闪窗
+
+    # 呈现路径实测：宿主上屏后提示真正可见（isHidden 只钉显隐标志不证
+    # 可见；qfw MessageBoxBase 被 FramelessWindowHint 抹掉窗口类型位，
+    # 本体是宿主内嵌 overlay 而非独立窗，须挂的宿主可见才 isVisible）
+    host.show()
+    qapp.processEvents()
+    assert dlg.isVisible()
+    assert dlg.empty_label.isVisible()
+    assert not dlg.empty_label.grab().isNull()
     dlg.deleteLater()
+    host.deleteLater()
 
 
 def test_picker_hides_weight_filter_and_face_controls(qapp, tmp_path):

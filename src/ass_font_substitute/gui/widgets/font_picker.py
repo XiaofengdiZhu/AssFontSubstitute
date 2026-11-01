@@ -82,13 +82,16 @@ class FontPickerDialog(MessageBoxBase):
         self.empty_label = CaptionLabel(self.tr(
             "字体库为空：先到「字体库」页添加目录并建立索引，再回到这里选择。"))
         self.empty_label.setWordWrap(True)
-        self.empty_label.hide()
         if not self.pvm.entities:
+            # 空库态列表全隐；空库提示保持默认可见即可——勿在挂父前 show()，
+            # 无父 show 即顶层窗口（AGENTS.md UI 约定 / 14f3e50 同类教训，
+            # 审查二轮 P1 事件 Spy 实锤顶层 Show）
             self.tools.hide()
             self.bar.hide()
             self.all_list.hide()
             self.hint.hide()
-            self.empty_label.show()
+        else:
+            self.empty_label.hide()
 
         body = QWidget()
         body_v = QVBoxLayout(body)
