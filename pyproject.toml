@@ -25,7 +25,6 @@ Issues = "https://github.com/XiaofengdiZhu/AssFontSubstitute/issues"
 
 [dependency-groups]
 dev = [
-    "babel>=2.18.0",
     "nuitka>=4.3.3",
     "py7zr>=1.1.4",
     "pytest>=8.0",

@@ -245,7 +245,6 @@ def test_dispatch_pool_isolates_poison_font(ctx_stub, monkeypatch, tmp_path):
     from concurrent.futures.process import BrokenProcessPool
     from types import SimpleNamespace
 
-    from ass_font_substitute.core.similarity.pool import score_chunk
     from ass_font_substitute.gui import jobs as jobs_mod
     from ass_font_substitute.gui.jobs import _dispatch_pool
 
@@ -254,8 +253,8 @@ def test_dispatch_pool_isolates_poison_font(ctx_stub, monkeypatch, tmp_path):
     from tests.fonts import build_font as bf
     bf(d / "t.ttf", chars="永", family="目標", psname="T")
     bf(d / "g.ttf", chars="永", family="好字體")
-    from ass_font_substitute.core.similarity.render import render_bundle
     from ass_font_substitute.core.similarity.cache import _encode
+    from ass_font_substitute.core.similarity.render import render_bundle
     blob = _encode(render_bundle(d / "t.ttf", 0, "永"))
     poison = (str(d / "poison.ttf"), 0)
     good = (str(d / "g.ttf"), 0)

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 import ass_font_substitute.core.similarity.search as search_mod
@@ -519,10 +521,11 @@ def test_pool_mixed_pair_hit_and_dispatch(tmp_path):
 def test_score_chunk_worker_fn(tmp_path):
     # worker 纯函数直测：与串行 compare 同分（同渲染管线）；结果附回编码
     # blob（调用方写渲染缓存，worker 本身零缓存契约不变）
-    from ass_font_substitute.core.similarity.pool import score_chunk
-    from ass_font_substitute.core.similarity.cache import _decode, _encode
-    from ass_font_substitute.core.similarity.render import render_bundle
+    from ass_font_substitute.core.similarity.cache import _decode
+    from ass_font_substitute.core.similarity.cache import _encode
     from ass_font_substitute.core.similarity.metrics import compare
+    from ass_font_substitute.core.similarity.pool import score_chunk
+    from ass_font_substitute.core.similarity.render import render_bundle
     d = tmp_path / "w"
     d.mkdir()
     build_font(d / "t.ttf", chars=CHARS, family="目標圓體", psname="TGT")

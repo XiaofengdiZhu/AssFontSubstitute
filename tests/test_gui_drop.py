@@ -3,12 +3,13 @@
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 from PySide6.QtCore import QObject
 from PySide6.QtCore import QPointF
-from PySide6.QtCore import QUrl
 from PySide6.QtCore import Qt
+from PySide6.QtCore import QUrl
 from PySide6.QtCore import Signal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -39,7 +40,7 @@ class _FakeWorker(QObject):
 class _YesBox:
     """qfw MessageBox 替身：记录构造参数，exec 恒确认。"""
 
-    calls: list = []
+    calls: ClassVar[list] = []
 
     def __init__(self, title, content, parent=None):
         type(self).calls.append((title, content))
@@ -95,7 +96,6 @@ def test_accepts_gate(tmp_path):
 # ---- 字幕处理页：拖入即加载，不确认 ----
 
 def test_subs_drop_loads_without_confirm(qapp, tmp_path, monkeypatch):
-    import ass_font_substitute.gui.pages.subs_page as m
 
     d = tmp_path / "subs"
     (d / "nested").mkdir(parents=True)

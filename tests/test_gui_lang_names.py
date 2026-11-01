@@ -1,5 +1,5 @@
-"""语言显示名查询：CLDR 子集表组合口径（期望值取自 babel 2.18/CLDR 实测，
-生成脚本 gen_lang_names.py 对拍同源）。纯 Python 表查询，无需 Qt。"""
+"""语言显示名查询：CLDR 子集表组合口径（期望值取自 babel 2.18/CLDR 实测
+钉死；生成脚本已删，表自足不再重生成）。纯 Python 表查询，无需 Qt。"""
 from ass_font_substitute.gui.lang_names import display_name
 
 

@@ -1,6 +1,7 @@
-"""语言显示名查询：CLDR 子集表（zh-Hans/zh-Hant，生成于
-lang_names_data，scripts/gen_lang_names.py），替代 babel
-Locale.get_display_name——打包 -30MB（拍板 2026-11-01）。
+"""语言显示名查询：CLDR 子集表（zh-Hans/zh-Hant，lang_names_data），
+替代 babel Locale.get_display_name——打包 -30MB（拍板 2026-11-01）。
+历史生成脚本 scripts/gen_lang_names.py 已随 babel 依赖一并删除
+（表自足，不再重生成；需重建时按本模块组合口径从 CLDR 重抽）。
 
 组合口径与 babel core.get_display_name 同构：语言名 + " (文字, 地区)"
 （细节名逗号连接）；文字缺失时 zh 按地区推断（TW/HK/MO→Hant，其余→
