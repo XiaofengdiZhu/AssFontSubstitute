@@ -551,3 +551,29 @@ def test_out_path_self_overlap_treated_as_conflict(tmp_path):
     rs = v.apply_files()
     assert rs[0].error == "exists"              # 未确认 → 跳过，原文件未动
     assert (tmp_path / "a.ass").read_text(encoding="utf-8") == "[Script Info]"
+
+
+def test_snapshot_decisions_pins_norm_key_direction(vm_full):
+    # 审查二轮 P1：派工期间重算清卡重建——收尾记忆须按派工起步快照写
+    # （norm + checked_key + 方向三方都锁），不能按当下 cards
+    vm, ents = _vm_full(vm_full)
+    card = vm.make_card(_usage("黑体", FULL), UsageClass("replace", ents))
+    vm.apply_default_check(card)
+    card.checked_key = ents[1].fingerprint
+    keepc = vm.make_card(_usage("不存在体", FULL), UsageClass("missing"))
+    vm.apply_default_check(keepc)               # missing 卡 → KEEP，n_chars=4
+    zero = vm.make_card(_usage("空用字体", ""), UsageClass("zero"))
+    vm.cards = [card, keepc, zero]
+    snap = vm.snapshot_decisions()
+    # 零用字卡滤除（record_all 同口径）；KEEP 卡按 (None, True) 入快照
+    assert [(n, k) for n, k, _ in snap] == [("黑体", ents[1].fingerprint),
+                                            ("不存在体", KEEP)]
+    assert all(d == vm.direction for _, _, d in snap)
+    # 派工期间切向 + 卡勾选被重建回默认：快照方向/键不受当下状态影响
+    vm.direction = "s2t"
+    card.checked_key = ents[0].fingerprint
+    vm.record_snapshot(snap)
+    for norm, key, d in snap:
+        got = latest_decision(vm.decisions_db, norm, d)
+        assert got == ((key, False) if key != KEEP else (None, True))
+        assert latest_decision(vm.decisions_db, norm, "s2t") is None

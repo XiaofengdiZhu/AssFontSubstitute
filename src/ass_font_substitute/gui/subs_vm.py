@@ -599,7 +599,8 @@ class SubsVM:
     def record_all(self) -> None:
         """决定记忆：勾选实体 → fingerprint；KEEP → keep=True。
         键 = norm_name + 当前方向。零用字卡（n_chars==0）跳过——0 字
-        必然 keep，记录是无信息 no-op，只徒增 decisions.db 行数。"""
+        必然 keep，记录是无信息 no-op，只徒增 decisions.db 行数。
+        生产收尾走 record_snapshot（按派工批快照写）；本方法现仅测试用。"""
         for c in self.cards:
             if not c.n_chars:
                 continue
@@ -609,6 +610,24 @@ class SubsVM:
             else:
                 record_decision(self.decisions_db, c.norm_name, self.direction,
                                 c.checked_key)
+
+    def snapshot_decisions(self) -> list[tuple[str, str | None, str]]:
+        """派工起步时的决定快照 (norm, checked_key, direction)：派工期间
+        勾选/切向/移除/批次收齐/on_library_changed 都能触发重算清卡重建
+        ——收尾按当下 cards 写记忆会把派工那份决定整个丢掉（审查二轮
+        P1）。零用字卡跳过（与 record_all 同口径：0 字必然 keep，记录是
+        无信息 no-op）。"""
+        return [(c.norm_name, c.checked_key, self.direction)
+                for c in self.cards if c.n_chars]
+
+    def record_snapshot(self, snap: list[tuple[str, str | None, str]]) -> None:
+        """按快照写决定记忆；方向取快照值（派工期间切向不串向回放）。"""
+        for norm, key, direction in snap:
+            if key == KEEP:
+                record_decision(self.decisions_db, norm, direction,
+                                None, keep=True)
+            else:
+                record_decision(self.decisions_db, norm, direction, key)
 
 
 class _LibStub:

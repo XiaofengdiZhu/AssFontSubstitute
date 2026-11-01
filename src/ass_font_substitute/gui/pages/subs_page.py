@@ -97,6 +97,7 @@ class SubsPage(QWidget):
         self._apply_results: list = []
         self._apply_dispatching = False     # 派工在途标志（防重入）
         self._apply_gen = 0                 # apply 批次号：tag 带代次防跨批串账
+        self._apply_decisions: list = []    # 派工批的决定快照（收尾记忆用）
         self._confirmed_once = False
         self._search_active = False
         self._removed: set[str] = set()    # 已移除文件：迟到解析回执弃置
@@ -784,6 +785,9 @@ class SubsPage(QWidget):
             return                        # 无勾选文件：不派工、不禁用
         self._apply_dispatching = True
         self.btn_apply.setEnabled(False)   # 派工期禁用：防连点重复写文件
+        # 决定快照随批锁定：派工期间重算清卡重建后，收尾按快照写记忆
+        # （按当下 cards 写会把派工那份决定整个丢掉，审查二轮 P1）
+        self._apply_decisions = self.vm.snapshot_decisions()
         # 批次号入 tag：批 N 失败复位后，批 N 的迟到回执不得计入批 N+1
         # （裸 tag "apply" 曾提前凑满总数、成功 InfoBar 早发）
         self._apply_gen += 1
@@ -794,7 +798,7 @@ class SubsPage(QWidget):
 
     def _on_apply_done(self, result):
         # 派工中断（_on_failed 复位）后迟到的结果不再触发收尾，
-        # 否则剩余回执会连环重复 InfoBar/record_all
+        # 否则剩余回执会连环重复 InfoBar/record_snapshot
         if not self._apply_dispatching or len(self._apply_results) \
                 >= self._apply_total:
             return
@@ -810,7 +814,7 @@ class SubsPage(QWidget):
             InfoBar.success(self.tr("替换完成"),
                             self.tr("{0} 个文件已写入").format(len(ok)),
                             parent=self)
-        self.vm.record_all()
+        self.vm.record_snapshot(self._apply_decisions)
         self._apply_dispatching = False
         self._apply_results = []
         self._apply_total = 0
@@ -826,7 +830,7 @@ class SubsPage(QWidget):
         self.replace_label.setText(
             self.tr("将替换 {0} / {1} 种字体").format(n, total))
         # 派工期保持禁用：此时写盘用的是派工快照，改勾选不会生效，
-        # 放开按钮只会让「替换并保存」与决策记忆（record_all）分叉
+        # 放开按钮只会让「替换并保存」与决策记忆（record_snapshot）分叉
         self.btn_apply.setEnabled(not self._apply_dispatching
                                   and bool(self.vm.checked_parses())
                                   and bool(self.vm.cards))

@@ -2160,3 +2160,31 @@ def test_direction_syncs_into_vm(qapp, tmp_path, monkeypatch):
     page2 = SubsPage(s_hans, _FakeWorker())
     assert page2.vm.direction == "t2s"
     page2.deleteLater()
+
+
+def test_apply_records_snapshot_not_post_dispatch_cards(qapp, tmp_path, monkeypatch):
+    # 审查二轮 P1：派工期间重算清卡重建（切向/勾选/批次收齐等触发）——
+    # 收尾按派工起步快照写决定记忆；旧码 record_all 读当下 cards，重建
+    # 后勾选回默认，用户决定整个丢失
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.decision.store import latest_decision
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import ApplyFileResult
+    from ass_font_substitute.gui.jobs import FileParse
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    src = tmp_path / "a.ass"
+    src.write_text("[Script Info]", "utf-8")
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=1, chars={"永"}, variants={"甲字体"})
+    page._on_result(f"parse:{src}", FileParse(str(src), None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0",
+                    (usage, UsageClass(kind="replace", entities=[ent_a, ent_b])))
+    page._cards_ui["甲字体"].option_checked.emit("甲字体", "fp2")
+    page._apply()
+    # 派工期间重建：勾选回默认原字体（模拟 _reclassify 后状态）
+    page.vm.cards[0].checked_key = "fp1"
+    page._on_result(f"apply:{page._apply_gen}", ApplyFileResult(str(src), str(src), 1))
+    d = latest_decision(Path(page.vm.decisions_db), "甲字体", "t2s")
+    assert d == ("fp2", False)          # 快照：用户勾的 fp2，非重建后的 fp1

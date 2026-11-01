@@ -51,7 +51,7 @@ def record_decision(db_path: Path, norm_name: str, direction: str,
     """记录/覆盖一条决定；键 = 规范化字体名 + 方向，只保留最近一次。
 
     本层不做归一：norm_name 必须由调用方传 normalize_name 结果
-    （生产调用点 subs_vm.record_all 传 c.norm_name）。传原始名记忆
+    （生产调用点 subs_vm.record_snapshot 传快照 norm）。传原始名记忆
     静默 miss，不再补救。"""
     try:
         conn = _connect(db_path)
