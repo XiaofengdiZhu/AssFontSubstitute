@@ -250,3 +250,47 @@ def test_parse_name_records(tmp_path):
     rec = parse_font_file(p)[0]
     assert (1, 1, 0, "Mac Rec") in rec.name_records
     assert (4, 3, 0x409, "@Rec體 Vertical") in rec.name_records
+
+
+def test_parse_psname_prefers_windows_platform(tmp_path):
+    # 审查二轮 P1：ID6 首条命中曾取到 platform0 变体名（corbell 实测
+    # platform0='Corbel-Light' vs Windows='CorbelLight'）——去重键漂移。
+    # PS 名只认 Windows 平台记录，无 Win 记录才回退首条
+    from fontTools.ttLib.tables._n_a_m_e import NameRecord
+
+    from tests.fonts import _make
+
+    spec = {"chars": "永中", "family": "窗體", "psname": "CorbelLight"}
+    tt = _make(spec)
+    rec = NameRecord()
+    rec.nameID, rec.platformID, rec.platEncID, rec.langID = 6, 0, 0, 0
+    rec.string = "Corbel-Light"
+    tt["name"].names.insert(0, rec)     # platform0 记录插到最前：旧码必中
+    p = tmp_path / "w.ttf"
+    tt.save(p)
+    r = parse_font_file(p)[0]
+    assert r.psname == "CorbelLight"
+    # 无 Windows 记录的老字体：回退首条（Mac），不改键域
+    tt2 = _make(spec)
+    for rec2 in tt2["name"].names:
+        if rec2.nameID == 6:
+            rec2.platformID, rec2.platEncID, rec2.langID = 1, 0, 0
+    p2 = tmp_path / "old.ttf"
+    tt2.save(p2)
+    assert parse_font_file(p2)[0].psname == "CorbelLight"
+
+
+def test_parse_at_variant_names_excluded_from_aliases(tmp_path):
+    # 审查二轮 P1：@ 竖排变体名泄漏 aliases——'@'=0x40 排序恒最前，
+    # 污染指纹/去重键/find_by_name，展示名回退 aliases[0] 时必占首位
+    p = tmp_path / "v.ttf"
+    build_font(p, chars="永中", family="甲體",
+               extra_aliases={"zh-CN": "@甲體豎排"})
+    r = parse_font_file(p)[0]
+    assert not any(a.startswith("@") for a in r.aliases)
+    assert "甲體" in r.aliases and "@甲體豎排" not in r.aliases
+    assert r.display_name == "甲體"     # 回退链不被 @ 名劫持
+    # 语言候选链（name_langs）同样不收 @ 变体（@ 名只进 name_records
+    # 命名卡原始记录——test_parse_name_records 已断言其保留）
+    assert all(not t.startswith("@")
+               for recs in r.name_langs.values() for _, t in recs)

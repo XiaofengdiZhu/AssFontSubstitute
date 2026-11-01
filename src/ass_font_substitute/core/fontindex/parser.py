@@ -119,6 +119,13 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                         records.append((r.nameID, r.platformID, r.langID, s))
                     if r.nameID not in NAME_IDS:
                         continue
+                    if s.startswith("@"):
+                        # 竖排变体名不进别名（审查二轮 P1）：'@'=0x40 排序
+                        # 恒在最前——污染指纹/版本去重键/find_by_name，
+                        # 展示名回退 aliases[0] 时必占首位（照 ID1/16/4
+                        # 展示路径同款过滤；查询侧 normalize_name 剥 @，
+                        # 匹配不受影响）
+                        continue
                     all_names.add(s)
                     if r.platformID == 3 and r.nameID in (1, 4, 16) \
                             and not s.startswith("@"):
@@ -130,7 +137,16 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                     if r.platformID == 3:
                         by_id.setdefault(r.nameID, []).append(s)
                 aliases = sorted(all_names)
-                psname = next((r.toUnicode() for r in name.names if r.nameID == 6), None)
+                # PS 名只认 Windows 平台（platformID==3）记录：去重键应与
+                # Windows 字体系统的标识同源——corbell 实测 platform0 的
+                # ID6='Corbel-Light' 而 Windows 记录='CorbelLight'，首条
+                # 命中曾把去重键漂成非 Windows 形态（审查二轮 P1）。无
+                # Win 记录的老字体回退首条（Mac 平台），不改键域
+                psname = next((r.toUnicode() for r in name.names
+                               if r.nameID == 6 and r.platformID == 3), None)
+                if psname is None:
+                    psname = next((r.toUnicode() for r in name.names
+                                   if r.nameID == 6), None)
                 version = parse_version(next((r.toUnicode() for r in name.names
                                               if r.nameID == 5), None))
                 # OS/2 缺失（老字库/精简字体，恰是 v9 要救的文鼎系）回退
