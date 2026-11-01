@@ -64,8 +64,8 @@ def _encoder_for(face, fh, face_index: int) -> _Encoder:
     return _Encoder(None, {})    # 无可识别表：Unicode 模式（查全空，同旧况）
 
 
-def _sfnt_table_dir(fh, face_index: int) -> int | None:
-    """cmap 表在文件内的偏移；TTC 按 face_index 取对应表目录。"""
+def _sfnt_table_offset(fh, face_index: int, tag: bytes) -> int | None:
+    """sfnt 表在文件内的偏移；TTC 按 face_index 取对应表目录。"""
     fh.seek(0)
     head = fh.read(12)
     if head[:4] == b"ttcf":
@@ -77,10 +77,29 @@ def _sfnt_table_dir(fh, face_index: int) -> int | None:
         head = fh.read(12)
     (num_tables,) = struct.unpack(">H", head[4:6])
     for _ in range(num_tables):
-        tag, _cks, off, _ln = struct.unpack(">4sIII", fh.read(16))
-        if tag == b"cmap":
+        t, _cks, off, _ln = struct.unpack(">4sIII", fh.read(16))
+        if t == tag:
             return off
     return None
+
+
+def _sfnt_table_dir(fh, face_index: int) -> int | None:
+    """cmap 表在文件内的偏移；TTC 按 face_index 取对应表目录。"""
+    return _sfnt_table_offset(fh, face_index, b"cmap")
+
+
+def _fvar_axis_count(fh, face_index: int) -> int | None:
+    """fvar axesCount 二进制直读。防呆校验不能走 freetype-py 的
+    get_variation_info/get_var_design_coords：包装器对部分 name 记录
+    排序崩（方正悠宋简可变实测 TypeError NoneType < int），set 坐标
+    本身却完全正常——真机 VF 实例行渲染全败即栽在校验上。
+    fvar 头：version u32 + offsetToData u16 + countSizePairs u16 +
+    axesCount u16，axesCount 在表偏移 +8。无 fvar 表返回 None。"""
+    off = _sfnt_table_offset(fh, face_index, b"fvar")
+    if off is None:
+        return None
+    fh.seek(off + 8)
+    return struct.unpack(">H", fh.read(2))[0]
 
 
 def _cmap_subtables(fh, face_index: int) -> list[tuple[tuple[int, int], int]]:
@@ -213,20 +232,21 @@ def _second_pass_px(median: float) -> int:
     return max(RULER_PX, round(RULER_PX * ANCHOR_INK / median))
 
 
-def _apply_var_axes(face, var_axes: tuple[float, ...]) -> None:
+def _apply_var_axes(face, fh, face_index: int,
+                   var_axes: tuple[float, ...]) -> None:
     """可变字体实例化：Face 打开后、任何 glyph 操作前按轴序设全长设计
     坐标（坐标影响字距/度量，须先于 set_pixel_sizes/load_glyph）。
     freetype 对部分长度坐标静默补默认值（2 轴传 1 值实测另一轴落默认
     态）——长度不等于轴数直接抛错防呆，绝不静默错实例。轴数经
-    get_variation_info（freetype-py 无 get_var_axis_count 包装）。
-    不用 set_var_named_instance：FreeType 实例序 0 起，与 inst_index
-    0=默认态口径不一致（spec §4 S5 记账）。静态字体/默认态传空坐标即
-    跳过。"""
+    _fvar_axis_count 二进制直读（freetype-py 包装层在该路径上对真实
+    字体崩，见其 docstring）。不用 set_var_named_instance：FreeType
+    实例序 0 起，与 inst_index 0=默认态口径不一致（spec §4 S5 记账）。
+    静态字体/默认态传空坐标即跳过。"""
     if not var_axes:
         return
-    n = len(face.get_variation_info().axes)
-    if n != len(var_axes):
-        raise ValueError(f"var_axes 长度 {len(var_axes)} != 轴数 {n}")
+    n = _fvar_axis_count(fh, face_index)
+    if n is None or n != len(var_axes):
+        raise ValueError(f"var_axes 长度 {len(var_axes)} != fvar 轴数 {n}")
     face.set_var_design_coords([float(a) for a in var_axes])
 
 
@@ -248,7 +268,7 @@ def render_bundle(path: Path, face_index: int, chars: str,
     """
     with open(path, "rb") as fh:
         face = freetype.Face(fh, face_index)
-        _apply_var_axes(face, var_axes)
+        _apply_var_axes(face, fh, face_index, var_axes)
         enc = _encoder_for(face, fh, face_index)
         # 反 tofu：cmap 缺字先剔除（F3），避免渲染落到 .notdef 方块；
         # 重复字符去重（样例文本用户可编辑，重复字两遍全量重渲纯浪费）
@@ -329,7 +349,7 @@ def render_text_strip(path: Path, face_index: int, text: str,
     """
     with open(path, "rb") as fh:
         face = freetype.Face(fh, face_index)
-        _apply_var_axes(face, var_axes)
+        _apply_var_axes(face, fh, face_index, var_axes)
         enc = _encoder_for(face, fh, face_index)
         face.set_pixel_sizes(0, px)
         pad = 4

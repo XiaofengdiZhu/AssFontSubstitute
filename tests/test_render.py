@@ -382,3 +382,39 @@ def test_render_partial_axes_rejected(tmp_path):
              instances=[])
     with pytest.raises(ValueError):
         render_bundle(p, 0, "永", var_axes=(900.0,))   # 2 轴只给 1 值
+
+
+def test_fvar_axis_count_binary_read(tmp_path):
+    # 轴数校验必须二进制直读 fvar（方正悠宋简可变实测：freetype-py 的
+    # get_variation_info/get_var_design_coords 包装层对该字体 name 记录
+    # 排序崩 TypeError——set 坐标本身正常，防呆不能依赖包装器）
+    from ass_font_substitute.core.similarity.render import _fvar_axis_count
+    p1 = tmp_path / "vf1.ttf"
+    build_vf(p1, "永", family="变化體一轴",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 300, "default": 400, "max": 900}],
+             instances=[])
+    with open(p1, "rb") as fh:
+        assert _fvar_axis_count(fh, 0) == 1
+    p2 = tmp_path / "vf2.ttf"
+    build_vf(p2, "永", family="变化體兩轴",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 300, "default": 400, "max": 900},
+                   {"name": "Width", "tag": "wdth",
+                    "min": 50, "default": 100, "max": 200}],
+             instances=[])
+    with open(p2, "rb") as fh:
+        assert _fvar_axis_count(fh, 0) == 2
+    ps = tmp_path / "static.ttf"
+    build_font(ps, chars="永", family="靜態體")
+    with open(ps, "rb") as fh:
+        assert _fvar_axis_count(fh, 0) is None
+
+
+def test_render_var_axes_on_static_font_rejected(tmp_path):
+    # 防呆对称面：静态字体（无 fvar 表）传非空坐标同样拒绝，
+    # n is None 与 n != len 同口径
+    p = tmp_path / "static.ttf"
+    build_font(p, chars="永", family="靜態體")
+    with pytest.raises(ValueError):
+        render_bundle(p, 0, "永", var_axes=(400.0,))
