@@ -307,6 +307,23 @@ def test_load_name_records_from_db(tmp_path):
     assert load_name_records(str(tmp_path / "nope"), "a.ttf", 0) is None
 
 
+def test_load_name_records_uri_escaping(tmp_path):
+    # 二轮审查 P2：手工 quote 改 as_uri 后的转义回归——中文/空格目录
+    # （as_uri 百分号编码，sqlite 解码）必须照常读出行；此前与 jobs.py
+    # as_uri 口径不一致正是本修动机
+    from ass_font_substitute.core.fontindex.library import load_name_records
+
+    d = tmp_path / "字 体 库#1"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永", family="TestFam")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    conn.close()
+    recs = load_name_records(str(d), "a.ttf", 0)
+    assert recs is not None
+    assert (1, 3, 0x409, "TestFam") in recs
+
+
 def test_deep_corruption_degrades_per_dir(tmp_path):
     # 审查二轮 P1 回归：深层损坏（数据页坏块/截断）能过 open_db 头级
     # 探测，但在装载 SELECT / zlib 解压层炸出——曾把整个聚合装载炸成

@@ -18,6 +18,9 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=5)
     try:
         conn.execute("PRAGMA journal_mode=WAL")
+        # 与 fontindex/similarity 缓存同口径：commit 不逐条 fsync，掉电
+        # 最多丢最后一次提交（决定记忆可重建，二轮审查 P2 口径对齐）
+        conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA busy_timeout=5000")
         conn.executescript(DDL)
     except sqlite3.DatabaseError:

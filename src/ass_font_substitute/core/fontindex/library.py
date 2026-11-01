@@ -6,7 +6,6 @@ import zlib
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
-from urllib.parse import quote
 
 from ass_font_substitute.core.fontindex.probes import effective_weight
 from ass_font_substitute.core.fontindex.store import DB_NAME
@@ -32,8 +31,10 @@ def load_name_records(dir_path: str, rel_path: str, face_index: int
     （调用方走别名平铺兜底）。"""
     p = Path(dir_path) / DB_NAME
     try:
-        conn = sqlite3.connect(f"file:{quote(str(p))}?mode=ro", uri=True,
-                               timeout=5)
+        # as_uri 与 gui/jobs.py 只读打开同口径（手工 quote 对 UNC/保留
+        # 字符的转义规则与 as_uri 不一致，审查二轮 P2）
+        conn = sqlite3.connect(p.resolve().as_uri() + "?mode=ro",
+                               uri=True, timeout=5)
         try:
             row = conn.execute(
                 "SELECT name_records FROM fonts WHERE rel_path=? AND "

@@ -37,6 +37,7 @@ from qfluentwidgets import SettingCardGroup
 from qfluentwidgets import Slider
 from qfluentwidgets import SubtitleLabel
 from qfluentwidgets import TextEdit
+from qfluentwidgets import isDarkTheme
 from qfluentwidgets import qconfig
 from qfluentwidgets import setFont
 
@@ -516,7 +517,7 @@ class SettingsPage(ScrollArea):
         head.addWidget(group.titleLabel)
         head.addStretch(1)
         self.sim_pending_hint = CaptionLabel(self.tr("下次寻找相似时生效"))
-        self.sim_pending_hint.setStyleSheet("color: #c42b1c; font-weight: 600;")
+        self._sync_hint_color()
         self.sim_pending_hint.hide()
         head.addWidget(self.sim_pending_hint)
         group.vBoxLayout.insertLayout(0, head)
@@ -527,6 +528,14 @@ class SettingsPage(ScrollArea):
                   self.range_slider, self.pause_card.slider,
                   self.pause_card.spin, self.spin, self.spin_max):
             w.valueChanged.connect(self._mark_sim_pending)
+        qconfig.themeChangedFinished.connect(self._sync_hint_color)
+
+    def _sync_hint_color(self):
+        # 红字 #c42b1c 写死暗主题对比度低（审查二轮 P2）：按主题对取，
+        # 与 font_card._TofuFrame 错误色同对（#ff99a4/#c62b1c）
+        self.sim_pending_hint.setStyleSheet(
+            f"color: {'#ff99a4' if isDarkTheme() else '#c62b1c'};"
+            " font-weight: 600;")
 
     def bind_search_activity(self, subs_page):
         """AFSWindow 注入处理字幕页：跟踪在跑相似搜索，驱动提示显隐。"""
