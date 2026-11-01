@@ -2123,3 +2123,22 @@ def test_direction_default_follows_language(qapp, tmp_path, monkeypatch):
     assert page2._direction == "s2t"
     assert page2.seg_dir.currentRouteKey() == "s2t"
     page2.deleteLater()
+
+
+def test_direction_syncs_into_vm(qapp, tmp_path, monkeypatch):
+    # 审查二轮 P1 回归：vm.direction 默认 t2s，繁体界面页面方向 s2t——
+    # 不同步则决策记忆键（norm+方向）错向、跨方向回放选择
+    from ass_font_substitute.gui.pages.subs_page import SubsPage
+    from ass_font_substitute.gui.settings_store import Settings
+
+    s_hant = Settings(tmp_path / "h.json")
+    s_hant.set("language", "zh-Hant")
+    page = SubsPage(s_hant, _FakeWorker())
+    assert page._direction == "s2t"
+    assert page.vm.direction == "s2t"
+    page.deleteLater()
+
+    s_hans = Settings(tmp_path / "l.json")
+    page2 = SubsPage(s_hans, _FakeWorker())
+    assert page2.vm.direction == "t2s"
+    page2.deleteLater()

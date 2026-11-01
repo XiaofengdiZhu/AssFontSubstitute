@@ -89,6 +89,9 @@ class SubsPage(QWidget):
         # 简，繁体界面按简转繁——各自主流字幕方向
         self._direction = ("s2t" if settings.get("language") == "zh-Hant"
                            else "t2s")
+        # 决策记忆键=norm+方向（审查二轮 P1）：vm 默认 t2s，繁体界面页面
+        # 方向是 s2t，不同步则记忆读写错向、跨方向回放选择
+        self.vm.direction = self._direction
         self._gen = 0                              # 分类代次：弃置旧代结果
         self._apply_total = 0
         self._apply_results: list = []
