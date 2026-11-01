@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 
 from fontTools.ttLib import TTCollection
@@ -147,6 +148,37 @@ def _instance_compose(family_recs: list[tuple[int, str]],
     return names, display
 
 
+def _pick_psname(name) -> str | None:
+    """ID6 选取：0x409 正典 → 众数（Win 落点优先）→ 首条 Win → 首条。
+
+    腾祥嘉丽书宋简实证：厂商把 Win 0x404 那条 ID6 错标成同厂另一字体的
+    PS 名（同文件 Mac 与 0x804 记录都写对），首条命中曾把去重键漂成
+    撞键值、整个字体被误判重复版本跳过。义启字心体实证：Mac 记录可能
+    是乱码，回落必须 Win 优先（去重键域与 Windows 字体系统标识同源）。
+
+    已知假阴：无 0x409 且 ≥2 条 Mac 记录共享同一错值时，众数会被 Mac
+    压过 Win 单条对值——需双重巧合，罕见，接受（若禁 Mac 入众数则
+    书宋主案 Win 两条 1:1 并列修不了）。
+    """
+    recs = [(r.platformID, r.langID, s) for r in name.names
+            if r.nameID == 6 for s in (r.toUnicode(),) if s]
+    if not recs:
+        return None
+    for p, lang, s in recs:
+        if p == 3 and lang == 0x409:
+            return s            # spec 正典：存在即采用，即使处于少数
+    counts = Counter(s for _, _, s in recs)
+    top = max(counts.values())
+    cands = {s for s, c in counts.items() if c == top}
+    win_vals = [s for p, _lang, s in recs if p == 3]
+    if win_vals:
+        for s in win_vals:
+            if s in cands:
+                return s        # 众数落在 Win 记录：取之（书宋案修正点）
+        return win_vals[0]      # 众数仅在 Mac：键域仍是 Win 值（Windows 所见）
+    return recs[0][2]           # 无 Win 记录的老字体：首条（不改键域）
+
+
 def _load_fonts(path: Path) -> list[TTFont]:
     try:
         if path.suffix.lower() in TTC_EXTS:
@@ -203,13 +235,8 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                 # PS 名只认 Windows 平台（platformID==3）记录：去重键应与
                 # Windows 字体系统的标识同源——corbell 实测 platform0 的
                 # ID6='Corbel-Light' 而 Windows 记录='CorbelLight'，首条
-                # 命中曾把去重键漂成非 Windows 形态（审查二轮 P1）。无
-                # Win 记录的老字体回退首条（Mac 平台），不改键域
-                psname = next((r.toUnicode() for r in name.names
-                               if r.nameID == 6 and r.platformID == 3), None)
-                if psname is None:
-                    psname = next((r.toUnicode() for r in name.names
-                                   if r.nameID == 6), None)
+                # 命中曾把去重键漂成非 Windows 形态（审查二轮 P1）
+                psname = _pick_psname(name)
                 version = parse_version(next((r.toUnicode() for r in name.names
                                               if r.nameID == 5), None))
                 # OS/2 缺失（老字库/精简字体，恰是 v9 要救的文鼎系）回退

@@ -51,7 +51,9 @@ from ass_font_substitute.core.models import FontRecord
 # 实例序号，静态行 0）与 var_axes BLOB（struct '<nf'，静态行 NULL），唯一
 # 键放宽为 (rel_path, face_index, inst_index)；fingerprints 主键同步三元组
 # （inst_index NOT NULL DEFAULT 0，缺列 INSERT 落 0 与静态行兼容）。
-SCHEMA_VERSION = 2
+# v3：psname 选取改众数口径（parser._pick_psname）——腾祥书宋类厂商单条
+# ID6 错标记录的存量行需全量重解析才能修正去重键，升版本触发重建。
+SCHEMA_VERSION = 3
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 

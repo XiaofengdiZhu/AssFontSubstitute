@@ -280,6 +280,90 @@ def test_parse_psname_prefers_windows_platform(tmp_path):
     assert parse_font_file(p2)[0].psname == "CorbelLight"
 
 
+def _id6(platform: int, lang: int, s: str):
+    from fontTools.ttLib.tables._n_a_m_e import NameRecord
+
+    r = NameRecord()
+    r.nameID = 6
+    r.platformID = platform
+    r.platEncID = 1 if platform == 3 else 0
+    r.langID = lang
+    r.string = s
+    return r
+
+
+def test_parse_psname_majority_fixes_single_mislabeled_record(tmp_path):
+    # 腾祥嘉丽书宋简实证：厂商把 Win langID 0x404 那条 ID6 错标成
+    # 'Tensentype JiaLiZhongHeiJ'（与中黑简撞键，整字体被误判重复版本跳过）；
+    # 同文件 Mac 记录与 0x804 记录都写对。0x409 缺失时按众数取值，
+    # 单条错标记录被多数修正
+    from tests.fonts import _make
+
+    spec = {"chars": "永中", "family": "腾祥嘉丽书宋简", "psname": "JiaLiShuSongJ"}
+    tt = _make(spec)
+    nt = tt["name"]
+    # 重建 ID6 记录集：复刻书宋简实况（无 0x409）
+    nt.names = [r for r in nt.names if r.nameID != 6]
+    nt.names += [_id6(1, 0, "JiaLiShuSongJ"),
+                 _id6(3, 0x404, "JiaLiZhongHeiJ"),   # 厂商错标：与中黑简同 PS 名
+                 _id6(3, 0x804, "JiaLiShuSongJ")]
+    p = tmp_path / "sfj.ttf"
+    tt.save(p)
+    assert parse_font_file(p)[0].psname == "JiaLiShuSongJ"
+
+
+def test_parse_psname_win_english_canonical_over_majority(tmp_path):
+    # 0x409 是 spec 正典：存在即直接采用，即使处于少数（多数只是
+    # 0x409 缺失时的兜底推断，不能反过来否决显式正典记录）
+    from tests.fonts import _make
+
+    spec = {"chars": "永中", "family": "窗體", "psname": "Canonical-PS"}
+    tt = _make(spec)
+    nt = tt["name"]
+    nt.names = [r for r in nt.names if r.nameID != 6]
+    nt.names += [_id6(1, 0, "Legacy-PS"),
+                 _id6(3, 0x804, "Legacy-PS"),
+                 _id6(3, 0x409, "Canonical-PS")]
+    p = tmp_path / "canon.ttf"
+    tt.save(p)
+    assert parse_font_file(p)[0].psname == "Canonical-PS"
+
+
+def test_parse_psname_tie_prefers_win_over_mac_garbage(tmp_path):
+    # 义启字心体实证：Mac 记录是乱码 'Î´'，Win 0x409 才有真名——
+    # 众数并列（各 1 条）时必须回落 Win 首条而非 Mac 首条，
+    # 回归护栏：防未来改动把并列回落改成 Mac 优先
+    from tests.fonts import _make
+
+    spec = {"chars": "永中", "family": "字心体", "psname": "WeiDingYi"}
+    tt = _make(spec)
+    nt = tt["name"]
+    nt.names = [r for r in nt.names if r.nameID != 6]
+    nt.names += [_id6(1, 0, "Î´"),               # Mac 乱码（序在前）
+                 _id6(3, 0x404, "WeiDingYi")]
+    p = tmp_path / "zxt.ttf"
+    tt.save(p)
+    assert parse_font_file(p)[0].psname == "WeiDingYi"
+
+
+def test_parse_psname_mac_only_majority_never_beats_win(tmp_path):
+    # 审查 P2：众数值只出现在 Mac 记录上时，去重键仍须取 Win 所见值——
+    # 键域与 Windows 字体系统标识同源，Mac 重复记录不得劫持
+    from tests.fonts import _make
+
+    spec = {"chars": "永中", "family": "窗體", "psname": "WinUnique-B"}
+    tt = _make(spec)
+    nt = tt["name"]
+    nt.names = [r for r in nt.names if r.nameID != 6]
+    nt.names += [_id6(1, 0, "0Garbage-X"),
+                 _id6(1, 0, "9Mac-Y"),
+                 _id6(1, 0, "9Mac-Y"),
+                 _id6(3, 0x404, "WinUnique-B")]
+    p = tmp_path / "macmaj.ttf"
+    tt.save(p)
+    assert parse_font_file(p)[0].psname == "WinUnique-B"
+
+
 def test_parse_at_variant_names_excluded_from_aliases(tmp_path):
     # 审查二轮 P1：@ 竖排变体名泄漏 aliases——'@'=0x40 排序恒最前，
     # 污染指纹/去重键/find_by_name，展示名回退 aliases[0] 时必占首位
