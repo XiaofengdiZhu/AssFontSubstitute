@@ -248,3 +248,57 @@ def test_first_open_reclaims_legacy_bloat(tmp_path):
         assert p.stat().st_size < 4 * 1024 * 1024  # 打开即还盘，不等 close
     finally:
         c.conn.close()
+
+
+def test_overwrite_accounting_subtracts_old_row(tmp_path):
+    # 审查二轮 P1 回归：同键覆盖写入时记账只加不减——_nb_sum 虚高让
+    # trim 提前淘汰还在用的行
+    c = Cache(tmp_path / "cache.db")
+    big = bytes(1000)
+    small = bytes(10)
+    c.put_render_encoded("fpA", "v1", big)
+    c.put_render_encoded("fpA", "v1", small)
+    assert c._nb_sum == c.render_bytes == 10
+    # 两键混合覆盖
+    c.put_render_encoded("fpB", "v1", bytes(600))
+    c.put_render_encoded("fpA", "v1", bytes(90))
+    assert c._nb_sum == c.render_bytes == 690
+    # 覆盖写清读命中记账（对齐 put_pair）：先读命中攒 pending，覆盖写
+    # 后 pending 清空——否则 flush 把 used_at 回退成旧读时间
+    calls = []
+    c.get_render("fpC", "v1", lambda: calls.append(1) or _bundle())
+    c.get_render("fpC", "v1", lambda: calls.append(1) or _bundle())   # 命中攒 pending
+    assert len(calls) == 1 and c._pending_render
+    c.put_render_encoded("fpC", "v1", bytes(50))
+    assert c._pending_render == {}
+    assert c._nb_sum == c.render_bytes == 740
+
+
+def test_corrupt_render_blob_self_heals(tmp_path):
+    # 审查二轮 P1 回归：坏渲染行曾永不失效——异常当「字体渲染失败」，
+    # 重启不愈只能手清缓存。现删行扣账走 loader 重渲回写
+    c = Cache(tmp_path / "cache.db")
+    c.put_render_encoded("fpBad", "v1", b"corrupt-not-zlib")
+    calls = []
+    b = c.get_render("fpBad", "v1", lambda: calls.append(1) or _bundle())
+    assert len(calls) == 1                 # 坏行删掉，重渲
+    b2 = c.get_render("fpBad", "v1", lambda: calls.append(1) or _bundle())
+    assert len(calls) == 1                 # 新行正常命中，不再重渲
+    assert b2.tiles.keys() == b.tiles.keys()
+    assert all(np.array_equal(b2.tiles[k], b.tiles[k]) for k in b.tiles)
+    assert c.render_bytes > 0 and c._nb_sum == c.render_bytes
+    assert c.pair_count == 0               # renders 真被重建（防回归断言有验证力）
+    # 记账一致性：坏行字节数已从 _nb_sum 扣除，不留虚账
+    c2 = Cache(tmp_path / "cache2.db")
+    c2.put_render_encoded("fpX", "v1", b"junk-not-zlib-123456")
+    c2.get_render("fpX", "v1", lambda: _bundle())
+    assert c2._nb_sum == c2.render_bytes
+
+
+def test_encode_deterministic(tmp_path):
+    # 记账与 blob 回写的正确性都依赖「同 bundle 编码逐字节相同」——
+    # 池模式 worker 编码落库 vs 主进程重编码必须产出同一 blob
+    from ass_font_substitute.core.similarity.cache import _encode
+
+    b = _bundle("永中木水8b")
+    assert _encode(b) == _encode(b)

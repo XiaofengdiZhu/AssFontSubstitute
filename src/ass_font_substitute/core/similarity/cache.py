@@ -129,16 +129,33 @@ class Cache:
     def get_render(self, fingerprint: str, text_ver: str, loader) -> RenderBundle:
         kv = self._kv(text_ver)
         row = self.conn.execute(
-            "SELECT blob FROM renders WHERE fingerprint=? AND text_ver=?",
+            "SELECT blob, nbytes FROM renders WHERE fingerprint=? AND text_ver=?",
             (fingerprint, kv)).fetchone()
         if row:
-            self._pending_render[(fingerprint, kv)] = time.time()
-            if len(self._pending_render) >= self.FLUSH_PENDING:
-                self.flush()
-            return _decode(row[0])
+            try:
+                bundle = _decode(row[0])
+            except Exception:
+                # 坏行自愈（审查二轮 P1）：磁盘翻转/外部改动/截断的 blob
+                # 永不命中也不再信任——删行扣账，走 loader 重渲回写。
+                # 否则异常一路冒到上层被当「字体渲染失败」，重启不愈
+                self._delete_render(fingerprint, kv, row[1])
+            else:
+                self._pending_render[(fingerprint, kv)] = time.time()
+                if len(self._pending_render) >= self.FLUSH_PENDING:
+                    self.flush()
+                return bundle
         bundle = loader()
         self._put_render(fingerprint, text_ver, bundle)
         return bundle
+
+    def _delete_render(self, fingerprint: str, kv: str, nbytes: int):
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM renders WHERE fingerprint=? AND text_ver=?",
+                (fingerprint, kv))
+        self._pending_render.pop((fingerprint, kv), None)
+        if self._nb_sum is not None:
+            self._nb_sum -= nbytes
 
     def _put_render(self, fingerprint, text_ver, bundle: RenderBundle):
         self.put_render_encoded(fingerprint, text_ver, _encode(bundle))
@@ -146,11 +163,22 @@ class Cache:
     def put_render_encoded(self, fingerprint: str, text_ver: str, blob: bytes):
         """直接落已编码 blob（池模式 worker 渲染后回传，免主进程重编码）。
         编码口径（_encode + 键前缀）与 worker 侧同库同版本，无需校验。"""
+        kv = self._kv(text_ver)
         with self.conn:
+            old = self.conn.execute(
+                "SELECT nbytes FROM renders WHERE fingerprint=? AND text_ver=?",
+                (fingerprint, kv)).fetchone()
             self.conn.execute(
                 "INSERT OR REPLACE INTO renders VALUES (?,?,?,?,?)",
-                (fingerprint, self._kv(text_ver), blob, len(blob), time.time()))
+                (fingerprint, kv, blob, len(blob), time.time()))
+        # 同键若已有读命中记账：DB 刚写的时间更新，留旧记账反而在 flush
+        # 时回退（对齐 put_pair）
+        self._pending_render.pop((fingerprint, kv), None)
         if self._nb_sum is not None:
+            # 覆盖写先扣旧行字节数（审查二轮 P1）：INSERT OR REPLACE 删旧行，
+            # 记账只加不减会让 trim 按虚高总量提前淘汰
+            if old is not None:
+                self._nb_sum -= old[0]
             self._nb_sum += len(blob)
         self.trim()
 
