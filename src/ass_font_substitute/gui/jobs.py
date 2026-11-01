@@ -331,7 +331,8 @@ def render_preview(entity, text: str, mono_cells: bool):
     一律留空占位。mono 不给默认：core render_text_strip 默认 True（比对
     管线口径）与 GUI 开关默认 False 相反，显式传参防两口径漂移。"""
     return render_text_strip(Path(entity.dir_path) / entity.rel_path,
-                             entity.face_index, text, mono_cells=mono_cells)
+                             entity.face_index, text, mono_cells=mono_cells,
+                             var_axes=entity.var_axes)
 
 
 @dataclass

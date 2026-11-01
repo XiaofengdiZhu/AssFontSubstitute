@@ -104,7 +104,7 @@ def test_miss_path_render_failure_skips(tmp_path, monkeypatch):
     target = next(e for e in lib.entities() if e.psname == "TGT")
     cache = Cache(tmp_path / "cache.db")
 
-    def explode(path, face_index, chars):
+    def explode(path, face_index, chars, var_axes=()):
         raise RuntimeError("不应触发渲染")
 
     monkeypatch.setattr(search_mod, "render_bundle", explode)
@@ -126,7 +126,7 @@ def test_rejected_results_still_cached(tmp_path, monkeypatch):
     assert _drain(s) == []                      # 0.81 < 0.99 被拒，但 pair 已入库
     assert cache.pair_count >= 1
 
-    def explode(path, face_index, chars):
+    def explode(path, face_index, chars, var_axes=()):
         raise RuntimeError("放宽阈值后不应触发渲染")
 
     monkeypatch.setattr(search_mod, "render_bundle", explode)
@@ -146,7 +146,7 @@ def test_cache_hit_path_coverage_gate(tmp_path, monkeypatch):
     cache.put_pair(target.fingerprint, far.fingerprint, text_version(CHARS),
                    CompareResult(0.92, 1.05, 5))
 
-    def explode(path, face_index, chars):
+    def explode(path, face_index, chars, var_axes=()):
         raise RuntimeError("不应触发渲染")
 
     monkeypatch.setattr(search_mod, "render_bundle", explode)
@@ -164,7 +164,7 @@ def test_target_render_failure_flagged(tmp_path, monkeypatch):
     tpath = str(search_mod._entity_path(target))
     calls: list[str] = []
 
-    def flaky(path, face_index, chars):
+    def flaky(path, face_index, chars, var_axes=()):
         calls.append(str(path))
         raise RuntimeError("目标坏了")
 
@@ -188,7 +188,7 @@ def test_cache_hit_accepted_without_render(tmp_path, monkeypatch):
     cache.put_pair(target.fingerprint, c0.fingerprint, text_version(CHARS),
                    CompareResult(0.92, 1.05, 8))
 
-    def explode(path, face_index, chars):
+    def explode(path, face_index, chars, var_axes=()):
         raise RuntimeError("不应触发渲染")
 
     monkeypatch.setattr(search_mod, "render_bundle", explode)
@@ -212,10 +212,10 @@ def test_render_failure_skipped(tmp_path, monkeypatch):
 
     real_render = search_mod.render_bundle
 
-    def flaky(path, face_index, chars):
+    def flaky(path, face_index, chars, var_axes=()):
         if str(path) == broken_path:
             raise RuntimeError("boom: 不可渲染")
-        return real_render(path, face_index, chars)
+        return real_render(path, face_index, chars, var_axes)
 
     monkeypatch.setattr(search_mod, "render_bundle", flaky)
     s = _searcher(tmp_path, lib, target, cov_threshold=0.98)
@@ -333,7 +333,7 @@ def test_score_pair_shared_cache_semantics(tmp_path, monkeypatch):
     cache.put_pair(target.fingerprint, c0.fingerprint, text_version(CHARS),
                    CompareResult(0.9, 1.0, 3))
 
-    def explode(path, face_index, chars):
+    def explode(path, face_index, chars, var_axes=()):
         raise RuntimeError("缓存命中不应渲染")
 
     monkeypatch.setattr(search_mod, "render_bundle", explode)
@@ -349,10 +349,10 @@ def test_score_pair_shared_cache_semantics(tmp_path, monkeypatch):
     assert r2b is not None and cache2.pair_count == 1
 
     # 目标渲染失败 → TargetRenderError
-    def tgt_explode(path, face_index, chars):
+    def tgt_explode(path, face_index, chars, var_axes=()):
         if str(path) == tpath:
             raise RuntimeError("目标坏了")
-        return real(path, face_index, chars)
+        return real(path, face_index, chars, var_axes)
 
     monkeypatch.setattr(search_mod, "render_bundle", tgt_explode)
     try:
@@ -362,10 +362,10 @@ def test_score_pair_shared_cache_semantics(tmp_path, monkeypatch):
         pass
 
     # 候选渲染失败 → None，且不落 pair 缓存
-    def cand_explode(path, face_index, chars):
+    def cand_explode(path, face_index, chars, var_axes=()):
         if str(path) == bpath:
             raise RuntimeError("候选坏了")
-        return real(path, face_index, chars)
+        return real(path, face_index, chars, var_axes)
 
     monkeypatch.setattr(search_mod, "render_bundle", cand_explode)
     cache4 = Cache(tmp_path / "c4.db")
@@ -464,10 +464,10 @@ def test_pool_target_render_error(tmp_path, monkeypatch):
     s = _pool_searcher(tmp_path, lib, target, cov_threshold=0.98)
     real = search_mod.render_bundle
 
-    def explode(path, fi, text):
+    def explode(path, fi, text, var_axes=()):
         if Path(str(path)).name == "target.ttf":
             raise RuntimeError("boom")
-        return real(path, fi, text)
+        return real(path, fi, text, var_axes)
 
     monkeypatch.setattr(search_mod, "render_bundle", explode)
     disp = _InlineDispatcher()
@@ -532,7 +532,7 @@ def test_score_chunk_worker_fn(tmp_path):
     build_font(d / "c.ttf", chars=CHARS, family="圓體0")
     tb = render_bundle(d / "t.ttf", 0, CHARS)
     blob = _encode(tb)
-    jobs = [(str(d / "c.ttf"), 0), (str(d / "missing.ttf"), 0)]
+    jobs = [(str(d / "c.ttf"), 0, ()), (str(d / "missing.ttf"), 0, ())]
     res = score_chunk(blob, CHARS, jobs)
     assert res[0] is not None
     rt, cblob = res[0]

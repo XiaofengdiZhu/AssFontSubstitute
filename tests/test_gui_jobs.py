@@ -274,8 +274,8 @@ def test_dispatch_pool_isolates_poison_font(ctx_stub, monkeypatch, tmp_path):
     from ass_font_substitute.core.similarity.cache import _encode
     from ass_font_substitute.core.similarity.render import render_bundle
     blob = _encode(render_bundle(d / "t.ttf", 0, "永"))
-    poison = (str(d / "poison.ttf"), 0)
-    good = (str(d / "g.ttf"), 0)
+    poison = (str(d / "poison.ttf"), 0, ())
+    good = (str(d / "g.ttf"), 0, ())
 
     class FakePool:
         def __init__(self):
@@ -334,7 +334,7 @@ def test_dispatch_pool_submits_all_before_waiting(monkeypatch):
 
     monkeypatch.setattr("ass_font_substitute.core.similarity.pool.score_chunk",
                         fake_score)
-    chunks = [[("a", 0)], [("b", 0)], [("c", 0)]]
+    chunks = [[("a", 0, ())], [("b", 0, ())], [("c", 0, ())]]
     ctx = SimpleNamespace(pool=LatchPool(len(chunks)), pool_workers=3,
                           settings=None)
     res = jm._dispatch_pool(ctx, ctx.pool, chunks, b"", "x")

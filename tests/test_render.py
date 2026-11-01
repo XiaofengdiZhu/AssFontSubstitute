@@ -1,8 +1,10 @@
 import numpy as np
+import pytest
 
 from ass_font_substitute.core.similarity import render
 from ass_font_substitute.core.similarity.render import render_bundle
 from tests.fonts import build_font
+from tests.fonts import build_vf
 
 
 def test_render(tmp_path):
@@ -324,3 +326,41 @@ def test_render_bundle_small_ink_rerenders(monkeypatch, tmp_path):
     assert px2 > 48 and calls.count(px2) == 3
     assert abs(px2 - 48 * 43 / b.ink_median) <= 1
     assert 27 <= b.ink_median <= 31              # 量尺仍是 48px 口径
+
+
+def test_render_bundle_with_var_axes(tmp_path):
+    # VF 实例态渲染管道：带设计坐标渲染不炸、产出结构有效位图
+    # （无 gvar 轮廓不随轴变——此处只锁管道口径，spec §6）
+    p = tmp_path / "vf.ttf"
+    build_vf(p, "永", family="变化體",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 300, "default": 400, "max": 900}],
+             instances=[{"name": "Black", "location": {"wght": 900}}])
+    b1 = render_bundle(p, 0, "永")                     # 默认态
+    b2 = render_bundle(p, 0, "永", var_axes=(900.0,))  # 实例态
+    assert len(b2.tiles) == len(b1.tiles) == 1
+    assert b2.available == frozenset("永")
+
+
+def test_render_text_strip_with_var_axes(tmp_path):
+    p = tmp_path / "vf.ttf"
+    build_vf(p, "永", family="变化體",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 300, "default": 400, "max": 900}],
+             instances=[])
+    s = render.render_text_strip(p, 0, "永", var_axes=(900.0,))
+    assert s is not None and s.any()
+
+
+def test_render_partial_axes_rejected(tmp_path):
+    # freetype 对部分长度坐标静默只设首轴（审查实测）——调用方须传全长；
+    # 本层对长度不等于轴数的坐标直接抛错防呆
+    p = tmp_path / "vf.ttf"
+    build_vf(p, "永", family="变化體",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 300, "default": 400, "max": 900},
+                   {"name": "Width", "tag": "wdth",
+                    "min": 50, "default": 100, "max": 200}],
+             instances=[])
+    with pytest.raises(ValueError):
+        render_bundle(p, 0, "永", var_axes=(900.0,))   # 2 轴只给 1 值

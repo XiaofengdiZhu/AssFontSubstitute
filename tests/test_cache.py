@@ -55,7 +55,7 @@ def test_algo_ver_isolates_entries(tmp_path):
     calls = []
     c.get_render("fp", "v1", lambda: calls.append(1) or _bundle())
     assert len(calls) == 1
-    c.ALGO_VER = "3"                       # 模拟算法升级（当前已是 v2）
+    c.ALGO_VER = "4"                       # 模拟算法升级（当前已是 v3）
     c.get_render("fp", "v1", lambda: calls.append(1) or _bundle())
     assert len(calls) == 2                 # 旧口径不命中，重算
 

@@ -20,8 +20,10 @@ from ass_font_substitute.core.similarity.render import render_bundle
 
 
 def score_chunk(target_blob: bytes, sample_text: str,
-                jobs: list[tuple[str, int]]) -> list[tuple | None]:
-    """一批候选评分。jobs = [(path, face_index)…]，返回同序
+                jobs: list[tuple[str, int, tuple[float, ...]]]
+                ) -> list[tuple | None]:
+    """一批候选评分。jobs = [(path, face_index, var_axes)…]（var_axes =
+    VF 实例设计坐标，静态行空元组），返回同序
     (result, blob)：result = (score, size_ratio, n_chars) | None（渲染
     失败/交集空，调用方跳过）；blob = _encode(候选 RenderBundle)（渲染
     成功才有，含交集空）——调用方写渲染缓存，worker 本身仍零缓存零状态
@@ -30,9 +32,9 @@ def score_chunk(target_blob: bytes, sample_text: str,
     一次（~3ms）摊到批内逐字体。"""
     tb = _decode(target_blob)
     out: list[tuple | None] = []
-    for path, face_index in jobs:
+    for path, face_index, var_axes in jobs:
         try:
-            b = render_bundle(Path(path), face_index, sample_text)
+            b = render_bundle(Path(path), face_index, sample_text, var_axes)
             r = compare(tb, b)
         except Exception:
             out.append(None)        # 候选渲染失败无法证明达标（spec §11：跳过）

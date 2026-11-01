@@ -213,7 +213,25 @@ def _second_pass_px(median: float) -> int:
     return max(RULER_PX, round(RULER_PX * ANCHOR_INK / median))
 
 
-def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
+def _apply_var_axes(face, var_axes: tuple[float, ...]) -> None:
+    """可变字体实例化：Face 打开后、任何 glyph 操作前按轴序设全长设计
+    坐标（坐标影响字距/度量，须先于 set_pixel_sizes/load_glyph）。
+    freetype 对部分长度坐标静默补默认值（2 轴传 1 值实测另一轴落默认
+    态）——长度不等于轴数直接抛错防呆，绝不静默错实例。轴数经
+    get_variation_info（freetype-py 无 get_var_axis_count 包装）。
+    不用 set_var_named_instance：FreeType 实例序 0 起，与 inst_index
+    0=默认态口径不一致（spec §4 S5 记账）。静态字体/默认态传空坐标即
+    跳过。"""
+    if not var_axes:
+        return
+    n = len(face.get_variation_info().axes)
+    if n != len(var_axes):
+        raise ValueError(f"var_axes 长度 {len(var_axes)} != 轴数 {n}")
+    face.set_var_design_coords([float(a) for a in var_axes])
+
+
+def render_bundle(path: Path, face_index: int, chars: str,
+                  var_axes: tuple[float, ...] = ()) -> RenderBundle:
     """量尺渲染：48px 渲一遍测墨迹高度中位数（size_ratio 口径）并保留位图
     → 按 锚43/中位数 定 pass2 字号，≤48px 全踩下限直接复用 pass1 位图
     （库内 ~66% 字体），median 偏小的才放大字号重渲第二遍。
@@ -225,9 +243,12 @@ def render_bundle(path: Path, face_index: int, chars: str) -> RenderBundle:
     缺字（cmap 无映射）直接跳过，绝不渲染 .notdef tofu。
     以文件对象打开：Windows 上 FreeType 按 ANSI 码页解释路径字符串，
     非 ASCII 路径会打不开；传文件对象则由 Python 负责读文件，不受编码影响。
+    var_axes：可变字体实例设计坐标（轴序全长，空=默认态），见
+    _apply_var_axes。
     """
     with open(path, "rb") as fh:
         face = freetype.Face(fh, face_index)
+        _apply_var_axes(face, var_axes)
         enc = _encoder_for(face, fh, face_index)
         # 反 tofu：cmap 缺字先剔除（F3），避免渲染落到 .notdef 方块；
         # 重复字符去重（样例文本用户可编辑，重复字两遍全量重渲纯浪费）
@@ -286,8 +307,8 @@ def _cell_advance(ch: str, px: int) -> float:
 
 
 def render_text_strip(path: Path, face_index: int, text: str,
-                      px: int = STRIP_PX,
-                      mono_cells: bool = True) -> np.ndarray | None:
+                      px: int = STRIP_PX, mono_cells: bool = True,
+                      var_axes: tuple[float, ...] = ()) -> np.ndarray | None:
     """预览条带：真实排版渲染（统一 px 尺寸 + 统一画布），字形比例保真
     ——区别于相似度管线 render_bundle 的等高归一 tile（那套为比对设计，
     逐字裁缩到 48px，放大即糊）。
@@ -303,10 +324,12 @@ def render_text_strip(path: Path, face_index: int, text: str,
     缺字/坏字形两模式都留空占位同档前进（不渲染 tofu，也不错位）；
     全缺字返回 None。重复字符各自渲染归位（RenderBundle 的 dict 会
     去重，预览不能丢字）。极端墨迹超挂（>上空/下空）裁边不毁条。
-    以文件对象打开，理由同 render_bundle。
+    以文件对象打开，理由同 render_bundle。var_axes 同 render_bundle
+    （实例态预览条与库内行对齐）。
     """
     with open(path, "rb") as fh:
         face = freetype.Face(fh, face_index)
+        _apply_var_axes(face, var_axes)
         enc = _encoder_for(face, fh, face_index)
         face.set_pixel_sizes(0, px)
         pad = 4

@@ -56,7 +56,8 @@ def score_pair(target: FontEntity, entity: FontEntity, cache: Cache,
     def bundle(e: FontEntity):
         return cache.get_render(
             e.fingerprint, tver,
-            lambda: render_bundle(_entity_path(e), e.face_index, sample_text))
+            lambda: render_bundle(_entity_path(e), e.face_index, sample_text,
+                                  e.var_axes))
 
     try:
         tb = bundle(target)
@@ -165,7 +166,8 @@ class FontSearcher:
         命中就地过门槛（与串行同款快路径），未命中先覆盖率剪枝再按
         RENDER_CHUNK 分块派发 worker 渲染评分，收回同序逐个 absorb。
         dispatcher 契约 = (chunks, target_blob, sample_text) → 同序结果，
-        chunk 结果 = ((score, size_ratio, n_chars) | None, blob | None) | None
+        chunk = job 元组列表（path, face_index, var_axes），chunk 结果 =
+        ((score, size_ratio, n_chars) | None, blob | None) | None
         （blob = 候选编码 bundle，_absorb 回写渲染缓存）。worker 崩溃
         （BrokenProcessPool）的隔离在 dispatcher 层负责（jobs 侧弃池重建
         + 二分定位毒字体后跳过）；此处兜底收到 BrokenProcessPool 时**
@@ -205,7 +207,8 @@ class FontSearcher:
             return []
         out: list[Candidate] = []
         deadline = time.perf_counter() + max_seconds
-        blobs: list[tuple[str, int]] = []       # 待派发 job（path, face_index）
+        blobs: list[tuple[str, int, tuple[float, ...]]] = []
+        # 待派发 job（path, face_index, var_axes）
         meta: list[tuple[FontEntity, float]] = []   # 与 blobs 对齐 (实体, 覆盖率)
         evals = 0
         while evals < max_evals and not self.paused:
@@ -235,12 +238,13 @@ class FontSearcher:
                         self.target.fingerprint, self._tver,
                         lambda: render_bundle(_entity_path(self.target),
                                               self.target.face_index,
-                                              self.sample_text))
+                                              self.sample_text,
+                                              self.target.var_axes))
                 except Exception:
                     self.target_error = True
                     return out
                 self._target_blob = cache_encode(tb)
-            blobs.append((str(_entity_path(e)), e.face_index))
+            blobs.append((str(_entity_path(e)), e.face_index, e.var_axes))
             meta.append((e, cov))
         if not blobs:
             return out

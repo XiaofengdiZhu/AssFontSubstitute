@@ -40,8 +40,10 @@ class Cache:
     # 渲染/比对算法版本（单一事实源，变更时 +1）：TILE/TARGET_INK/
     # RULER_PX/ANCHOR_INK/CHAR_WEIGHT/phash/NCC 任一变更后缓存键随之整体
     # 失效，持久库（Data/cache.db）里的旧口径相似度不再静默命中。
-    # 键前缀实现，零迁移。v2：量尺 96→48px + 锚 43 下限复用（tile 位级变）
-    ALGO_VER = "2"
+    # 键前缀实现，零迁移。v2：量尺 96→48px + 锚 43 下限复用（tile 位级变）。
+    # v3：VF 实例坐标入渲染（var_axes 全链传递）——默认态 tile 位级不变，
+    # 但实例行此前渲染错实例（默认态），渲染/比对键整体失效
+    ALGO_VER = "3"
     # 读命中 used_at 记账条数阈值：满即批量落库（读路径零写入的关键参数）
     FLUSH_PENDING = 256
     # put_pair 触发 _trim_pairs 行数检查的节流间隔（COUNT(*) 全表扫不逐条付）
