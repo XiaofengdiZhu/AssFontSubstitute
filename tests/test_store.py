@@ -100,7 +100,7 @@ def test_schema_mismatch_backs_up_and_rebuilds(tmp_path):
     old.commit()
     old.close()
     (d / "fontindex.db.bak").write_bytes(b"stale backup")   # 既有 .bak 须被覆盖
-    conn = open_db(db)                    # 不得抛 IndexSchemaError
+    conn = open_db(db)                    # 隔离失败须折成 OperationalError（offline 语义）
     assert stats(conn) == {"files": 0, "fonts": 0, "support_sc": 0, "support_tc": 0}
     assert conn.execute("SELECT v FROM schema_version").fetchone()[0] == SCHEMA_VERSION
     bak = d / "fontindex.db.bak"
@@ -283,7 +283,7 @@ def test_v1_db_backed_up_and_rebuilt(tmp_path):
     old.close()
     (d / "fontindex.db.bak").write_bytes(b"stale backup")
     build_font(d / "a.ttf", chars="永", family="新體")
-    conn = open_db(db)                    # 不得抛 IndexSchemaError
+    conn = open_db(db)                    # 隔离失败须折成 OperationalError（offline 语义）
     assert conn.execute("SELECT v FROM schema_version").fetchone()[0] \
         == SCHEMA_VERSION
     assert update_index(d, conn).added == 1
@@ -631,3 +631,36 @@ def test_scan_dir_skips_junction(tmp_path):
                     + r.stderr.decode("gbk", "replace").strip())
     out = scan_dir(d)
     assert [p.name for p in out] == ["a.ttf"]
+
+
+def test_serial_progress_reaches_total_on_skip(tmp_path, monkeypatch):
+    # 串行路径守卫窗口 = 分类 stat 之后、串行 stat 之前文件被删（杀毒
+    # 隔离/清理恰落 parse 窗口；分类前的删除由扫描期 stat 守卫处理，
+    # 进不了 todo）：旧码 done-=1 复用序号——后续回执停 total-1 永不
+    # 达满；修后与并行路径同口径（stat 前收缩 total）
+    d = tmp_path / "fonts"
+    d.mkdir()
+    _mklib(d, 3)
+    real_parse = store_mod.parse_font_file
+    state = {"n": 0}
+
+    def parse_then_delete_next(p):
+        state["n"] += 1
+        if state["n"] == 1:
+            (d / "f1.ttf").unlink()   # 首文件 parse 窗口内删下一个
+        return real_parse(p)
+
+    monkeypatch.setattr(store_mod, "parse_font_file", parse_then_delete_next)
+    conn = open_db(d / "fontindex.db")
+    calls = []
+    update_index(
+        d, conn, max_threads=1,
+        progress=lambda done, total, res:
+            (calls.append((done, total)) or True))
+    assert calls == [(1, 3), (2, 2)]            # 收缩后达满、序号不重复
+    # skip 路径书记正确：f2 入库、f1 不留行（added 在分类期已计 3，虚高
+    # 为旧码同病——GUI 不消费 res，仅记账）
+    assert (d / "f2.ttf").relative_to(d).as_posix() in dict(
+        conn.execute("SELECT rel_path, size FROM files"))
+    rows = dict(conn.execute("SELECT rel_path, size FROM files"))
+    assert set(rows) == {"f0.ttf", "f2.ttf"}    # f1 被删不留行

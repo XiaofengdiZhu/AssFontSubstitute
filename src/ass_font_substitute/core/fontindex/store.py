@@ -103,10 +103,6 @@ def fingerprint_of(aliases: list[str], cmap: CmapRanges, weight: int, width: int
     return hashlib.sha1(canon.encode("utf-8")).hexdigest()
 
 
-class IndexSchemaError(Exception):
-    pass
-
-
 @dataclass
 class UpdateResult:
     added: int = 0
@@ -196,12 +192,13 @@ def _open_checked(path: Path) -> sqlite3.Connection:
         return conn
     if row[0] == SCHEMA_VERSION:
         return conn
-    # spec §5：版本不符 → 改名备份旧库（覆盖既有 .bak）后全量重建
+    # spec §5：版本不符 → 改名备份旧库（覆盖既有 .bak）后全量重建。
+    # 隔离失败由 _quarantine 折成 sqlite3.OperationalError 上抛（与
+    # .corrupt 路径同口径：库被占用=打不开=调用方 offline 语义）——
+    # 曾在此包一层 IndexSchemaError，但 _quarantine 不裸抛 OSError，
+    # 该分支永不触发（二轮审查 P2 死代码）
     conn.close()  # 干净关闭：WAL 落盘、清掉 -wal/-shm 旁车文件
-    try:
-        _quarantine(path, ".bak")
-    except OSError as e:
-        raise IndexSchemaError(f"备份旧库失败: {e}") from e
+    _quarantine(path, ".bak")
     conn = _connect(path)
     conn.execute("INSERT INTO schema_version VALUES (?)", (SCHEMA_VERSION,))
     conn.commit()
@@ -439,15 +436,21 @@ def update_index(dir_path: Path, conn: sqlite3.Connection,
             _update_parallel(dir_path, conn, todo, res, progress, total,
                              cmap_ids, executor=executor, max_threads=max_threads)
         else:
-            for done, p in enumerate(todo, 1):
+            done = 0
+            for p in todo:
                 rel = p.relative_to(dir_path).as_posix()
                 # 解析前取 stat：若解析窗口内文件被外部覆写，记下的是旧 mtime，
                 # 下次必重检；解析后取会记到新 mtime，门误判「未变」→ 静默陈旧
                 try:
                     st = p.stat()
                 except OSError:
-                    done -= 1   # 扫描与 stat 之间被删（清理/杀毒）：跳过，下轮 removed 收敛
+                    # 扫描与 stat 之间被删（清理/杀毒）：跳过，下轮 removed
+                    # 收敛。同步收缩 total 免进度停在 total-1 永不达满（旧
+                    # 码 done-=1 复用序号：后续文件重复回执且末尾差 1，与
+                    # 并行路径派发期收缩不同口径，二轮审查 P2）
+                    total -= 1
                     continue
+                done += 1
                 try:
                     recs = parse_font_file(p)
                 except FontParseError as e:
@@ -504,7 +507,6 @@ def load_font_rows(conn: sqlite3.Connection) -> Iterator[tuple]:
 __all__ = [
     "FP_ALGO",
     "SCHEMA_VERSION",
-    "IndexSchemaError",
     "UpdateResult",
     "fingerprint_of",
     "load_font_rows",
