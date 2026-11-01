@@ -133,6 +133,84 @@ def test_style_field_padding_preserved(tmp_path):
     assert "Style: Main, 思源黑体 ,52" in text
 
 
+def test_style_trailing_space_mapping_key_still_replaces(tmp_path):
+    # 审查二轮 P1：light_ass 不 strip Style 域，fontname 带尾随空格时
+    # extract 按原样建桶（raw_name="華康主體W5 "），映射键随之带空格；
+    # rewrite 取样式域先 strip，键不归一则静默漏替
+    p = tmp_path / "in.ass"
+    p.write_bytes(ASS.encode("utf-8-sig").replace(
+        "Style: Main,華康主體W5,52".encode(),
+        "Style: Main,華康主體W5 ,52".encode()))
+    out = tmp_path / "out.ass"
+    rewrite_file(p, {"華康主體W5 ": "思源黑体"}, out=out)
+    text = out.read_text("utf-8-sig")
+    assert "Style: Main,思源黑体 ,52" in text
+    # 纯空格键剥空后丢弃：不产生零宽 alt 让 fn 正则全场误替
+    rewrite_file(p, {"  ": "思源黑体"}, out=out)
+    assert "華康主體W5" in out.read_text("utf-8-sig")
+
+
+def test_trailing_space_key_also_hits_inline_fn(tmp_path):
+    # 键 strip 归一与行内 \fn 路径自洽：键来自 Style 域带尾随空格，行内
+    # \fn 名字两侧空白由正则组单独保留——剥空键不得破坏行内命中
+    p = _mk(tmp_path)
+    out = tmp_path / "out.ass"
+    r = rewrite_file(p, {"華康主體W5 ": "思源黑体"}, out=out)
+    text = out.read_text("utf-8-sig")
+    assert "{\\fn思源黑体}甲" in text
+    assert "{\\fn思源黑体}丙" in text
+    assert "{\\fn華康主體W5X}" in text       # 前缀不误伤
+    assert "Style: Main,思源黑体,52" in text
+    assert len(r.changed_lines) == 3
+
+
+def test_leading_space_mapping_key_still_replaces(tmp_path):
+    # light_ass 不 strip Style 域：", 華康主體W5" 的前导空格同样进
+    # raw_name/映射键；键 strip 归一后照常命中
+    p = _mk(tmp_path)
+    out = tmp_path / "out.ass"
+    rewrite_file(p, {" 華康主體W5": "思源黑体"}, out=out)
+    text = out.read_text("utf-8-sig")
+    assert "Style: Main,思源黑体,52" in text
+    assert "{\\fn思源黑体}甲" in text
+
+
+def test_at_key_with_trailing_space_still_expands_both_directions(tmp_path):
+    # 键先 strip 再进 _expand_at：带尾随空格的 @ 键剥空后两个方向照常
+    # 展开（@舊→@新 且 舊→新），展开不得重新引入空白
+    p = tmp_path / "v.ass"
+    ass = ("[Script Info]\r\n"
+           "Title: t\r\n"
+           "\r\n"
+           "[V4+ Styles]\r\n"
+           "Format: Name, Fontname, Fontsize\r\n"
+           "Style: V,@舊字體,52\r\n"
+           "Style: H,舊字體,52\r\n"
+           "\r\n"
+           "[Events]\r\n"
+           "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\n"
+           "Dialogue: 0,0:00:00.00,0:00:05.00,V,,0,0,0,,{\\fn@舊字體}甲\r\n")
+    p.write_bytes(ass.encode("utf-8-sig"))
+    out = tmp_path / "out.ass"
+    rewrite_file(p, {"@舊字體 ": "@新字體"}, out=out)
+    text = out.read_text(encoding="utf-8-sig")
+    assert "Style: V,@新字體,52" in text
+    assert "Style: H,新字體,52" in text
+    assert "{\\fn@新字體}" in text
+
+
+def test_colliding_keys_after_strip_latter_wins(tmp_path):
+    # 同名键剥空后相撞按后者覆盖（与 dict 字面量语义一致）：现有调用方
+    # build_mapping 的键是同一卡的 variants，剥空相撞时值必相同，无静默
+    # 换值面；此测试仅钉死确定性语义防回归
+    p = _mk(tmp_path)
+    out = tmp_path / "out.ass"
+    rewrite_file(p, {"華康主體W5": "甲字体", "華康主體W5 ": "乙字体"}, out=out)
+    text = out.read_text("utf-8-sig")
+    assert "Style: Main,乙字体,52" in text
+    assert "{\\fn乙字体}甲" in text
+
+
 def test_big5_dual_encoding_bytes_preserved(tmp_path):
     # 终审 P1：big5 双编码字（a2 40 与 a2 42 同解 ＼）decode→encode 曾
     # 回写规范码 a2 42——未改动行字节也被翻转。未改行锁原字节。

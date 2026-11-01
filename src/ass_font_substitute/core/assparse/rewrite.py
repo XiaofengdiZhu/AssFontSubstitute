@@ -101,7 +101,13 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
         bl = _split_lines(body)
         if len(bl) == len(lines):
             byte_lines = bl
-    m = _expand_at(mapping)
+    # 映射键 strip 归一（审查二轮 P1）：light_ass 不 strip Style 域，
+    # extract 按原样建桶（raw_name="MS Gothic "），映射键随之带尾随空格；
+    # 而本函数取样式域先 strip（cur = parts[fi].strip()）、\fn 名字的
+    # 空白由正则组单独保留——键不归一则「提得到、改不掉」静默漏替。
+    # 空格键剥空后丢弃（空 alt 会让 fn 正则零宽匹配全场）；同名键剥空后
+    # 相撞按后者覆盖（调用方不应给同名键，与 dict 字面量语义一致）。
+    m = _expand_at({k.strip(): v for k, v in mapping.items() if k.strip()})
 
     section = ""
     formats: dict[str, list[str]] = {}
