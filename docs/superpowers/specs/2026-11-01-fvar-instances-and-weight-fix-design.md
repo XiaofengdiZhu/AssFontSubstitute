@@ -57,35 +57,43 @@ store 加列升 SCHEMA_VERSION；去重键加实例维度；FontEntity 带 var_a
 
 | 字段 | 口径 |
 |---|---|
-| weight/width | wght/wdth 轴坐标（轴缺失回退 OS/2 值） |
+| weight | wght 轴坐标（轴缺失回退 OS/2 值） |
+| width | **沿用 OS/2 usWidthClass**（审查 B1：wdth 注册轴是百分刻度 62.5-100，usWidthClass 是 1-9，直接入库污染整型列/粗排 /100 罚项/指纹序列化；width 罚项权重轻，CJK VF 带 wdth 轴极少，YAGNI 不折算） |
 | italic | slnt 轴≠0 或 ital 轴=1 或 OS/2 fsSelection bit0 |
 | cmap | 全实例共享同一 CmapRanges 对象（同文件同字形集） |
 | version/psname | 文件级 ID5/ID6 沿用 |
-| 别名 | 族别名（ID1/4/16 现行口径全收，保证 \fn族名 搜得到实例）+ 实例限定名：instance.subfamilyNameID 回查 name 表按语言取子族名，与族名逐语言拼「族名 子族名」（ID16=思源黑体 + 子族 Heavy → 别名「思源黑体 Heavy」，与静态 Heavy 字体 Windows 命名习惯对齐） |
-| display_name | 实例行 = 族显示名 + 空格 + 子族名；默认实例行沿用现行推导 |
+| 别名 | 族别名（ID1/4/16 现行口径全收，保证 \fn族名 搜得到实例）+ 实例限定名：instance.subfamilyNameID 回查 name 表取子族名（含 ID2 常规回退），与族名按相同 langID 配对拼「族名 子族名」（ID16=思源黑体 + 子族 Heavy → 别名「思源黑体 Heavy」，与静态 Heavy 字体 Windows 命名习惯对齐）；子族名无该语言记录时只出英文（langID 0x409）限定名 |
+| display_name | 实例行 = 限定名别名同一路径的产物（按族名显示链语言配对子族名），保证 display_name ∈ aliases 不变量（审查 B3：两路径分裂时子族名常只有英文——实测 SegUIVar 全 0x409——display 拼出 CJK 名而别名只有英文名，写回名二次检索 miss）；默认实例行沿用现行推导 |
+| name_langs | **实例行置空**（审查 B2：v7 后 GUI 展示名走 name_langs 而非 display_name，实例行照收会全显示成族名无法区分；置空则 pick_display_name 走现有回退链到 display_name=限定名，GUI 零改动。代价：实例名不随界面语言切换，族名部分 CJK 优先不变） |
 | name_records | 沿用文件级（命名卡以文件为单位，不逐实例展开） |
 
+跳过规则（审查 S3 + 拍板「无名不合成」）：坐标与 fvar 默认全等的命名实例
+跳过枚举（默认行已覆盖，免近重复实体）；subfamilyNameID 无法解析出子族名
+的实例跳过（等价无命名实例）。
+
 ID17 不收别名的既有原则不破：收的是「族名+子族名」拼接后的完整名（与静态
-ID1="微软雅黑 Light" 同构），裸子族词不入别名。限定名配对规则：族名与
-子族名按相同 langID 配对拼接；子族名无该语言记录时只出英文（langID
-0x409）限定名；两者皆缺时不出限定名别名。
+ID1="微软雅黑 Light" 同构），裸子族词不入别名。
 
 ### 字重错标补偿（static/VF 统一，行组装末段）
 
-- 触发：该行 aliases（ASCII 名大小写不敏感、`\b` 词边界）含重量词
-  **且 weight == 400**。
+- 触发：**ID1/ID4/ID16 文本名**（审查 S1：aliases 含 ID6 PS 名，corbell
+  实测 PS 名与族名形态漂移，不进扫描域）中**尾词**（大小写不敏感）为
+  重量词 **且 weight == 400**。尾词限定对齐 Windows「族名+样式尾置」
+  命名惯例，封「Black Ops One」（真 400 面，族名首词 Black）类假阳。
 - 词表：Thin→100、ExtraLight/UltraLight→200、Light→300、Medium→500、
-  SemiBold/DemiBold→600、Bold→700、ExtraBold/UltraBold→800、Black/Heavy→900。
-- 仅英文词——CJK「黑体/粗」是类别语义不入表；命中多词取最大
-  （"Bold Condensed"→700）。
+  SemiBold/DemiBold→600、Bold→700、ExtraBold/UltraBold→800、Black/Heavy→900
+  （对照 OS/2 规范核验无误）。
+- 仅英文词——CJK「黑体/粗」是类别语义不入表。
 - VF 实例行 weight 来自轴坐标（可信）不参与补偿；默认实例行走同规则
   （族名含重量词的罕见特例，统一规则优先）。
 
 ## 2. store（core/fontindex/store.py）
 
 - fonts 表加两列：`inst_index INTEGER NOT NULL DEFAULT 0`、
-  `var_axes BLOB`（按轴声明序打包 float 坐标，NULL=静态——渲染层直接用，
-  不重读 fvar）；唯一约束 `UNIQUE(rel_path, face_index)` → 
+  `var_axes BLOB`（按轴声明序打包 float 坐标，**必须全长**——审查实测
+  freetype set_var_design_coords 对部分长度列表静默只设首轴；NULL=静态，
+  VF 默认实例行也存 NULL 走默认态渲染——渲染层直接用，不重读 fvar）；
+  唯一约束 `UNIQUE(rel_path, face_index)` → 
   `UNIQUE(rel_path, face_index, inst_index)`。
 - bad/files/cmap_data 表不动（同文件各实例行 cmap_id 同值，去重存储照旧）。
 - fingerprints 主键 `(rel_path, face_index)` → `(rel_path, face_index,
@@ -112,7 +120,10 @@ ID1="微软雅黑 Light" 同构），裸子族词不入别名。限定名配对�
 - `render_bundle` / `render_text_strip` 加参 `var_axes: tuple[float, ...] = ()`；
   `freetype.Face(fh, face_index)` 打开后、load_glyph 前：
   `face.set_var_design_coords(list(var_axes))`（轴序 = fvar axes 声明序 =
-  parser 打包序）。失败按现有渲染错误契约折包。
+  parser 打包序，坐标列表须与轴数等长）。失败按现有渲染错误契约折包。
+  不用 `set_var_named_instance`：FreeType 实例序（0 起）与 parser
+  inst_index（0=默认态）口径不一致，且 parser 反正要读坐标算 weight
+  （审查 S5 记账，免实现时再纠结）。
 - 调用点同步：search.py:59/236 传 `e.var_axes`；pool.py worker 载荷加
   var_axes 字段（gather chunks 契约 docstring 同步）；jobs.py:333 预览条传
   `entity.var_axes`。
@@ -125,7 +136,9 @@ ID1="微软雅黑 Light" 同构），裸子族词不入别名。限定名配对�
 
 单提交落地（SCHEMA_VERSION 2 + ALGO_VER+1 + parser/library/render 全链），
 不做中间态——旧库旧缓存一次性 .bak/弃表重建，无双版本共存分支。发布前
-重跑 build_portable.bat（既有待办，再确认）。
+重跑 build_portable.bat（既有待办，再确认）。注意 `_quarantine` 覆盖既有
+.bak（审查 N3）：本次会把 2026-11-01 基线重置留下的备份抹掉，数据可全量
+重 derive，接受。
 
 ## 6. 测试口径
 
@@ -149,6 +162,18 @@ parser/index 测试只需 fvar+name+cmap；render 测试口径 = 带坐标渲染
 6. rank_pool：补偿后 VF@900 与错标 StaticHeavy@400 排位不再被压底。
 7. e2e：含 VF 目录全流程，搜索出实例实体。
 
+审查补位（S4）：
+
+8. 展示/检索 roundtrip（B2/B3）：实例行 display_name ∈ aliases；写回链
+   用的 display_name 再进 find_by_name 能命中；name_langs 置空后
+   pick_display_name 回退到限定名。
+9. 假阳样例（S1）：「Black Ops One」类族名首词重量词不改写；尾词命中
+   照改。
+10. var_axes 全长断言（部分长度 freetype 静默只设首轴）；坐标=默认的
+    实例与子族名不可解析的实例跳过枚举。
+11. instance.coordinates 缺轴键回退 axis.defaultValue（fontTools 不保证
+    齐全）。
+
 ## 7. 真机验收（用户）
 
 1.3 万库重扫耗时目测；VF 实体在库页/字体选择器展示与搜索；「族 Heavy」
@@ -157,9 +182,22 @@ parser/index 测试只需 fvar+name+cmap；render 测试口径 = 带坐标渲染
 
 ## 8. 已知限制（记账）
 
-- 实例子族名按语言回退：缺语言走英文/首名。
+- **libass 写回侧实例不可解析**（审查实证 libass#386，用户拍板 2026-11-01
+  仅记账不加徽标）：libass 不能按命名实例匹配 \fn，fontconfig provider
+  显式忽略 VF 命名实例，未命中回落 fvar 默认实例（字重可能错）；GDI/
+  VSFilter 栈可解析实例族名。即实例实体库内可搜可选可预览（自渲染
+  set_var_design_coords 有效），mpv/libass 系播放写回可能渲成默认字重。
+- 补偿假阴（S1）：camelCase PS 名（CorbelLight）无词边界不触发；非 400
+  的其他错标值不覆盖（只修最普遍的「整标默认 400」形态）。
+- 指纹不含 var_axes（S2）：限定名生成失败已由跳过规则堵死，残留窗口为
+  「同轴坐标全等但 opsz 等其他轴不同」的两实例同指纹——与 cache.py
+  「fingerprint 不含字形轮廓」既有已知限制同源，LRU 淘汰自然轮换。
 - wght 轴缺失的命名实例 weight 回退 OS/2（可能被补偿规则接管）。
+- instance.coordinates 缺轴键回退 axis.defaultValue（fontTools 不保证
+  齐全）。
 - TTC×VF 组合依赖 face 级 fvar 判定（fontTools 保证）。
+- 实例行 name_langs 置空：实例名不随界面语言切换（族名部分 CJK 优先
+  不变）。
 - 无命名实例的 VF 只入默认实例，不合成名称（用户拍板：不同字重有不同
   名称自然是好事，没有时不合成——现有系统本就支持同族名多字重实体）。
 - woff/woff2 维持现状（网页格式，libass/VSFilter 不加载，白名单静默跳过）。
