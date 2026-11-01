@@ -219,7 +219,14 @@ def scan_dir(root: Path) -> list[Path]:
         with os.scandir(d) as it:
             for e in it:
                 if e.is_dir(follow_symlinks=False):
-                    stack.append(Path(e.path))
+                    # junction（Windows reparse point）is_symlink()=False，
+                    # is_dir(False) 照真——自指/成环 junction 不跳过则递归
+                    # 到路径极限 OSError 炸整次扫描（真机复现 WinError
+                    # 1921「系统无法辨识文件名」）。rglob「不跟随目录符号
+                    # 链接」语义延伸到 junction：库内目标会经真实路径扫
+                    # 到，库外目标本就不该收
+                    if not e.is_junction():
+                        stack.append(Path(e.path))
                 elif (e.is_file(follow_symlinks=False)
                       and Path(e.path).suffix.lower() in WHITELIST
                       and e.name != DB_NAME):

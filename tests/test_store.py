@@ -607,3 +607,27 @@ def test_update_index_parallel_deleted_between_scan_and_dispatch(tmp_path, monke
     conn3 = open_db(d / "fontindex.db")
     r3 = update_index(d, conn3, executor=ThreadPoolExecutor(max_workers=2))
     assert r3.removed == 1 and stats(conn3)["fonts"] == 2
+
+
+def test_scan_dir_skips_junction(tmp_path):
+    # 自指 junction：is_symlink()=False 但成环，不跳过则递归到路径极限
+    # OSError 炸整次扫描（真机复现 WinError 1921「系统无法辨识文件名」）
+    import subprocess
+    import sys
+
+    import pytest
+
+    from ass_font_substitute.core.fontindex.store import scan_dir
+
+    if sys.platform != "win32":
+        pytest.skip("Windows junction")
+    d = tmp_path / "fonts"
+    d.mkdir()
+    build_font(d / "a.ttf", chars="永", family="A體")
+    r = subprocess.run(["cmd", "/c", "mklink", "/J", str(d / "loop"),
+                        str(d)], capture_output=True)
+    if r.returncode != 0:
+        pytest.skip("junction 创建失败: "
+                    + r.stderr.decode("gbk", "replace").strip())
+    out = scan_dir(d)
+    assert [p.name for p in out] == ["a.ttf"]
