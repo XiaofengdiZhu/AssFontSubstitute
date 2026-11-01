@@ -1,7 +1,7 @@
 [project]
 name = "ass-font-substitute"
 version = "1.0.0"
-description = "用于解决 ASS 字幕文件经简繁转换后，原字体覆盖率不足/难以找到相似替补字体的问题的一站式 GUI 工具"
+description = "用于解决 ASS 字幕文件经简繁转换后，原字体覆盖率不足/难以确定相似替补字体等问题的一站式 GUI 工具"
 readme = "README.md"
 authors = [
     { name = "销锋镝铸", email = "523084467@qq.com" }
