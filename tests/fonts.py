@@ -46,6 +46,7 @@ def _new_glyph(shape: str, scale: float = 1.0) -> object:
 
 
 def _make(spec: dict):
+    """构建最小字体的 TTFont（未 save）；build_font/build_ttc 与测试直接复用。"""
     chars = spec.get("chars", "")
     family = spec.get("family", DEFAULT_FAMILY)
     weight = spec.get("weight", 400)
@@ -105,3 +106,26 @@ def build_ttc(path: Path, specs: list[dict]) -> None:
     coll = TTCollection()
     coll.fonts = [_make(s) for s in specs]
     coll.save(path)
+
+
+def build_vf(path: Path, chars: str, family: str = DEFAULT_FAMILY,
+             axes: list[dict] | None = None,
+             instances: list[dict] | None = None,
+             weight: int = 400, psname: str | None = None,
+             version: str = "Version 1.000",
+             extra_aliases: dict | None = None) -> None:
+    """最小可变字体：fvar 轴+命名实例，无 gvar（轮廓不随轴变——
+    parser/index/渲染管道测试只依赖 fvar+name+cmap；轮廓级变异由
+    freetype 自身保证，spec §6）。"""
+    font = _make({"chars": chars, "family": family, "weight": weight,
+                  "psname": psname, "version": version,
+                  "extra_aliases": extra_aliases})
+    # fontBuilder.addFvar 的轴只收 tuple/带属性的 designspace 对象（不收 dict），
+    # 命名实例 dict 键为 stylename——这里把本工厂的 dict 口径转换过去
+    fvar_axes = [(a["tag"], a["min"], a["default"], a["max"], a["name"])
+                 for a in (axes or [])]
+    fvar_instances = [{"stylename": i["name"], "location": i["location"]}
+                      for i in (instances or [])]
+    fb = FontBuilder(font=font)
+    fb.setupFvar(fvar_axes, fvar_instances)
+    font.save(path)

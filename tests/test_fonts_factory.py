@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fontTools.ttLib import TTFont
 
 from tests.fonts import build_font
@@ -23,3 +25,21 @@ def test_build_ttc(tmp_path):
     assert len(TTFont(p, fontNumber=0)["name"].names) > 0
     from fontTools.ttLib import TTCollection
     assert len(TTCollection(p).fonts) == 2
+
+
+def test_build_vf_has_named_instances(tmp_path: Path):
+    from tests.fonts import build_vf
+    p = tmp_path / "vf.ttf"
+    build_vf(p, "永", family="变化體",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 300, "default": 400, "max": 900}],
+             instances=[{"name": "Light", "location": {"wght": 300}},
+                        {"name": "Black", "location": {"wght": 900}}])
+    tt = TTFont(str(p))
+    fvar = tt["fvar"]
+    assert [a.axisTag for a in fvar.axes] == ["wght"]
+    assert len(fvar.instances) == 2
+    # fontBuilder 自动登记实例名 name 记录，subfamilyNameID 指向它
+    sub_ids = {i.subfamilyNameID for i in fvar.instances}
+    got = {tt["name"].getDebugName(nid) for nid in sub_ids}
+    assert got == {"Light", "Black"}
