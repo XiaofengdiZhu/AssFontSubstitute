@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections import Counter
 from pathlib import Path
@@ -286,6 +287,14 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                 errors.append(f"{path.name}#{idx}: {e}")
         if not out:
             raise FontParseError("; ".join(errors) or f"{path.name}: no face parsed")
+        if errors:
+            # 部分面失败不阻断其余 face 入库（spec §11），但必须留痕——
+            # 静默丢弃让 TTC「少了字体」无从查起（二轮审查 P2）。进程池
+            # worker 的 stderr 在 GUI 不可见，界面级呈现另案（bad 表键=
+            # rel_path，整文件标坏会误伤已入库 face，语义不符）
+            logging.getLogger(__name__).warning(
+                "%s: %d/%d 个 face 解析失败: %s",
+                path.name, len(errors), len(fonts), "; ".join(errors))
         return out
     finally:
         # lazy 加载会持有文件句柄，Windows 上不关闭会阻塞后续删除/覆盖

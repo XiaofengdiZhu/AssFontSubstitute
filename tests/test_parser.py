@@ -63,7 +63,7 @@ def test_parse_missing_os2_falls_back(tmp_path):
     assert r.cmap.contains(ord("永"))
 
 
-def test_parse_ttc_partial_face_failure(tmp_path):
+def test_parse_ttc_partial_face_failure(tmp_path, caplog):
     # spec §11：TTC 个别子字体解析失败 → 跳过该子字体，文件其余照常
     p = tmp_path / "a.ttc"
     build_ttc(p, [{"chars": "永", "family": "A體"}, {"chars": "中", "family": "B體"}])
@@ -78,6 +78,9 @@ def test_parse_ttc_partial_face_failure(tmp_path):
     recs = parse_font_file(p2)
     assert [r.face_index for r in recs] == [0]   # 保留原始枚举下标
     assert "A體" in recs[0].aliases
+    # 部分失败必须留痕：静默丢弃让 TTC「少了字体」无从查起（二轮审查 P2）
+    assert "1/2 个 face 解析失败" in caplog.text
+    assert "broken.ttc#1" in caplog.text   # 带文件名前缀，防 "#1" 撞 "#10"
 
 
 def test_parse_ttc_all_faces_broken_raises(tmp_path):
