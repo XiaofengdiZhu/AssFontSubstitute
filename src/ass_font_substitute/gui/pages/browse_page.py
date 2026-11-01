@@ -100,8 +100,11 @@ class BrowsePage(ScrollArea):
     def reload_library(self):
         dirs = tuple(self.settings.get("font_dirs"))
         if not dirs:
-            # 目录清空必须真清数据：只显 hint 会让旧字体列表留在提示下面
+            # 目录清空必须真清数据：只显 hint 会让旧字体列表留在提示下面。
+            # 失效键同步清空态——否则 showEvent 每次都误判「键变」重拉
+            # （审查二轮 P2）
             self.pvm.set_entities([])
+            self._lib_key = lib_key([])
             self._reload_list()
             return
         self.worker.submit("blib", _lib_job, list(dirs))

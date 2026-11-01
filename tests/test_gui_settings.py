@@ -1079,3 +1079,38 @@ def test_save_suffix_rejects_ass(tmp_path):
     assert s2.get("save_suffix") == DEFAULTS["save_suffix"]
     assert json.loads(f.read_text("utf-8"))["save_suffix"] == \
         DEFAULTS["save_suffix"]
+
+
+def test_set_side_element_validation_matches_reload(tmp_path):
+    # 审查二轮 P2：set 侧只查列表外壳不查元素——错型元素落盘后重启被
+    # reload 静默蒸发；修后与 reload 同口径（font_dirs 强转 str，
+    # preview_history 元素须非空 str 且截 MAX）
+    s = Settings(tmp_path / "settings.json")
+    with pytest.raises(ValueError):
+        s.set("preview_history", ["a", 123])
+    with pytest.raises(ValueError):
+        s.set("preview_history", ["a", "  "])
+    s.set("preview_history", ["x"] * 15)
+    assert s.get("preview_history") == ["x"] * 10   # 截 MAX_PREVIEW_HISTORY
+    s.set("font_dirs", [1, "Q:/f"])                   # 与 reload 同口径强转
+    assert s.get("font_dirs") == ["1", "Q:/f"]
+    s2 = Settings(tmp_path / "settings.json")       # 重启存活（不再被蒸发）
+    assert s2.get("preview_history") == ["x"] * 10
+    assert s2.get("font_dirs") == ["1", "Q:/f"]
+
+
+def test_stale_tmp_files_cleaned_on_init(tmp_path):
+    # 审查二轮 P2：崩溃残留 settings.json.tmp<pid> 不清理会无限积累；
+    # 只删 mtime 超 60 秒的（活实例 tmp 只存活毫秒级，不误伤）
+    f = tmp_path / "settings.json"
+    stale = tmp_path / "settings.json.tmp123"
+    stale.write_text("garbage", "utf-8")
+    old = time.time() - 3600
+    os.utime(stale, (old, old))
+    fresh = tmp_path / "settings.json.tmp999"
+    fresh.write_text("garbage", "utf-8")            # 60 秒内=活实例在写
+    s = Settings(f)
+    assert not stale.exists()
+    assert fresh.exists()
+    s.close() if hasattr(s, "close") else None
+

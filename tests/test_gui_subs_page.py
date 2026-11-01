@@ -947,7 +947,7 @@ def test_pick_score_receipt_and_metrics_text(qapp, tmp_path, monkeypatch):
                     (usage, UsageClass(kind="replace", entities=[ent_a])))
     assert page.vm.cards
 
-    page._on_result("pickscore:甲字体", (ent_b, 0.88, 1.04))
+    page._on_result(f"pickscore:{page._gen}:甲字体", (ent_b, 0.88, 1.04))
     card = page.vm.cards[0]
     o = card.option("fp2")
     assert o is not None and o.source == "pick" and card.checked_key == "fp2"
@@ -964,7 +964,7 @@ def test_pick_score_receipt_and_metrics_text(qapp, tmp_path, monkeypatch):
 
     # 卡被重算后迟到的评分回执：弃置不炸
     page.on_library_changed()
-    page._on_result("pickscore:甲字体", (ent_b, 0.5, 1.0))
+    page._on_result(f"pickscore:{page._gen - 1}:甲字体", (ent_b, 0.5, 1.0))
 
 
     # 评分失败降级：无分回填保住用户选择（不弹「任务失败」改 warning 语义）
@@ -977,7 +977,7 @@ def test_pick_score_receipt_and_metrics_text(qapp, tmp_path, monkeypatch):
     fired = []
     monkeypatch.setattr(InfoBar, "warning",
                         classmethod(lambda cls, *a, **k: fired.append(a[0])))
-    page2._on_failed("pickscore:甲字体", "boom")
+    page2._on_failed(f"pickscore:{page2._gen}:甲字体", "boom")
     monkeypatch.setattr(InfoBar, "warning", InfoBar.warning)   # 还原防误伤后段
     assert fired == ["相似度评分失败"]    # 降级走 warning，不是静默也不是 error
     card2 = page2.vm.cards[0]
@@ -988,11 +988,11 @@ def test_pick_score_receipt_and_metrics_text(qapp, tmp_path, monkeypatch):
 
     # 无 pending（迟到失败）/卡已重算孤儿：无从回填，照白名单报错不炸
     fired.clear()
-    page2._on_failed("pickscore:甲字体", "boom")
+    page2._on_failed(f"pickscore:{page2._gen}:甲字体", "boom")
     assert fired == []                 # 白名单走 InfoBar.error，未拦
     page2.on_library_changed()
     page2._pending_picks["甲字体"] = ent_b
-    page2._on_failed("pickscore:甲字体", "boom")
+    page2._on_failed(f"pickscore:{page2._gen}:甲字体", "boom")
 
 
 def test_twin_metrics_lead_phrase(qapp, tmp_path, monkeypatch):
@@ -2364,3 +2364,39 @@ def test_apply_records_snapshot_not_post_dispatch_cards(qapp, tmp_path, monkeypa
     page._on_result(f"apply:{page._apply_gen}", ApplyFileResult(str(src), str(src), 1))
     d = latest_decision(Path(page.vm.decisions_db), "甲字体", "t2s")
     assert d == ("fp2", False)          # 快照：用户勾的 fp2，非重建后的 fp1
+
+
+def test_pickscore_gen_guard_and_reclassify_clears_pending(qapp, tmp_path, monkeypatch):
+    # 审查二轮 P2：_reclassify 清 _pending_picks（旧在途评分残留会让同
+    # norm 新手选被「评分进行中」误挡）；旧批迟到回执/失败按 gen 整批
+    # 弃置——不得弹新批 pending（张冠李戴）也不得回填
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    ent_a, ent_b = _ent("fp1", "甲字体"), _ent("fp2", "乙字体")
+    _feed_replace_card(page, ent_a, ent_b)
+    assert page.vm.cards
+    old_gen = page._gen
+    page._pending_picks["甲字体"] = ent_b
+    page._reclassify()
+    assert page._gen == old_gen + 1
+    assert "甲字体" not in page._pending_picks      # 随批清空
+
+    # 新批 pending 在途，旧批迟到回执/失败不得触碰
+    page._pending_picks["甲字体"] = ent_b
+    page._on_result(f"pickscore:{old_gen}:甲字体", (ent_b, 0.5, 1.0))
+    assert "甲字体" in page._pending_picks          # 旧回执没弹新批 pending
+    page._on_failed(f"pickscore:{old_gen}:甲字体", "boom")
+    assert "甲字体" in page._pending_picks
+    # 旧格式 2 段 tag（无 gen）同样拦在守卫外
+    page._on_result("pickscore:甲字体", (ent_b, 0.5, 1.0))
+    page._on_failed("pickscore:甲字体", "boom")
+    assert "甲字体" in page._pending_picks
+    # 当前批正常回执照常消费（fp3 不在分类候选里 → attach 建新 pick 行；
+    # 已有 recommend 行的实体 pick 只勾选不回填分，属既有行为）
+    page._reclassify()
+    ent_c = _ent("fp3", "丙字体", chars="永宇")
+    _feed_replace_card(page, ent_a, ent_b)   # parse 到达内部还会 bump _gen
+    page._pending_picks["甲字体"] = ent_c
+    page._on_result(f"pickscore:{page._gen}:甲字体", (ent_c, 0.5, 1.0))
+    assert "甲字体" not in page._pending_picks
+    o = page.vm.cards[0].option("fp3")
+    assert o is not None and o.source == "pick"

@@ -5,6 +5,7 @@ import math
 import os
 import re
 import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QLocale
@@ -111,7 +112,27 @@ class Settings(QObject):
         # worker 线程与 UI 线程并发 set：
         # 互斥保住「tmp 固定名原子写」与 dumps 期间字典不被改
         self._lock = threading.RLock()          # set→save 嵌套，须可重入
+        self._cleanup_stale_tmps()
         self.reload()
+
+    def _cleanup_stale_tmps(self) -> None:
+        """崩溃残留的 settings.json.tmp<pid> 不清理会无限积累（二轮审查
+        P2）。只删 mtime 超 60 秒的：活实例的 tmp 只在 write_text→replace
+        间存活毫秒级；同 pid 的新写会覆写同名 tmp，留着也无害。失败静默
+        （只读目录等，与 save 的容忍口径一致）。"""
+        try:
+            f = self._file()
+            if not f.parent.is_dir():
+                return
+            now = time.time()
+            for p in f.parent.glob(f.name + ".tmp*"):
+                try:
+                    if now - p.stat().st_mtime > 60:
+                        p.unlink()
+                except OSError:
+                    continue
+        except OSError:
+            pass
 
     def _file(self) -> Path:
         if self.path is not None:
@@ -196,10 +217,18 @@ class Settings(QObject):
             value = float(value)   # int 实参归一（会话内 get 口径与 reload 一致）
         if key in _LIST_KEYS and not isinstance(value, list):
             raise ValueError(f"{key} 必须是列表")
-        if key == "preview_history" and not isinstance(value, list):
-            raise ValueError("preview_history 必须是列表")
-        if key == "last_dirs" and not isinstance(value, dict):
-            raise ValueError("last_dirs 必须是字典")
+        if key in _LIST_KEYS:
+            value = [str(x) for x in value]    # 与 reload 同口径强转 str
+        if key == "preview_history":
+            if not isinstance(value, list) or                     not all(isinstance(x, str) and x.strip() for x in value):
+                raise ValueError("preview_history 必须是非空字符串列表")
+            value = value[:MAX_PREVIEW_HISTORY]   # 新→旧，最多 10 条
+        if key == "last_dirs":
+            if not isinstance(value, dict):
+                raise ValueError("last_dirs 必须是字典")
+            if not all(isinstance(kk, str) and isinstance(vv, str)
+                       for kk, vv in value.items()):
+                raise ValueError("last_dirs 键值必须都是字符串")
         if key == "sample_text" and (not isinstance(value, str) or not value.strip()):
             raise ValueError("对比文字不能为空")
         if key == "save_suffix" and not _suffix_ok(value):

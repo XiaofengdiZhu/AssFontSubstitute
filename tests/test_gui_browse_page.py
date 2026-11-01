@@ -22,7 +22,12 @@ class _FakeWorker(QObject):
     result = Signal(object, object)
     failed = Signal(object, str)
 
+    def __init__(self):
+        super().__init__()
+        self.tags: list = []
+
     def submit(self, tag, fn, *args, **kw):
+        self.tags.append(tag)
         return type("H", (), {"cancelled": False})()
 
 
@@ -56,4 +61,19 @@ def test_blib_failure_reports(qapp, tmp_path, monkeypatch):
     assert fired and "boom" in fired[0][1]
     page.worker.failed.emit("unrelated", "x")       # 白名单外不弹
     assert len(fired) == 1
+    page.deleteLater()
+
+
+def test_clear_dirs_syncs_lib_key(qapp, tmp_path, monkeypatch):
+    # 审查二轮 P2：目录清空真清数据且失效键同步清空态——否则 showEvent
+    # 每次都误判「键变」重拉
+    from ass_font_substitute.gui.jobs import lib_key
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    page.settings.set("font_dirs", [])
+    page.reload_library()
+    assert page._lib_key == lib_key([])
+    from PySide6.QtGui import QShowEvent
+    before = len(page.worker.tags)
+    page.showEvent(QShowEvent())                    # 不再触发重拉
+    assert len(page.worker.tags) == before          # 键同步后无重复提交
     page.deleteLater()

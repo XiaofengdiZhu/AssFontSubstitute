@@ -506,7 +506,10 @@ class SubsPage(QWidget):
                 self._apply_card(card)
                 self._update_summary()
         elif isinstance(tag, str) and tag.startswith("pickscore:"):
-            norm = tag.split(":", 1)[1]
+            parts = tag.split(":", 2)
+            if len(parts) != 3 or int(parts[1]) != self._gen:
+                return                     # 旧批迟到回执：整批弃置
+            norm = parts[2]
             self._pending_picks.pop(norm, None)
             card = self._card(norm)
             if card is None:               # 评分期间整页重算：弃置
@@ -541,7 +544,10 @@ class SubsPage(QWidget):
             self._update_summary()         # 按当前状态恢复
         # 手选评分失败：降级无分回填，保住用户选择（重算孤儿卡则无从回填）
         if isinstance(tag, str) and tag.startswith("pickscore:"):
-            norm = tag.split(":", 1)[1]
+            parts = tag.split(":", 2)
+            if len(parts) != 3 or int(parts[1]) != self._gen:
+                return                     # 旧批迟到失败：状态已清，不回填
+            norm = parts[2]
             entity = self._pending_picks.pop(norm, None)
             card = self._card(norm) if entity is not None else None
             if card is not None:
@@ -566,6 +572,9 @@ class SubsPage(QWidget):
         for d in self._cancels.values():
             d["cancelled"] = True
         self._cancels.clear()
+        # 在途手选评分随批失效：pending 不得跨批残留——旧回执按 gen 弃
+        # 置后残留项会让同 norm 新手选被「评分进行中」误挡（审查二轮 P2）
+        self._pending_picks.clear()
         usages = self.vm.merged_usages()
         self.vm.cards.clear()
         for w in self._cards_ui.values():
@@ -763,7 +772,12 @@ class SubsPage(QWidget):
                                 self.tr("该字体的上一次评分还在路上，请稍候再选"),
                                 parent=self)
                 return
-            self.worker.submit(f"pickscore:{norm}", _pick_score_job,
+            # tag 带 _gen：重算批的迟到评分回执整批弃置（审查二轮 P2：
+            # _pending_picks 不清——旧在途评分让同 norm 新手选被「评分
+            # 进行中」误挡， cleared 后旧回执若按 norm 弹 pending 又会
+            # 张冠李戴——gen 对不上的一律不碰状态）
+            self.worker.submit(f"pickscore:{self._gen}:{norm}",
+                               _pick_score_job,
                                vm_target(self.vm, card), dlg.selected)
             self._pending_picks[norm] = dlg.selected
 
