@@ -305,9 +305,17 @@ def _update_parallel(dir_path: Path, conn: sqlite3.Connection,
     try:
         futs = {}
         for p in todo:
-            # 派发前取 stat：解析窗口内被外部覆写则记旧 mtime，下次必重检
-            futs[ex.submit(_parse_task, p)] = (
-                p.relative_to(dir_path).as_posix(), p.stat(), p)
+            rel = p.relative_to(dir_path).as_posix()
+            try:
+                # 派发前取 stat：解析窗口内被外部覆写则记旧 mtime，下次必重检
+                st = p.stat()
+            except OSError:
+                # 扫描与派发之间被删（清理/杀毒）：跳过，下轮 removed 收敛。
+                # 此时尚无任何 progress 回执，同步收缩 total 免进度停在
+                # total-1 永不达满（串行路径的守卫见 update_index 主循环）
+                total -= 1
+                continue
+            futs[ex.submit(_parse_task, p)] = (rel, st, p)
         pending = dict(futs)
         done = 0
         for fut in as_completed(futs):
@@ -365,7 +373,10 @@ def update_index(dir_path: Path, conn: sqlite3.Connection,
     todo: list[Path] = []
     for p in scan_dir(dir_path):
         rel = p.relative_to(dir_path).as_posix()
-        st = p.stat()
+        try:
+            st = p.stat()
+        except OSError:
+            continue   # rglob 与 stat 之间被删（清理/杀毒）：跳过，下轮收敛
         current[rel] = (st.st_size, st.st_mtime_ns)
         if rel in known:
             if known[rel] != current[rel]:

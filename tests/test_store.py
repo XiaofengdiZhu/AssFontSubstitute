@@ -426,3 +426,58 @@ def test_name_records_blob_roundtrip(tmp_path):
     assert (1, 3, 0x409, "TestFam") in recs
     assert all(r[0] in (1, 2, 3, 4, 16) for r in recs)
     assert all(r[1] in (1, 3) for r in recs)   # Windows+Mac 平台
+
+
+def test_update_index_parallel_deleted_between_scan_and_dispatch(tmp_path, monkeypatch):
+    # 审查二轮 P1 回归：并行派发期（与扫描期）p.stat() 曾无删文件守卫——
+    # 扫描后文件被外部删（清理/杀毒）炸整目录更新。现两处都跳过，
+    # 下轮 removed 收敛；total 收缩防进度永不达满
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    import ass_font_substitute.core.fontindex.store as st_mod
+
+    d = tmp_path / "fonts"
+    d.mkdir()
+    _mklib(d, n=3)
+    ghost = d / "ghost.ttf"
+    real_scan = st_mod.scan_dir
+
+    def scan_with_ghost(root):
+        return [*real_scan(root), ghost]   # 扫描窗口内还在，stat 前被删
+
+    monkeypatch.setattr(st_mod, "scan_dir", scan_with_ghost)
+    conn = open_db(d / "fontindex.db")
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        r = update_index(d, conn, executor=ex)
+    assert r.added == 3                       # 幽灵不计入
+    assert stats(conn)["fonts"] == 3
+
+    # 派发期被删：victim 触碰成 changed 进 todo，扫描期 stat 放行、
+    # 派发循环 stat（同路径第二次调用）时已删——跳过不炸
+    monkeypatch.setattr(st_mod, "scan_dir", real_scan)
+    victim = d / "f1.ttf"
+    os.utime(victim)                          # mtime 变化 → changed → todo
+    os.utime(d / "f0.ttf")                    # 再 touch 一个：todo≥2 才走并行分支
+    real_stat = type(victim).stat
+    calls = {"n": 0}
+
+    def stat_delete_on_second(self, *a, **kw):
+        if self == victim:
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                victim.unlink(missing_ok=True)
+                raise OSError(2, "gone")
+        return real_stat(self, *a, **kw)
+    monkeypatch.setattr(type(victim), "stat", stat_delete_on_second)
+    conn2 = open_db(d / "fontindex.db")
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        r2 = update_index(d, conn2, executor=ex)
+    assert r2.changed == 2                    # changed 在扫描期已计（幻影计数，
+                                              # 与串行路径同款）；victim 行仍在，
+                                              # 不炸不跳整个任务
+    assert stats(conn2)["fonts"] == 3
+    monkeypatch.undo()                        # 下轮真实扫描：removed 收敛
+    conn3 = open_db(d / "fontindex.db")
+    r3 = update_index(d, conn3, executor=ThreadPoolExecutor(max_workers=2))
+    assert r3.removed == 1 and stats(conn3)["fonts"] == 2
