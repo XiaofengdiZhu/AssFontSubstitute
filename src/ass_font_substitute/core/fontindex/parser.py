@@ -23,6 +23,31 @@ RECORD_IDS = (1, 2, 3, 4, 16)
 TTC_EXTS = {".ttc", ".otc"}
 _VER_RE = re.compile(r"([\d]+(?:\.\d+)*)")
 
+# 字重错标补偿词表（spec §1，OS/2 usWeightClass 规范值核验无误）。仅英文
+# 词——CJK「黑体/粗」是类别语义。触发条件：ID1/4/16 文本名尾词（大小写
+# 不敏感）命中 ∧ 该行 weight==400（审查 S1 尾词限定：对齐 Windows「族名
+# +样式尾置」惯例，封「Black Ops One」（真 400 面）类假阳；camelCase
+# 尾缀（CorbelLight）无词边界不触发——假阴记账 spec §8）
+_WEIGHT_WORDS = {
+    "thin": 100, "extralight": 200, "ultralight": 200, "light": 300,
+    "medium": 500, "semibold": 600, "demibold": 600, "bold": 700,
+    "extrabold": 800, "ultrabold": 800, "black": 900, "heavy": 900,
+}
+
+
+def _compensate_weight(base: dict) -> int:
+    """错标补偿：名字尾词命中词表且 OS/2==400 → 按词表改写。多命中取
+    最大（"… Light" 与 "… Bold" 并存时取 700）。"""
+    if base["weight"] != 400:
+        return base["weight"]
+    hits = [w for nid in (1, 4, 16)
+            for _lg, s in (base["name_langs"].get(nid) or [])
+            for w in ([_WEIGHT_WORDS[s.rstrip().rsplit(" ", 1)[-1].lower()]]
+                      if s.rstrip() and
+                      s.rstrip().rsplit(" ", 1)[-1].lower() in _WEIGHT_WORDS
+                      else [])]
+    return max(hits) if hits else base["weight"]
+
 
 class FontParseError(Exception):
     pass
@@ -90,9 +115,10 @@ def _family_names(by_id: dict[int, list[str]]) -> tuple[str, ...]:
 
 
 def _subfamily_texts(name, nid: int) -> list[tuple[int, str]]:
-    """subfamilyNameID 回查 name 表（全平台），[(langID, 文本)]；含 ID2
-    常规回退——fvar 实例的 subfamilyNameID 常指向自建记录，缺失时查同值
-    nameID 无意义，只按 nid 直查；记录缺失返回空。"""
+    """subfamilyNameID 直查 name 表（全平台），[(langID, 文本)]。按
+    subfamilyNameID 直查天然覆盖其指向 ID2 记录的场景；fvar 实例的
+    subfamilyNameID 也常指向自建记录，同一直查路径处理。记录缺失返回
+    空。"""
     return [(r.langID, r.toUnicode()) for r in name.names
             if r.nameID == nid and r.toUnicode()]
 
@@ -195,6 +221,10 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                 italic = bool(os2.fsSelection & 1) if os2 is not None else False
                 cmap = CmapRanges.from_cmap_subtables(tt["cmap"].tables)
                 # —— 公共属性（默认/实例行共用）——
+                # 错标补偿先于 base 组装（统一作用于默认/静态行；实例行
+                # weight 之后按轴值覆盖，不受补偿二次改写）
+                weight = _compensate_weight({"weight": weight,
+                                             "name_langs": by_lang})
                 base = {
                     "dir_path": str(path.parent), "rel_path": path.name,
                     "face_index": idx, "psname": psname, "version": version,
@@ -216,7 +246,8 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                 # 限定名用的族名记录：ID16 优先回退 ID1（与 _display_name
                 # 同序），非 @ 名，[(langID, 文本)]；按 CJK 优先排序，使
                 # display 与 _display_name 的族名语言选择对齐（preflight
-                # 裁定）
+                # 裁定）。fam_recs 仅含平台 3 记录，纯 Mac 名 VF 的实例行
+                # 将跳过（现实趋零，默认行仍带族别名）
                 fam_recs = (by_lang.get(16) or by_lang.get(1)) or []
                 fam_recs = sorted(fam_recs, key=lambda p: not _has_cjk(p[1]))
                 for k, inst in enumerate(fvar.instances, start=1):

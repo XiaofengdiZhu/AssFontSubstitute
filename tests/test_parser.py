@@ -352,6 +352,39 @@ def test_parse_static_unchanged(tmp_path):
     assert r.inst_index == 0 and r.var_axes == ()
 
 
+def test_weight_compensation_tail_word(tmp_path):
+    from tests.fonts import build_font
+    cases = [
+        ("演示 Heavy", 400, 900),      # 错标修复
+        ("演示 Bold", 400, 700),
+        ("演示 Light", 400, 300),
+        ("演示 Medium", 400, 500),
+        ("演示 Heavy", 900, 900),      # 正确标注不动
+        ("Black Ops One", 400, 400),   # 首词重量词不触发（S1 假阳）
+        ("演示 Condensed Bold", 400, 700),   # 尾词命中
+        ("CorbelLight", 400, 400),     # camelCase 无词边界不触发（假阴记账）
+    ]
+    for fam, w400, expect in cases:
+        p = tmp_path / f"{fam.replace(' ', '_')}.ttf"
+        build_font(p, "永", family=fam, weight=w400)
+        r, = parse_font_file(p)
+        assert r.weight == expect, (fam, r.weight)
+
+
+def test_weight_compensation_not_for_vf_instances(tmp_path):
+    from tests.fonts import build_vf
+    p = tmp_path / "vf.ttf"
+    # 族名带 Heavy 的 VF：默认行（OS/2 400）补偿→900；Black 实例行
+    # weight=轴值 900，不受补偿二次改写
+    build_vf(p, "永", family="重黑體 Heavy",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 400, "default": 400, "max": 900}],
+             instances=[{"name": "Black", "location": {"wght": 900}}])
+    dflt, black = parse_font_file(p)
+    assert dflt.weight == 900            # 默认行走补偿（统一规则）
+    assert black.weight == 900 and black.inst_index == 1
+
+
 def test_parse_vf_missing_subfamily_name_skipped(tmp_path):
     # subfamilyNameID 指向不存在的 name 记录 → 该实例跳过（拍板：无名不合成）
     from fontTools.ttLib import TTFont
