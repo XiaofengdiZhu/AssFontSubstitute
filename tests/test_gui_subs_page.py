@@ -390,6 +390,81 @@ def test_apply_confirm_mapping_and_record(qapp, tmp_path, monkeypatch):
     assert page.vm.checked_parses() == [page.vm.files[0]]
 
 
+def _confirm_page(qapp, tmp_path, monkeypatch, names=("a.ass",)):
+    """单/多文件各带已存在另存目标（默认后缀），喂满替换卡并首击确认。"""
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+
+    # 多文件时 classify 回执须在第一批收齐后的 _reclassify 递增 _gen
+    # 之后再喂，否则旧代结果被弃置
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    for name in names:
+        src = tmp_path / name
+        src.write_text("[Script Info]", "utf-8")
+        (tmp_path / (src.stem + ".substituted.ass")).write_text("old", "utf-8")
+        usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                          inline_count=1, chars={"永"}, variants={"甲字体"})
+        page._on_result(f"parse:{src}", FileParse(str(src), None, [usage], [], []))
+        page._on_result(f"classify:{page._gen}:0",
+                        (usage, UsageClass(kind="replace",
+                                           entities=[_ent("fp1", "甲字体"),
+                                                     _ent("fp2", "乙字体")])))
+    page._apply()                                   # 首击：置位确认
+    assert page._confirmed_once is True
+    return page
+
+
+def _apply_submits(page):
+    return [s for s in page.worker.submits if s[0].startswith("apply")]
+
+
+def test_apply_confirm_invalidated_by_suffix_setter(qapp, tmp_path, monkeypatch):
+    # 审查二轮 P2：_on_suffix_edit（本页改后缀）已复位，但设置页回灌
+    # set_save_suffix 漏了——确认过 A 目标后换后缀，B 目标已存在也直接覆盖
+    page = _confirm_page(qapp, tmp_path, monkeypatch)
+    (tmp_path / "a.two.ass").write_text("old", "utf-8")   # 新后缀目标也在
+    # 真实流：设置页先写设置再发 suffixChanged 回灌（setter 只搬 UI）
+    page.settings.set("save_suffix", ".two.ass")
+    page.set_save_suffix(".two.ass")
+    assert page._confirmed_once is False
+    page._apply()                                   # 旧确认不得放行新目标：再警告
+    assert not _apply_submits(page)
+    page._apply()                                   # 二次确认 → 派工
+    assert page.worker.submits[-1][0] == f"apply:{page._apply_gen}"
+    assert page.worker.submits[-1][2][2] == ".two.ass"
+
+
+def test_apply_confirm_invalidated_by_save_mode_change(qapp, tmp_path, monkeypatch):
+    # 换保存方式（本页 combo / 设置页回灌两条路）确认语义失效：切走再切回，
+    # 旧确认不得直接放行原目标
+    page = _confirm_page(qapp, tmp_path, monkeypatch)
+    page._on_save_mode(1)                           # 本页切覆盖
+    assert page._confirmed_once is False
+    page._on_save_mode(0)                           # 切回另存：目标仍在
+    page._apply()
+    assert not _apply_submits(page)
+    page._apply()
+    assert _apply_submits(page)
+    # 设置页回灌路径同样复位：另开一页重置确认态再走 setter
+    page2 = _confirm_page(qapp, tmp_path, monkeypatch)
+    page2.set_save_mode(True)
+    assert page2._confirmed_once is False
+
+
+def test_apply_confirm_invalidated_by_remove_file(qapp, tmp_path, monkeypatch):
+    # 移除文件改变冲突集：旧确认针对的是含被移除文件的旧集合
+    page = _confirm_page(qapp, tmp_path, monkeypatch, names=("a.ass", "b.ass"))
+    page._remove_file(str(tmp_path / "b.ass"))
+    assert page._confirmed_once is False
+    page._apply()                                   # 剩余冲突仍在：再警告
+    assert not _apply_submits(page)
+    page._apply()
+    # 移除触发 _reclassify 清卡，二击派工时 mapping 为空 dict——断言只查
+    # 路径与 tag，不查 mapping 内容
+    assert [s[2][0] for s in _apply_submits(page)] == [str(tmp_path / "a.ass")]
+
+
 def test_apply_reentry_guard_disables_during_dispatch(qapp, tmp_path, monkeypatch):
     # 回归：_apply 派工在途时入口守卫忽略重复点击，且派工前禁用按钮；
     # 收尾（_on_apply_done）经 _update_summary 恢复

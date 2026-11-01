@@ -311,6 +311,8 @@ class SubsPage(QWidget):
             if not w.exec():
                 return
         for f in self.vm.files:
+            # 不复位 _confirmed_once：文件清空后冲突集必空，下次 _apply
+            # 走派工路径自清；重加文件走 _add_paths 复位（审查核验记录）
             self._removed.add(f.path)
             self._parsing.discard(f.path)
         self.vm.files = []
@@ -421,6 +423,7 @@ class SubsPage(QWidget):
         在途解析回执按 _removed 弃置，免得删掉的文件又冒回来。"""
         self._removed.add(path)
         self._parsing.discard(path)     # 移除即视为该份已到达：不卡批次
+        self._confirmed_once = False    # 冲突集变化：覆盖确认针对旧集合
         self.vm.remove_file(path)
         self._rebuild_file_rows()
         if not self._parsing:
@@ -843,6 +846,7 @@ class SubsPage(QWidget):
     def _on_save_mode(self, index):
         overwrite = index == 1
         self.settings.set("overwrite_default", overwrite)
+        self._confirmed_once = False    # 冲突语义随保存方式变化，确认失效
         self._set_suffix_row_visible(not overwrite)
         self.saveModeChanged.emit(overwrite)
         self._update_summary()
@@ -852,6 +856,7 @@ class SubsPage(QWidget):
         self.save_mode.blockSignals(True)
         self.save_mode.setCurrentIndex(1 if overwrite else 0)
         self.save_mode.blockSignals(False)
+        self._confirmed_once = False    # 冲突语义随保存方式变化，确认失效
         self._set_suffix_row_visible(not overwrite)
         self._update_summary()
 
@@ -873,6 +878,8 @@ class SubsPage(QWidget):
     def set_save_suffix(self, text: str):
         """设置页改了后缀：只搬 UI（editingFinished 不因 setText 触发）。"""
         self.suffix_edit.setText(text)
+        self._confirmed_once = False    # 覆盖目标集随目标后缀变化，确认失效
+                                        # （与 _on_suffix_edit 同款，审查二轮 P2）
 
     def _set_suffix_row_visible(self, visible: bool):
         self.suffix_label.setVisible(visible)
