@@ -49,6 +49,7 @@ from ass_font_substitute.gui.jobs import read_failures
 from ass_font_substitute.gui.jobs import retry_bad
 from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.library_vm import LibraryVM
+from ass_font_substitute.gui.pages.subs_page import _REMOVE_RED
 from ass_font_substitute.gui.pages.subs_page import _ElidedLabel
 from ass_font_substitute.gui.tip import install_tip
 from ass_font_substitute.gui.workers import IndexWorker
@@ -198,6 +199,7 @@ class LibraryPage(ScrollArea):
         回执只原地 set 值/文案，绝不整页重排"""
         self._pending_failures = None       # "failures" 任务结果到达后的弹窗回调
         self._lib_reported = False          # loadCompleted 只发一次
+        self._auto_started = False          # 启动 stale 自动开更只做一次
 
         self.view = QWidget(self)
         v = QVBoxLayout(self.view)
@@ -329,7 +331,8 @@ class LibraryPage(ScrollArea):
             else:
                 btn.setEnabled(False)
             rh.addWidget(btn, 0, Qt.AlignVCenter)
-            rm = PushButton(FIF.DELETE, self.tr("删除"))
+            rm = PushButton(FIF.REMOVE_FROM.icon(color=_REMOVE_RED),
+                            self.tr("移除"))
             # 更新在途禁删：索引线程正写该目录 db，删后状态失配
             rm.setEnabled(self._index_worker is None)
             rm.clicked.connect(lambda _=False, p=d.path: self._remove_dir(p))
@@ -420,6 +423,10 @@ class LibraryPage(ScrollArea):
         if added:
             self._rebuild_dir_rows()
             self.refresh_status()
+            # 新目录立即自动建索引；更新在途不并跑（索引线程独占写库），
+            # 行上琥珀钮兜底手动点
+            if self._index_worker is None:
+                self._launch_update(added)
         return added
 
     # ---- 拖拽入：只认文件夹，逐个确认框后加库 ----
@@ -449,13 +456,13 @@ class LibraryPage(ScrollArea):
                 self.add_dirs([d])
 
     def _remove_dir(self, path):
-        """二次确认后移除：手滑即删太危险（目录行删除按钮紧邻更新按钮）。"""
+        """二次确认后移除：手滑即移太危险（目录行移除按钮紧邻更新按钮）。"""
         box = MessageBox(
-            self.tr("删除字体目录"),
+            self.tr("移除字体目录"),
             _box_content(
                 self.tr("确定从列表移除以下目录吗？\n\n{0}\n\n仅移出列表：字体文件与已建索引不会被删除。").format(path)),
             self.window())
-        box.yesButton.setText(self.tr("删除"))
+        box.yesButton.setText(self.tr("移除"))
         box.cancelButton.setText(self.tr("取消"))
         if box.exec():
             self._remove_dir_confirmed(path)
@@ -485,6 +492,16 @@ class LibraryPage(ScrollArea):
             self._lib_reported = True
             QTimer.singleShot(0, self.loadCompleted.emit)
 
+    def _auto_update_stale(self):
+        """启动首轮探测后：需更新目录立即自动开更（一次性，后续源盘变化
+        仍走行上琥珀钮/更新全部手动）。被门拒（如启动间隙用户抢先拖入
+        占住索引线程）不耗标志——后续 libdetail 到达自然补发。"""
+        if self._auto_started:
+            return
+        stale = [d.path for d in self.vm.dirs if d.state == "stale"]
+        if not stale or self._launch_update(stale):
+            self._auto_started = True
+
     def _on_result(self, tag, payload):
         if tag == "lib":
             snap = payload
@@ -501,6 +518,7 @@ class LibraryPage(ScrollArea):
             statuses, dir_stats = payload
             self.vm.apply_detail(statuses, dir_stats)
             self._rebuild_dir_rows()        # 行状态/字体数落定，不重发告警
+            self._auto_update_stale()
         elif tag == "failures":
             if self._pending_failures is not None:
                 show, self._pending_failures = self._pending_failures, None
@@ -588,16 +606,18 @@ class LibraryPage(ScrollArea):
             self._apply_stats(self.vm.stats)
             self._launch_update([path], force=True)
 
-    def _launch_update(self, dirs: list[str], force: bool = False):
+    def _launch_update(self, dirs: list[str], force: bool = False) -> bool:
+        """返回是否真正启动；被门拒（更新/重试在途）返回 False，调用方
+        （如启动自动开更）据此不消费触发时机。"""
         if not dirs or self._index_worker is not None:
-            return
+            return False
         if self._retry_outstanding:
             # 重试门反向：retry_bad rw 开库与 IndexWorker 并发写同库曾锁
             # 冲突——重试在途时不启动索引更新
             InfoBar.warning(self.tr("重试进行中"),
                             self.tr("请等失败文件重试完成后再更新索引"),
                             parent=self)
-            return
+            return False
         for d in dirs:
             self.vm.mark_indexing(d)
         # 先持 worker 再重排行：行内 upd/rm 按钮的在途禁用读该字段
@@ -611,6 +631,7 @@ class LibraryPage(ScrollArea):
         self._index_worker.failed.connect(self._on_index_failed)
         self._index_worker.finished.connect(self._on_index_all_done)
         self._index_worker.start()
+        return True
 
     def _on_index_progress(self, d, done, total, res):
         self._index_progress[d] = (done, total)

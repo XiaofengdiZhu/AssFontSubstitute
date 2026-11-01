@@ -37,6 +37,36 @@ class _FakeWorker(QObject):
         return SimpleNamespace(cancelled=False)
 
 
+class _StubIndexWorker(QObject):
+    """IndexWorker 替身：只记构造参数，不真起线程（拖入自动开更用）。"""
+    progress = Signal(str, int, int, object)
+    finished_dir = Signal(str, object)
+    failed = Signal(str, str)
+    finished = Signal()          # 真身为 QThread 内建信号，替身须自补
+
+    calls: ClassVar[list] = []
+
+    def __init__(self, dirs, max_threads: int = 1,
+                 force: set[str] | None = None, parent=None):
+        super().__init__(parent)
+        type(self).calls.append((list(dirs), force))
+
+    def start(self):
+        pass
+
+    def cancel(self):
+        pass
+
+    def cancel_dir(self, path):
+        pass
+
+    def isRunning(self):
+        return False
+
+    def wait(self, msecs=...):
+        return True
+
+
 class _YesBox:
     """qfw MessageBox 替身：记录构造参数，exec 恒确认。"""
 
@@ -153,6 +183,8 @@ def _make_lib_page(qapp, tmp_path, monkeypatch):
     import ass_font_substitute.gui.pages.library_page as m
     from ass_font_substitute.gui.pages.library_page import LibraryPage
     from ass_font_substitute.gui.settings_store import Settings
+    # 拖入确认即触发自动建索引：换替身，不真起索引线程
+    monkeypatch.setattr(m, "IndexWorker", _StubIndexWorker)
     page = LibraryPage(Settings(tmp_path / "s.json"), _FakeWorker())
     return page, m
 

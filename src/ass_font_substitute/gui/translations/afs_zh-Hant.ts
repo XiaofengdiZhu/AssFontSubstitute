@@ -707,8 +707,12 @@
             <translation>點選刪除舊索引並強制重建</translation>
         </message>
         <message>
-            <source>删除</source>
-            <translation>刪除</translation>
+            <source>移除</source>
+            <translation>移除</translation>
+        </message>
+        <message>
+            <source>移除字体目录</source>
+            <translation>移除字型目錄</translation>
         </message>
         <message>
             <source>文件 {0} · 字体 {1} · 支持简体 {2} · 支持繁体 {3} · 失败/重复 {4}</source>
@@ -749,10 +753,6 @@
         <message>
             <source>取消</source>
             <translation>取消</translation>
-        </message>
-        <message>
-            <source>删除字体目录</source>
-            <translation>刪除字型目錄</translation>
         </message>
         <message>
             <source>确定从列表移除以下目录吗？

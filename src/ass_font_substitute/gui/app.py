@@ -195,6 +195,9 @@ class AFSWindow(FluentWindow):
             self.browse_page.on_library_changed)
         self.library_page.libraryChanged.connect(
             self.subs_page.on_library_changed)
+        # 首页分流（loadCompleted=库快照就绪，Splash 随之收幕）：库非空
+        # 直接落处理字幕页（日常正事页），空库留字体库管理页引导建库
+        self.library_page.loadCompleted.connect(self._on_library_loaded)
         # 预览页拖入字体目录确认后交库管理页落列表（本页无 vm）
         self.browse_page.dirsAdded.connect(self.library_page.add_dirs)
         # 保存方式/另存后缀双向同步：任一页改动回灌另一页（setter 不回写）
@@ -234,6 +237,17 @@ class AFSWindow(FluentWindow):
         self._restore_geometry()
 
     # ---- 主题与窗口材质（设置页「常规」组驱动）----
+    def _on_library_loaded(self):
+        """启动首页分流：库里有字体落处理字幕页，空库留字体库管理页。
+        切页发生在 Splash 盖板下，关滑入动画与侧栏指示器滑动动画直切
+        再恢复——揭幕即是目标页首帧，不带 250ms 两段动画（用户实机反馈）。"""
+        if self.library_page.vm.stats.get("fonts", 0):
+            self.stackedWidget.setAnimationEnabled(False)
+            self.navigationInterface.setIndicatorAnimationEnabled(False)
+            self.switchTo(self.subs_page)
+            self.stackedWidget.setAnimationEnabled(True)
+            self.navigationInterface.setIndicatorAnimationEnabled(True)
+
     def _on_setting_changed(self, key: str, value):
         if key == "theme":
             self._apply_theme(value)

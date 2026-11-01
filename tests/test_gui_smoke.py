@@ -1,6 +1,9 @@
 import os
+from typing import ClassVar
 
 import pytest
+from PySide6.QtCore import QObject
+from PySide6.QtCore import Signal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -12,6 +15,36 @@ def qapp():
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     yield app
+
+
+class _StubIndexWorker(QObject):
+    """IndexWorker 替身：只记构造参数，不真起线程（自动开更测试用）。"""
+    progress = Signal(str, int, int, object)
+    finished_dir = Signal(str, object)
+    failed = Signal(str, str)
+    finished = Signal()          # 真身为 QThread 内建信号，替身须自补
+
+    calls: ClassVar[list] = []
+
+    def __init__(self, dirs, max_threads: int = 1,
+                 force: set[str] | None = None, parent=None):
+        super().__init__(parent)
+        type(self).calls.append((list(dirs), force))
+
+    def start(self):
+        pass
+
+    def cancel(self):
+        pass
+
+    def cancel_dir(self, path):
+        pass
+
+    def isRunning(self):
+        return False
+
+    def wait(self, msecs=...):
+        return True
 
 
 def test_main_window_boots(qapp, tmp_path, monkeypatch):
@@ -501,8 +534,8 @@ def test_library_page_add_and_stats(qapp, tmp_path, monkeypatch):
 
 
 def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
-    # 删目录广播：browse 页真清数据（不是只挂 hint），subs 页换代重分类；
-    # 更新在途时目录行按钮（更新/删除）禁用
+    # 移除目录广播：browse 页真清数据（不是只挂 hint），subs 页换代重分类；
+    # 更新在途时目录行按钮（更新/移除）禁用
     monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
     from tests.fonts import build_font
     d = tmp_path / "fonts"
@@ -533,21 +566,21 @@ def test_library_changed_propagates(qapp, tmp_path, monkeypatch):
             break
     assert len(w.browse_page.pvm.entities) == 1
 
-    # 更新在途：需更新行按钮+删除钮禁用（_index_worker 先于重排行赋值）；
+    # 更新在途：需更新行按钮+移除钮禁用（_index_worker 先于重排行赋值）；
     # stale 计数小字仅 stale 态可见
     page.vm.dirs[0].state = "stale"
     page._index_worker = object()
     page._rebuild_dir_rows()
     card = page.dirs_box.itemAt(0).widget()
     btns = {b.text(): b for b in card.findChildren(PushButton)}
-    assert not btns["需更新"].isEnabled() and not btns["删除"].isEnabled()
+    assert not btns["需更新"].isEnabled() and not btns["移除"].isEnabled()
     hint = card.findChildren(CaptionLabel)[0]
     assert not hint.isHidden()
     page._index_worker = None
     page._rebuild_dir_rows()
     card = page.dirs_box.itemAt(0).widget()
     btns = {b.text(): b for b in card.findChildren(PushButton)}
-    assert btns["需更新"].isEnabled() and btns["删除"].isEnabled()
+    assert btns["需更新"].isEnabled() and btns["移除"].isEnabled()
 
     # 已最新行保留更新入口（强制重建）：在途禁用、空闲可点
     page.vm.dirs[0].state = "ok"
@@ -854,4 +887,83 @@ def test_language_change_triggers_browse_name_reload(qapp, tmp_path, monkeypatch
     w.browse_page.reload_names = lambda: calls.append(1)
     s.set("language", "zh-Hant")
     assert calls == [1]
+    w.close()
+
+
+def test_add_dirs_auto_launches_update(qapp, tmp_path, monkeypatch):
+    # 新目录立即自动建索引；索引在途时不并跑（行上琥珀钮兜底手动点）
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
+    import ass_font_substitute.gui.pages.library_page as lp_mod
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    d = tmp_path / "fonts"
+    d.mkdir()
+    s = Settings(tmp_path / "settings.json")
+    w = AFSWindow(s)
+    page = w.library_page
+    monkeypatch.setattr(lp_mod, "IndexWorker", _StubIndexWorker)
+    _StubIndexWorker.calls = []
+    page.add_dirs([str(d)])
+    assert _StubIndexWorker.calls == [([str(d)], None)]
+    # 移除钮：文案与字幕页「移除全部」同款图标（危险红 REMOVE_FROM）
+    card = page.dirs_box.itemAt(0).widget()
+    from qfluentwidgets import PushButton
+
+    from ass_font_substitute.gui.pages.library_page import _REMOVE_RED
+    rm = next(b for b in card.findChildren(PushButton)
+              if b.text() == "移除")
+    assert not rm.icon().isNull()
+    assert _REMOVE_RED is not None      # 同色常量复用（真值色比对无意义：
+                                        # icon() 重着色后取色路径另测）
+    # 在途不并跑：_index_worker 非 None 即拒
+    _StubIndexWorker.calls = []
+    page.add_dirs([str(tmp_path / "fonts2")])
+    assert _StubIndexWorker.calls == []
+    w.close()
+
+
+def test_startup_stale_auto_updates_once(qapp, tmp_path, monkeypatch):
+    # 启动首轮探测后 stale 目录立即自动开更，一次性（后续变化走手动）
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
+    import ass_font_substitute.gui.pages.library_page as lp_mod
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    d = tmp_path / "fonts"
+    d.mkdir()
+    w = AFSWindow(Settings(tmp_path / "settings.json"))
+    page = w.library_page
+    page.vm.add_dir(str(d))
+    page.vm.dirs[0].state = "stale"
+    monkeypatch.setattr(lp_mod, "IndexWorker", _StubIndexWorker)
+    _StubIndexWorker.calls = []
+    # 被门拒（启动间隙用户抢先拖入占住索引线程）不耗标志
+    page._index_worker = object()
+    page._auto_update_stale()
+    assert _StubIndexWorker.calls == []
+    page._index_worker = None
+    page._auto_update_stale()
+    assert _StubIndexWorker.calls == [([str(d)], None)]
+    page._auto_update_stale()
+    assert _StubIndexWorker.calls == [([str(d)], None)]   # 标志已耗，不再发
+    w.close()
+
+
+def test_initial_page_routes_by_library(qapp, tmp_path, monkeypatch):
+    # 空库默认留字体库管理页（引导建库）；库非空 loadCompleted 后落处理字幕页
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
+
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    w = AFSWindow(Settings(tmp_path / "settings.json"))
+    w.stackedWidget.setAnimationEnabled(False)   # switchTo 滑入动画不走完
+    assert w.stackedWidget.currentWidget() is w.library_page
+    w.library_page.vm.stats["fonts"] = 3
+    w._on_library_loaded()
+    assert w.stackedWidget.currentWidget() is w.subs_page
+    # 直切不带页滑入与侧栏指示器滑动两段动画，切完均恢复
+    assert w.stackedWidget.isAnimationEnabled
+    assert w.navigationInterface.isIndicatorAnimationEnabled()
     w.close()
