@@ -53,6 +53,32 @@ def test_bomless_utf16_roundtrip(tmp_path):
         assert "{\\fn華康主體W5X}不誤傷的中文字幕" in text   # 未改行原样
 
 
+def test_unencodable_replacement_packaged(tmp_path):
+    # P2：替换值含目标编码不可表示的字符（简体「华」写回 big5）时
+    # UnicodeEncodeError 裸逃——折包 EncodingDetectError 对齐错误契约，
+    # gui 兜底显示的报错可读。注意 _mk 的 big5 样本会被误判 gb18030
+    # （gb 硬解恰 5 个高频字命中），此处用繁体高频台词样本确保检出 big5
+    import pytest
+
+    from ass_font_substitute.core.assparse.encoding import EncodingDetectError
+    text = ("[Script Info]\r\n"
+            "Title: t\r\n"
+            "\r\n"
+            "[V4+ Styles]\r\n"
+            "Format: Name, Fontname, Fontsize\r\n"
+            "Style: Main,華康主體W5,52\r\n"
+            "\r\n"
+            "[Events]\r\n"
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, "
+            "MarginV, Effect, Text\r\n"
+            "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,"
+            "這是繁體字幕的一句話，我們在這裡說話。\r\n")
+    p = tmp_path / "in_big5.ass"
+    p.write_bytes(text.encode("big5"))
+    with pytest.raises(EncodingDetectError, match="无法写回"):
+        rewrite_file(p, {"華康主體W5": "华文黑体"})
+
+
 def test_encoding_preserved(tmp_path):
     for enc in ("utf-16", "gb18030"):
         p = _mk(tmp_path, enc)

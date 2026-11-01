@@ -78,8 +78,9 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
     """按 mapping 重写字幕文件里的字体名。
 
     错误契约与 extract（折成 parse_error 字段）不同：本函数是落盘入口，
-    编码识别失败抛 EncodingDetectError，由调用方（jobs.apply_to_file 宽
-    except）兜底——有意为之，勿对齐。"""
+    编码识别失败与写回编码失败（替换值含目标编码不可表示的字符）都抛
+    EncodingDetectError，由调用方（jobs.apply_to_file 宽 except）兜底
+    ——有意为之，勿对齐。"""
     if out and overwrite_src:
         raise ValueError("out 与 overwrite_src 互斥")
     src = Path(src)
@@ -173,14 +174,22 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
                 changed.append(i)
 
     changed_set = set(changed)
-    if byte_lines is not None:
-        chunks = [bom_b]
-        for i, tl in enumerate(lines):
-            chunks.append(tl.encode(body_codec) if i in changed_set
-                          else byte_lines[i])
-        result_bytes = b"".join(chunks)
-    else:
-        result_bytes = bom_b + "".join(lines).encode(body_codec)
+    try:
+        if byte_lines is not None:
+            chunks = [bom_b]
+            for i, tl in enumerate(lines):
+                chunks.append(tl.encode(body_codec) if i in changed_set
+                              else byte_lines[i])
+            result_bytes = b"".join(chunks)
+        else:
+            result_bytes = bom_b + "".join(lines).encode(body_codec)
+    except UnicodeEncodeError as e:
+        # P2：替换值含目标编码不可表示的字符（如简体名写回 big5）时
+        # UnicodeEncodeError 裸逃——折包对齐错误契约，gui 兜底显示的
+        # 报错可读（类名沿 EncodingDetectError 略名不副实，但调用方按
+        # 编码问题分支的语义一致）
+        raise EncodingDetectError(
+            f"替换值含编码 {body_codec} 无法表示的字符，无法写回: {e}") from e
     if overwrite_src or out is not None:
         # 两分支统一 tmp+os.replace 原子写（审查二轮 P0-2：另存分支曾
         # write_bytes 直写——盘满/崩溃截断目标文件）；finally 清残骸，
