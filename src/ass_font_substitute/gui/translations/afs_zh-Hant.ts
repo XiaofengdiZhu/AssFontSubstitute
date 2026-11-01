@@ -1298,6 +1298,18 @@
             <translation>該字型的上一次評分還在路上，請稍候再選</translation>
         </message>
         <message>
+            <source>确认覆盖原文件</source>
+            <translation>確認覆蓋原檔案</translation>
+        </message>
+        <message>
+            <source>将覆盖 {0} 个原文件，覆盖后无法恢复，确定继续？</source>
+            <translation>將覆蓋 {0} 個原檔案，覆蓋後無法恢復，確定繼續？</translation>
+        </message>
+        <message>
+            <source>覆盖</source>
+            <translation>覆蓋</translation>
+        </message>
+        <message>
             <source>另存文件已存在</source>
             <translation>另存檔案已存在</translation>
         </message>

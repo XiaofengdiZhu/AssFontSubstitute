@@ -465,6 +465,107 @@ def test_apply_confirm_invalidated_by_remove_file(qapp, tmp_path, monkeypatch):
     assert [s[2][0] for s in _apply_submits(page)] == [str(tmp_path / "a.ass")]
 
 
+def test_apply_overwrite_mode_dialog_confirm(qapp, tmp_path, monkeypatch):
+    # 拍板（2026-11-01）：覆盖原文件不可恢复，应用前弹窗逐次确认；
+    # 取消不派工，确认才走派工批（另存模式的双击确认机制不变）
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import FileParse
+    from ass_font_substitute.gui.pages import subs_page as sp
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    src = tmp_path / "a.ass"
+    src.write_text("[Script Info]", "utf-8")
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=1, chars={"永"}, variants={"甲字体"})
+    page._on_result(f"parse:{src}", FileParse(str(src), None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0",
+                    (usage, UsageClass(kind="replace",
+                                       entities=[_ent("fp1", "甲字体"),
+                                                 _ent("fp2", "乙字体")])))
+    page._cards_ui["甲字体"].option_checked.emit("甲字体", "fp2")
+    page._on_save_mode(1)                           # 切覆盖原文件模式
+
+    boxes = []
+    btn_texts = []
+
+    class _FakeBox:
+        ret = 0                                     # 0=取消 1=确认（QDialog 口径）
+
+        def __init__(self, title, content, parent):
+            boxes.append((title, content))
+            self.yesButton = SimpleNamespace(
+                setText=lambda t: btn_texts.append(("yes", t)))
+            self.cancelButton = SimpleNamespace(
+                setText=lambda t: btn_texts.append(("cancel", t)))
+
+        def exec(self):
+            return _FakeBox.ret
+
+    monkeypatch.setattr(sp, "MessageBox", _FakeBox)
+
+    _FakeBox.ret = 0                                # 弹窗取消：不派工
+    page._apply()
+    assert not _apply_submits(page)
+    assert len(boxes) == 1
+    title, content = boxes[0]
+    assert "覆盖" in title and "1" in content       # 数量入文案
+    assert btn_texts == [("yes", "覆盖"), ("cancel", "取消")]
+    assert page._apply_dispatching is False and page.btn_apply.isEnabled()
+
+    _FakeBox.ret = 1                                # 弹窗确认：派工
+    page._apply()
+    subs = _apply_submits(page)
+    assert subs and subs[-1][2][3] is True          # apply_to_file overwrite=True
+
+
+def test_apply_overwrite_snapshot_during_dialog_exec(qapp, tmp_path, monkeypatch):
+    # 审查 B1/B2 回归：MessageBox.exec 开嵌套事件循环，弹窗模态期间迟到
+    # 的 parse 回执仍被分发（新文件默认勾选 + _reclassify 同步清空
+    # cards）——派工批须按弹窗前快照走（实写不超确认数），决定快照也须
+    # 赶在 exec 前拍（否则收尾 record_snapshot 拿到空 cards 丢记忆）
+    from ass_font_substitute.core.coverage.matcher import UsageClass
+    from ass_font_substitute.core.decision.store import latest_decision
+    from ass_font_substitute.core.models import FontUsage
+    from ass_font_substitute.gui.jobs import ApplyFileResult
+    from ass_font_substitute.gui.jobs import FileParse
+    from ass_font_substitute.gui.pages import subs_page as sp
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    src = tmp_path / "a.ass"
+    src.write_text("[Script Info]", "utf-8")
+    usage = FontUsage(raw_name="甲字体", norm_name="甲字体", style_count=1,
+                      inline_count=1, chars={"永"}, variants={"甲字体"})
+    page._on_result(f"parse:{src}", FileParse(str(src), None, [usage], [], []))
+    page._on_result(f"classify:{page._gen}:0",
+                    (usage, UsageClass(kind="replace",
+                                       entities=[_ent("fp1", "甲字体"),
+                                                 _ent("fp2", "乙字体")])))
+    page._cards_ui["甲字体"].option_checked.emit("甲字体", "fp2")
+    page._on_save_mode(1)
+    src2 = tmp_path / "b.ass"
+    src2.write_text("[Script Info]", "utf-8")
+
+    class _LateBox:
+        def __init__(self, title, content, parent):
+            self.yesButton = SimpleNamespace(setText=lambda t: None)
+            self.cancelButton = SimpleNamespace(setText=lambda t: None)
+
+        def exec(self):
+            # 模拟模态期间事件循环重入分发迟到 parse 回执：勾选集变大、
+            # cards 被重算清空
+            page._on_result(f"parse:{src2}",
+                            FileParse(str(src2), None, [usage], [], []))
+            return 1
+
+    monkeypatch.setattr(sp, "MessageBox", _LateBox)
+    page._apply()
+    assert [s[2][0] for s in _apply_submits(page)] == [str(src)]
+    page._on_result(f"apply:{page._apply_gen}",
+                    ApplyFileResult(str(src), str(src) + ".substituted.ass", 1))
+    # 收尾按 exec 前的决定快照记账，弹窗期间清卡不得丢记忆（B2）
+    d = latest_decision(Path(page.vm.decisions_db), "甲字体", "t2s")
+    assert d == ("fp2", False)
+
+
 def test_apply_reentry_guard_disables_during_dispatch(qapp, tmp_path, monkeypatch):
     # 回归：_apply 派工在途时入口守卫忽略重复点击，且派工前禁用按钮；
     # 收尾（_on_apply_done）经 _update_summary 恢复

@@ -582,7 +582,9 @@ class SubsVM:
 
     def apply_files(self, overwrite_confirm: bool = False) -> list:
         """逐勾选文件写回（jobs.apply_to_file）。另存目标已存在且未确认 →
-        该文件 error="exists" 跳过；覆盖原文件模式无冲突。"""
+        该文件 error="exists" 跳过；覆盖原文件模式无冲突。
+        无头/测试专用（同 record_all 先例）：本方法覆盖模式无确认弹窗，
+        生产入口走 subs_page._apply 的弹窗确认，勿接本方法。"""
         mapping = self.build_mapping()
         overwrite = bool(self._settings.get("overwrite_default"))
         out = []

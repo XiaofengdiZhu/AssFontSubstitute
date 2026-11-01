@@ -768,6 +768,18 @@ class SubsPage(QWidget):
             self._pending_picks[norm] = dlg.selected
 
     # ---- 应用 ----
+    def _confirm_overwrite(self, n: int) -> bool:
+        """覆盖原文件模式派工前弹窗（用户拍板 2026-11-01：原子覆盖无备份、
+        不可恢复，此前完全无确认）。逐次确认，无「不再询问」。另存模式的
+        双击 InfoBar 确认机制不受影响。数量由调用方快照传入：exec 开嵌套
+        事件循环，弹窗期间勾选集可能被迟到回执改变，重算即失真。"""
+        w = MessageBox(self.tr("确认覆盖原文件"),
+                       self.tr("将覆盖 {0} 个原文件，覆盖后无法恢复，确定继续？").format(n),
+                       self.window())
+        w.yesButton.setText(self.tr("覆盖"))
+        w.cancelButton.setText(self.tr("取消"))
+        return bool(w.exec())
+
     def _apply(self):
         if self._apply_dispatching:
             return                        # 派工在途：忽略重复点击（防重入）
@@ -782,20 +794,27 @@ class SubsPage(QWidget):
         self._confirmed_once = False
         mapping = self.vm.build_mapping()
         overwrite = bool(self.settings.get("overwrite_default"))
-        self._apply_total = len(self.vm.checked_parses())
+        files = list(self.vm.checked_parses())
+        self._apply_total = len(files)
         self._apply_results = []
         if not self._apply_total:
             return                        # 无勾选文件：不派工、不禁用
+        # 决定快照随批锁定（审查二轮 P1），且必须赶在弹窗 exec 重入点之前
+        # （审查 B2）：模态期间迟到 parse 回执会触发 _reclassify 同步清空
+        # cards，exec 返回后才拍快照会拿到空集——写盘按 mapping 照替、
+        # 记忆却丢，重新分叉。弹窗模态阻断用户输入，快照与确认间无漂移。
+        self._apply_decisions = self.vm.snapshot_decisions()
+        if overwrite and not self._confirm_overwrite(len(files)):
+            return                        # 弹窗取消：不派工（拍板 2026-11-01）
         self._apply_dispatching = True
         self.btn_apply.setEnabled(False)   # 派工期禁用：防连点重复写文件
-        # 决定快照随批锁定：派工期间重算清卡重建后，收尾按快照写记忆
-        # （按当下 cards 写会把派工那份决定整个丢掉，审查二轮 P1）
-        self._apply_decisions = self.vm.snapshot_decisions()
         # 批次号入 tag：批 N 失败复位后，批 N 的迟到回执不得计入批 N+1
         # （裸 tag "apply" 曾提前凑满总数、成功 InfoBar 早发）
         self._apply_gen += 1
         tag = f"apply:{self._apply_gen}"
-        for f in self.vm.checked_parses():
+        # 遍历弹窗前快照：MessageBox.exec 期间迟到 parse/scandir 回执会改
+        # 勾选集（新文件默认勾选），实写数不得超出弹窗确认数（审查 B1）
+        for f in files:
             self.worker.submit(tag, _apply_job, f.path, mapping,
                                self.settings.get("save_suffix"), overwrite)
 
