@@ -194,3 +194,34 @@ def test_non_left_button_never_releases(qapp):
     _mouse(w, QEvent.Type.MouseButtonPress, 150, Qt.MouseButton.LeftButton)
     _mouse(w, QEvent.Type.MouseButtonRelease, 150, Qt.MouseButton.LeftButton)
     assert fired == [1]
+
+
+def test_filter_release_ignores_non_left_button(qapp):
+    # 审查补刀：钮上过滤器路径的 release 分支漏 button 检查——左键按住
+    # 期间叠加的右键 release 曾清 _drag 并误发提交、拖拽中断
+    from PySide6.QtCore import QEvent
+    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+
+    w = _mk(qapp, lo_v=90, hi_v=110)
+    w.grab()
+    fired = []
+    w.sliderReleased.connect(lambda: fired.append(1))
+
+    def to_handle(etype, local_x, button):
+        ev = QMouseEvent(etype, QPointF(local_x, 11), QPointF(0, 0),
+                         button, button, Qt.KeyboardModifier.NoModifier)
+        QApplication.sendEvent(w.lo_handle, ev)
+        return ev
+
+    to_handle(QEvent.Type.MouseButtonPress, 11, Qt.MouseButton.LeftButton)
+    assert w._drag == "low"
+    # 左键按住期间叠加右键 release：不发、_drag 不清（拖拽存活）
+    to_handle(QEvent.Type.MouseButtonRelease, 11, Qt.MouseButton.RightButton)
+    to_handle(QEvent.Type.MouseButtonRelease, 11, Qt.MouseButton.MiddleButton)
+    assert fired == [] and w._drag == "low"
+    # 左键 release：照常收尾
+    to_handle(QEvent.Type.MouseButtonRelease, 11, Qt.MouseButton.LeftButton)
+    assert fired == [1] and w._drag is None

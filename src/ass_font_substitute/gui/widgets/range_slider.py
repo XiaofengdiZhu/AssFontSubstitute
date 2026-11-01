@@ -68,7 +68,11 @@ class RangeSlider(QWidget):
                 self._apply_drag(self._handle_x(watched, event)
                                  - self._grab_dx)
                 return True
-            if t == QEvent.Type.MouseButtonRelease and self._drag is not None:
+            if (t == QEvent.Type.MouseButtonRelease
+                    and event.button() == Qt.MouseButton.LeftButton
+                    and self._drag is not None):
+                # 按钮维度同 widget 路径对齐：左键按住期间叠加的右键
+                # release 曾清 _drag 并误发提交、拖拽中断
                 self._drag = None
                 self.sliderReleased.emit()
                 return True
