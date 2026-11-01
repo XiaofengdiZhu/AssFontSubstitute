@@ -144,3 +144,40 @@ def test_default_threshold_is_95(tmp_path):
     u = _usage("覆蓋體", chars + "中")            # 24/25 = 96%
     assert classify_usage(u, lib).kind == "keep"
     assert classify_usage(u, lib, threshold=0.98).kind == "replace"
+
+
+def test_coverage_ignores_invisible_chars():
+    # 审查二轮 P2：U+FE0F/U+200D/U+FEFF/U+2009 等不可见/空白字符曾全算
+    # 缺字——覆盖率虚低放行缺字候选，且与渲染口径不一致。不入分子分母
+    from ass_font_substitute.core.coverage.matcher import coverage_detail
+    from ass_font_substitute.core.models import CmapRanges
+
+    cmap = CmapRanges.from_chars([ord(c) for c in "永宇"])
+    # 无关字符单独成集：视为全覆盖（全不可见时不因 cmap 查不到报缺）。
+    # 码点全用 \u 转义：FE0F/U+2009 这类字面量会被编辑器规范化成可见形
+    for c in ("️", "‍", "﻿", " ", " ", "​", "̈", "­"):
+        ratio, missing = coverage_detail(cmap, {c})
+        assert (ratio, missing) == (1.0, []), hex(ord(c))
+    # 真缺字不受影响；无关字符不进缺字列表也不摊薄比例
+    ratio, missing = coverage_detail(cmap, {"永", "中", "️", " "})
+    assert ratio == 0.5 and missing == ["中"]
+
+
+def test_classify_ignores_invisible_at_threshold_boundary(tmp_path):
+    # 修复的原始症状（P2）：不可见字符摊薄比例，恰好压线的用字被误判
+    # replace——真字 19/20 = 95% 恰达默认阈值；混入 5 个不可见字符后
+    # 旧口径 19/25 = 76% → replace，新口径仍按 19/20 判 keep
+    d = tmp_path / "lib"
+    d.mkdir()
+    covered = "永和的文字春夏秋冬山川田石目心手白木水"    # 19 字
+    assert len(covered) == 19
+    build_font(d / "f.ttf", chars=covered, family="边线体")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    lib = LibraryIndex.open([d])
+    invisible = "️‍﻿ \u2009̈­"                # FE0F/200D/FEFF/2009/200B/0308/00AD
+    assert len(invisible) == 7
+    u = _usage("边线体", covered + "中" + invisible)
+    r = classify_usage(u, lib)
+    assert r.kind == "keep" and r.coverage == 0.95
+    assert r.missing_chars == ["中"]               # 缺字列表不混入不可见字符

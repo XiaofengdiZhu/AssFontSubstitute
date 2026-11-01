@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from dataclasses import field
 
@@ -19,12 +20,22 @@ def twin_convert(name: str, direction: str) -> str:
     return _CC[direction].convert(name)
 
 
+def _cov_irrelevant(c: str) -> bool:
+    """不影响字形选择的字符（审查二轮 P2）：组合记号(Mn：含变体选择符
+    FE0F)、格式控制(Cf：ZWJ/ZWNJ、BOM、方向标记等不可见字符)与空白
+    ——cmap 查不到它们只虚低覆盖率，渲染器自会跳过/回退，不该算缺字
+    （与渲染口径一致：宁多勿少的保守方向是缺字列表只增真字）。"""
+    return c.isspace() or unicodedata.category(c) in ("Mn", "Cf")
+
+
 def coverage_detail(cmap: CmapRanges, chars: set[str]) -> tuple[float, list[str]]:
-    """覆盖率比例 + 缺字列表。"""
-    if not chars:
+    """覆盖率比例 + 缺字列表。不可见/空白字符不入分子分母（_cov_irrelevant），
+    全部不可见时视为全覆盖。"""
+    relevant = [c for c in chars if not _cov_irrelevant(c)]
+    if not relevant:
         return 1.0, []
-    missing = sorted(c for c in chars if not cmap.contains(ord(c)))
-    return (len(chars) - len(missing)) / len(chars), missing
+    missing = sorted(c for c in relevant if not cmap.contains(ord(c)))
+    return (len(relevant) - len(missing)) / len(relevant), missing
 
 
 def find_fonts(lib: LibraryIndex, usage: FontUsage) -> list[FontEntity]:
