@@ -76,6 +76,65 @@ def test_fn_paren_name_full(tmp_path):
     assert "行" in by["華康行內體(p)"].chars
 
 
+def test_fn_paren_name_with_suffix_recovered(tmp_path):
+    # 审查二轮 P1：light_ass 把 \fn名字(...) 截到 ")"，其后到下一个 \
+    # 或 } 的残余变成 CommentNode——libass/rewrite 口径下这些字属于字体
+    # 名，须吞并恢复全名；否则提取 Foo(Bar) 幽灵卡、真名 Foo(Bar)X 永不可替
+    line = "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,{\\fnFoo(Bar)X}甲"
+    r = extract_usages(_write(tmp_path, ASS + line + "\n"))
+    by = {u.norm_name: u for u in r.usages}
+    assert by["foo(bar)x"].raw_name == "Foo(Bar)X"
+    assert by["foo(bar)x"].inline_count == 1
+    assert {"甲"} <= by["foo(bar)x"].chars
+    assert "foo(bar)" not in by          # 截断幽灵卡不得建桶
+    # 残余跨到下一个标签为止：\fnFoo(Bar)X\i1 → 全名仍是 Foo(Bar)X
+    line2 = "Dialogue: 0,0:00:01.00,0:00:02.00,Main,,0,0,0,,{\\fnFoo(Bar)X\\i1}乙"
+    r2 = extract_usages(_write(tmp_path, ASS + line2 + "\n"))
+    by2 = {u.norm_name: u for u in r2.usages}
+    assert "foo(bar)x" in by2
+    # 无残余（} 直接收尾）不误吞：仍是 Foo(Bar)
+    line3 = "Dialogue: 0,0:00:02.00,0:00:03.00,Main,,0,0,0,,{\\fnFoo(Bar)}丙"
+    r3 = extract_usages(_write(tmp_path, ASS + line3 + "\n"))
+    by3 = {u.norm_name: u for u in r3.usages}
+    assert "foo(bar)" in by3 and "foo(bar)x" not in by3
+
+
+def test_fn_paren_tail_no_overswallow(tmp_path):
+    # 吞并只限同一 {} 块内：跨块边界的残余（相邻块的 CommentNode 文本、
+    # 块内 \h 硬空格 RawTag）不得误吞进名字——libass 名字止于 } 或 \
+    line = "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,{\\fnFoo(Bar)}{X}甲"
+    r = extract_usages(_write(tmp_path, ASS + line + "\n"))
+    by = {u.norm_name: u for u in r.usages}
+    assert "foo(bar)" in by and "foo(bar)x" not in by
+    assert {"甲"} <= by["foo(bar)"].chars   # 跨块的 X 块后正文照常计字
+    # 块内残余止于 \h（未知标签回退 RawTag，无 _raw）：名字不含 \hY
+    line2 = "Dialogue: 0,0:00:01.00,0:00:02.00,Main,,0,0,0,,{\\fnFoo(Bar)X\\hY}乙"
+    r2 = extract_usages(_write(tmp_path, ASS + line2 + "\n"))
+    by2 = {u.norm_name: u for u in r2.usages}
+    assert "foo(bar)x" in by2 and "foo(bar)x\\hy" not in by2
+    # 残余带尾随空格：normalize strip 后与无空格形态同桶（rewrite 键 strip
+    # 口径闭环，正则侧 ([ \t]*) 保留空格命中）
+    line3 = "Dialogue: 0,0:00:02.00,0:00:03.00,Main,,0,0,0,,{\\fnFoo(Bar)X }丙"
+    r3 = extract_usages(_write(tmp_path, ASS + line3 + "\n"))
+    by3 = {u.norm_name: u for u in r3.usages}
+    assert "foo(bar)x" in by3
+    assert "Foo(Bar)X " in by3["foo(bar)x"].variants
+
+
+def test_fn_paren_suffix_extract_rewrite_roundtrip(tmp_path):
+    # 端到端：提取全名 → 映射 → rewrite 行内替换命中（与 rewrite 键 strip
+    # 口径闭环），幽灵名不进映射
+    line = "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,{\\fnFoo(Bar)X}甲"
+    p = _write(tmp_path, ASS + line + "\n")
+    r = extract_usages(p)
+    mapping = {u.raw_name: "新字體" for u in r.usages}
+    assert "Foo(Bar)X" in mapping and "Foo(Bar)" not in mapping
+    from ass_font_substitute.core.assparse.rewrite import rewrite_file
+    out = tmp_path / "out.ass"
+    rewrite_file(p, mapping, out=out)
+    assert "{\\fn新字體}甲" in out.read_text("utf-8-sig")
+
+
 def test_style_name_case_insensitive(tmp_path):
     # 终审 P1：VSFilter/libass 对样式名不敏感——`main` 引用 `Main` 样式
     # 曾整行丢字+误报 unknown_styles

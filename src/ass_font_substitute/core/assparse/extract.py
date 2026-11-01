@@ -5,6 +5,7 @@ from dataclasses import field
 from pathlib import Path
 
 from light_ass import Document
+from light_ass.curly.parsed_line import CommentNode
 from light_ass.curly.parsed_line import TextNode
 from light_ass.curly.tags import FontNameTag
 from light_ass.curly.tags import ResetStyleTag
@@ -60,6 +61,33 @@ def _fn_name(tag: FontNameTag) -> str:
     else:
         name = value.strip(" \t")
     return "" if name == "0" else name  # 模板原有 value != "0" 守卫
+
+
+def _paren_tail(tag: FontNameTag, nodes: list, idx: int) -> str:
+    """light_ass 截断签名：raw 以 ")" 结尾时，字体名在 ")" 之后的残余
+    （到下一个 \\ 或 } 为止）被切成 CommentNode 挂在后随节点上——
+    libass/rewrite 口径下这些字属于字体名，吞并恢复全名（审查二轮 P1：
+    {\fnFoo(Bar)X} 提取 Foo(Bar) 幽灵卡，真名 Foo(Bar)X 永不可替）。
+    CommentNode 无 _raw，text 字段即碎片；遇新标签（raw 以 \\ 开头）
+    或正文节点（TextNode 等，已在 {} 外）即停；无残余返回 ""。
+    只处理顶层：\t(...) 内嵌 \fn 带括号时 light_ass 连整个 TransformTag
+    的 raw 一起截（更深层的截断形态），另案。"""
+    raw = getattr(tag, "_raw", None)
+    if raw is None or not raw.raw_str.endswith(")"):
+        return ""
+    tail = []
+    while idx < len(nodes):
+        n = nodes[idx]
+        if isinstance(n, CommentNode):
+            tail.append(n.text)
+            idx += 1
+            continue
+        r = getattr(n, "_raw", None)
+        if r is None or r.raw_str.startswith("\\"):
+            break
+        tail.append(r.raw_str)
+        idx += 1
+    return "".join(tail)
 
 
 def _embedded_fonts(data: bytes, enc: str) -> list[str]:
@@ -142,10 +170,20 @@ def _extract(doc: Document, embedded: list[str] | None = None) -> ExtractResult:
         is_comment = ev.comment
         tf_names: set[str] = set()    # \t(...) 动画内嵌 \fn 引用的字体
         line_chars: set[str] = set()  # 整行文本（保守归入动画字体）
-        for node in ev.parse_tags(doc, parse_escape_nodes=True).parsed:
+        # list() 物化摊平序列：ParsedLine.__iter__ 才是把 OverrideBlock
+        # 摊成节点流的入口，直接下标 parsed[ni] 走 __getitem__ 拿到的是
+        # 未摊平 parts（OverrideBlock 包装），isinstance 全部落空
+        parsed = list(ev.parse_tags(doc, parse_escape_nodes=True).parsed)
+        ni = 0
+        while ni < len(parsed):
+            node = parsed[ni]
+            ni += 1
             if isinstance(node, FontNameTag):
                 value = _fn_name(node)
                 if value:
+                    tail = _paren_tail(node, parsed, ni)
+                    if tail:
+                        value += tail
                     current = value
                     # Comment 里的 \fn 也是引用：建桶，但不计 inline 次数与字
                     usage = bucket(current)
