@@ -36,6 +36,23 @@ def test_exact_column_replace_no_prefix_hit(tmp_path):
     assert len(r.changed_lines) == 3          # 1 Style + Dialogue + Comment
 
 
+def test_bomless_utf16_roundtrip(tmp_path):
+    # 审查二轮 P2：BOM 缺失的 UTF-16 此前不被探测（纯 ASCII 内容被判
+    # utf-8 解出 NUL 串静默 0 改写）。检出后按显式端序文本级整编，写回
+    # 不补 BOM、端序不变
+    for enc in ("utf-16-le", "utf-16-be"):
+        p = tmp_path / f"in_{enc}.ass"
+        p.write_bytes(ASS.encode(enc))
+        out = tmp_path / f"out_{enc}.ass"
+        rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out)
+        data = out.read_bytes()
+        assert not data.startswith((b"\xff\xfe", b"\xfe\xff"))
+        text = data.decode(enc)
+        assert "Style: Main,思源黑体,52" in text
+        assert "{\\fn思源黑体}甲" in text
+        assert "{\\fn華康主體W5X}不誤傷的中文字幕" in text   # 未改行原样
+
+
 def test_encoding_preserved(tmp_path):
     for enc in ("utf-16", "gb18030"):
         p = _mk(tmp_path, enc)
