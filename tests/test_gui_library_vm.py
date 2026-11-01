@@ -1,4 +1,5 @@
 from ass_font_substitute.gui.jobs import DirStatus
+from ass_font_substitute.gui.library_vm import DirRow
 from ass_font_substitute.gui.library_vm import LibraryVM
 from ass_font_substitute.gui.settings_store import Settings
 
@@ -123,3 +124,20 @@ def test_boots_from_settings(tmp_path):
     s.set("font_dirs", ["J:/x", "J:/y"])
     vm = LibraryVM(s)
     assert [d.path for d in vm.dirs] == ["J:/x", "J:/y"]
+
+
+def test_snapshot_offline_not_flipped_back_by_detail(tmp_path):
+    # 审查二轮 P1：装载期深层损坏目录已判 offline——只读探测可能侥幸
+    # 成功（files/bad 表完好），apply_detail 不得翻回 ok 掩盖不可用
+
+    vm = LibraryVM(Settings(tmp_path / "s.json"))
+    vm.dirs = [DirRow(str(tmp_path / "a")), DirRow(str(tmp_path / "bad"))]
+    vm.apply_snapshot({}, [], [str(tmp_path / "bad")])
+    assert vm.dirs[1].state == "offline"
+    ok = DirStatus(str(tmp_path / "bad"), "ok", indexed_files=3, total=3)
+    vm.apply_detail([ok])
+    assert vm.dirs[1].state == "offline"     # 不被探测翻回
+    # 下轮快照无离线：解禁，探测结果生效
+    vm.apply_snapshot({}, [], [])
+    vm.apply_detail([ok])
+    assert vm.dirs[1].state == "ok"

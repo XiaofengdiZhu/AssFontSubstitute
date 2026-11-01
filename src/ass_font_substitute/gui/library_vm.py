@@ -61,6 +61,10 @@ class LibraryVM:
         self.stats = snapshot_stats
         self.overlaps = list(overlaps)
         offline_set = {str(Path(p)) for p in offline_dirs}
+        # 本轮快照离线的目录：apply_detail 不被探测翻回 ok——深层损坏库
+        # 的只读探测（files/bad 表）可能侥幸成功，但装载层已证不可用
+        # （审查二轮 P1）；下轮快照重建本集合自然解禁
+        self._snapshot_offline = offline_set
         for d in self.dirs:
             if str(Path(d.path)) in offline_set:
                 d.state, d.added, d.changed = "offline", 0, 0
@@ -71,9 +75,12 @@ class LibraryVM:
                      dir_stats: dict | None = None) -> None:
         """逐目录探测结果 + 每目录库内统计：行状态/文件数/字体数落定。"""
         by = {s.path: s for s in statuses}
+        snap_offline = getattr(self, "_snapshot_offline", set())
         for d in self.dirs:
             if d.state == "indexing":
                 continue                        # 更新进行中不被探测结果覆盖
+            if str(Path(d.path)) in snap_offline:
+                continue                        # 快照离线同上，不被探测翻回
             s = by.get(d.path)
             if s is None or s.state in ("missing", "offline"):
                 d.state, d.added, d.changed = "offline", 0, 0

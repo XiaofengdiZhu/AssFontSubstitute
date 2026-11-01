@@ -253,3 +253,52 @@ def test_load_name_records_from_db(tmp_path):
     # 行缺失 / 库不存在：None（详情走别名平铺兜底）
     assert load_name_records(str(d), "missing.ttf", 0) is None
     assert load_name_records(str(tmp_path / "nope"), "a.ttf", 0) is None
+
+
+def test_deep_corruption_degrades_per_dir(tmp_path):
+    # 审查二轮 P1 回归：深层损坏（数据页坏块/截断）能过 open_db 头级
+    # 探测，但在装载 SELECT / zlib 解压层炸出——曾把整个聚合装载炸成
+    # failed；现按目录降级 offline，其余目录照常装载
+    d_ok = tmp_path / "ok"
+    d_bad = tmp_path / "bad"
+    _mklib(d_ok, n=1)
+    _mklib(d_bad, n=1)
+    # 深层损坏形态一：cmap blob 坏——装载 SELECT 正常、zlib.decompress
+    # 层 zlib.error（open_db 头级探测挡不住；纯页翻转 FF 小库上 SQLite
+    # 静默视作空表，不触发装载异常）
+    conn = open_db(d_bad / "fontindex.db")
+    conn.execute("UPDATE cmap_data SET data=X'00ff00ff00'")
+    conn.commit()
+    conn.close()
+
+    lib = LibraryIndex.open([d_ok, d_bad])
+    assert d_bad in lib.offline_dirs
+    names = {e.display_name for e in lib.entities()}
+    assert any(n.startswith("ok") for n in names)   # 好目录实体在
+    assert not any(n.startswith("bad") for n in names)
+
+    # 中途失败形态：同目录两字体只坏一个 cmap——目录判 offline，
+    # 坏页前已解析的行也不得泄漏进聚合（口径一致）
+    d_two = tmp_path / "two"
+    d_two.mkdir()
+    # 两个不同 chars → 两份 cmap blob：坏第二个，f0 解析进 buf 后 f1
+    # 才炸——中途失败形态（同 chars 会 UNIQUE 去重成单 blob，第一行
+    # 即炸，buf 恒空，测不到泄漏防护）
+    build_font(d_two / "f0.ttf", chars="永", family="兩體0")
+    build_font(d_two / "f1.ttf", chars="中木國", family="兩體1")
+    conn = open_db(d_two / "fontindex.db")
+    update_index(d_two, conn)
+    last = conn.execute("SELECT MAX(id) FROM cmap_data").fetchone()[0]
+    conn.execute("UPDATE cmap_data SET data=X'00ff00ff00' WHERE id=?", (last,))
+    conn.commit()
+    conn.close()
+    lib2 = LibraryIndex.open([d_two])
+    assert d_two in lib2.offline_dirs
+    assert lib2.entities() == []
+    assert lib2.stats()["fonts"] == 0
+
+    # 聚合层：load_library 把装载期离线并入快照（gui/jobs）
+    from ass_font_substitute.gui.jobs import load_library
+    snap = load_library([str(d_ok), str(d_bad)])
+    assert str(d_bad) in snap.offline_dirs
+    assert str(d_ok) not in snap.offline_dirs

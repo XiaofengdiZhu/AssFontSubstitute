@@ -77,6 +77,10 @@ class LibraryIndex:
         self.dirs = dirs
         self._entities: list[FontEntity] = []
         self._skipped: list[str] = []
+        # 装载期降级离线的目录（深层损坏等）：open_db 头级探测挡不住的
+        # （坏块/截断在装载 SELECT / zlib 解压层炸出）按目录剔除，不拖垮
+        # 整个聚合装载（审查二轮 P1）
+        self.offline_dirs: list[Path] = []
         self._by_alias: dict[str, list[FontEntity]] = {}   # _load 末尾灌满
         self._load()
 
@@ -90,44 +94,15 @@ class LibraryIndex:
         # 同族各字重共享 cmap，18k face 仅 ~1.5k 份 distinct（内存同享）
         memo: dict[bytes, CmapRanges] = {}
         for di, d in enumerate(self.dirs):
-            conn = open_db(d / "fontindex.db")
+            buf: list = []
             try:
-                cached = {(r[0], r[1]): (r[2], r[3]) for r in conn.execute(
-                    "SELECT rel_path, face_index, mtime_ns, fp FROM fingerprints "
-                    "WHERE algo=?", (FP_ALGO,))}
-                writeback = []
-                for (rel, fi, ps, ver, al, disp, fam, nl, w, wd, it, cmb,
-                     script, cat, size, mtime) in load_font_rows(conn):
-                    aliases = tuple(json.loads(al))
-                    version = tuple(json.loads(ver)) if ver else None
-                    family = tuple(json.loads(fam)) if fam else ()
-                    # JSON 键恒为串、对为列表：还原 int 键/元组对，GUI
-                    # 侧链挑选按 int nameID/langID 匹配
-                    name_langs = ({int(k): [(int(lg), t) for lg, t in v]
-                                   for k, v in json.loads(nl).items()}
-                                  if nl else {})
-                    cmap = memo.get(cmb)
-                    if cmap is None:
-                        cmap = CmapRanges.from_bytes(zlib.decompress(cmb))
-                        memo[cmb] = cmap
-                    hit = cached.get((rel, fi))
-                    if hit is not None and hit[0] == mtime:
-                        fp = hit[1]
-                    else:
-                        # 缓存缺失（旧库/新文件/mtime 变化）→ 现算并回写
-                        fp = fingerprint_of(list(aliases), cmap, w, wd, bool(it))
-                        writeback.append((rel, fi, mtime, fp))
-                    raw.append((di, rel, fi, ps, version, aliases, disp, family,
-                                name_langs, w, wd, bool(it), script, cat, cmap,
-                                fp, size, mtime))
-                if writeback:
-                    with conn:
-                        conn.executemany(
-                            "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
-                            [(rel, fi, mtime, FP_ALGO, fp)
-                             for rel, fi, mtime, fp in writeback])
-            finally:
-                conn.close()
+                self._load_dir(di, d, memo, buf)
+            except Exception:
+                self.offline_dirs.append(d)
+            else:
+                # 成功才并入：中途坏页前已解析的行不泄漏进聚合结果——
+                # 目录既判 offline，行必须整体剔除（口径一致）
+                raw.extend(buf)
         # 身份 = psname，无则别名并集；排序保证平局保留目录顺序靠前、rel_path、face_index
         best: dict[str, tuple] = {}
         for item in sorted(raw, key=lambda t: (t[0], t[1], t[2])):
@@ -156,6 +131,49 @@ class LibraryIndex:
         for e in self._entities:
             for a in e.aliases:
                 self._by_alias.setdefault(normalize_name(a), []).append(e)
+
+    def _load_dir(self, di: int, d: Path, memo: dict, raw: list) -> None:
+        """单目录装载；任何异常（sqlite3.Error / zlib.error / json 等）
+        由 _load 捕获降级 offline——sqlite3.Error 之外的类型同样可能
+        （坏块穿透到解压/JSON 层），故这里捕 Exception。"""
+        conn = open_db(d / "fontindex.db")
+        try:
+            cached = {(r[0], r[1]): (r[2], r[3]) for r in conn.execute(
+                "SELECT rel_path, face_index, mtime_ns, fp FROM fingerprints "
+                "WHERE algo=?", (FP_ALGO,))}
+            writeback = []
+            for (rel, fi, ps, ver, al, disp, fam, nl, w, wd, it, cmb,
+                 script, cat, size, mtime) in load_font_rows(conn):
+                aliases = tuple(json.loads(al))
+                version = tuple(json.loads(ver)) if ver else None
+                family = tuple(json.loads(fam)) if fam else ()
+                # JSON 键恒为串、对为列表：还原 int 键/元组对，GUI
+                # 侧链挑选按 int nameID/langID 匹配
+                name_langs = ({int(k): [(int(lg), t) for lg, t in v]
+                               for k, v in json.loads(nl).items()}
+                              if nl else {})
+                cmap = memo.get(cmb)
+                if cmap is None:
+                    cmap = CmapRanges.from_bytes(zlib.decompress(cmb))
+                    memo[cmb] = cmap
+                hit = cached.get((rel, fi))
+                if hit is not None and hit[0] == mtime:
+                    fp = hit[1]
+                else:
+                    # 缓存缺失（旧库/新文件/mtime 变化）→ 现算并回写
+                    fp = fingerprint_of(list(aliases), cmap, w, wd, bool(it))
+                    writeback.append((rel, fi, mtime, fp))
+                raw.append((di, rel, fi, ps, version, aliases, disp, family,
+                            name_langs, w, wd, bool(it), script, cat, cmap,
+                            fp, size, mtime))
+            if writeback:
+                with conn:
+                    conn.executemany(
+                        "INSERT OR REPLACE INTO fingerprints VALUES (?,?,?,?,?)",
+                        [(rel, fi, mtime, FP_ALGO, fp)
+                         for rel, fi, mtime, fp in writeback])
+        finally:
+            conn.close()
 
     def entities(self) -> list[FontEntity]:
         return list(self._entities)

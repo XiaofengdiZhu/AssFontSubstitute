@@ -90,7 +90,9 @@ class LibrarySnapshot:
 
 def load_library(dirs: list[str]) -> LibrarySnapshot:
     """聚合打开库；打不开的目录（离线/只读）剔除并报告，不拖垮整体。
-    尚无索引的目录建空库骨架，实体为 0；建索引进「更新全部索引」流程。"""
+    尚无索引的目录建空库骨架，实体为 0；建索引进「更新全部索引」流程。
+    装载期深层损坏（open_db 头级探测挡不住的坏块/截断）由 LibraryIndex
+    逐目录降级，offline_dirs 一并并入快照（审查二轮 P1）。"""
     usable, offline = [], []
     for d in dirs:
         try:
@@ -98,7 +100,9 @@ def load_library(dirs: list[str]) -> LibrarySnapshot:
             usable.append(Path(d))
         except sqlite3.Error:
             offline.append(d)
-    return LibrarySnapshot(lib=LibraryIndex.open(usable), offline_dirs=offline)
+    lib = LibraryIndex.open(usable)
+    offline.extend(str(d) for d in lib.offline_dirs)
+    return LibrarySnapshot(lib=lib, offline_dirs=offline)
 
 
 def lib_key(dirs) -> tuple:
