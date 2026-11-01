@@ -25,6 +25,8 @@ class ExtractResult:
     unknown_styles: list[str] = field(default_factory=list)
     invalid_styles: list[str] = field(default_factory=list)  # Fontname 为空的样式
     parse_error: str | None = None
+    # 降级剔除的畸形行（"第 N 行无法解析已跳过：…"）；非空 = 部分提取
+    skipped_lines: list[str] = field(default_factory=list)
 
 
 def _transform_fns(tag) -> list:
@@ -117,6 +119,53 @@ def _embedded_fonts(data: bytes, enc: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+# 降级剔除坏行的上限：正常字幕坏行是个位数，超限视为文件整体损坏，
+# 继续二分只是烧 CPU（每轮 O(log n) 次全量解析）
+_MAX_DEGRADE_REMOVALS = 50
+
+
+def _reload_skip_bad_lines(text: str) -> tuple[Document | None, list[str]]:
+    """单条畸形行降级装载：light_ass 行级不容错（Event 10 域 unpack /
+    AssTime / Style 域解析在 strict=False 下也照抛），一条坏行曾让
+    Document.load 整文件报废（审查二轮 P1，批量场景一颗老鼠屎坏一锅粥）。
+
+    降级：坏行存在性对行前缀单调（坏行仍在的前缀必失败）→ 二分找最小
+    失败前缀（O(log n) 次全量解析），其末行即肇事者；剔除后重载，循环
+    处理多条坏行。返回 (doc, 剔除行描述)；彻底失败返回 (None, [])。
+    行文本按原编码不可解时调用方直接走原错误，不进本函数。"""
+    lines = text.splitlines(keepends=True)
+    removed: set[int] = set()
+    skipped: list[str] = []
+    # N 条坏行要 N 次剔除 + 1 次成功解析 = N+1 轮：上限 50 指剔除数，
+    # 循环须跑到 _MAX_DEGRADE_REMOVALS + 1（差一曾让恰好 50 条坏行的
+    # 文件在最后一轮剔除后来不及终判而整文件报废）
+    for _ in range(_MAX_DEGRADE_REMOVALS + 1):
+        keep = [ln for i, ln in enumerate(lines) if i not in removed]
+        try:
+            doc = Document.from_string("".join(keep), strict=False)
+        except Exception:
+            lo, hi, culprit = 1, len(keep), None
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                try:
+                    Document.from_string("".join(keep[:mid]), strict=False)
+                    lo = mid + 1
+                except Exception:
+                    culprit = mid
+                    hi = mid - 1
+            # 全量失败已知，二分终会探到 len(keep)——culprit 理论必有值；
+            # None 分支纯防御（未来 light_ass 出非行局部失败形态时兜底）
+            if culprit is None:
+                return None, skipped
+            orig = [i for i in range(len(lines)) if i not in removed][culprit - 1]
+            removed.add(orig)
+            snippet = lines[orig].strip()
+            skipped.append(f"第 {orig + 1} 行无法解析已跳过：{snippet[:40]}")
+            continue
+        return doc, skipped
+    return None, skipped
+
+
 def extract_usages(path: Path) -> ExtractResult:
     path = Path(path)
     data = path.read_bytes()
@@ -125,13 +174,24 @@ def extract_usages(path: Path) -> ExtractResult:
     except EncodingDetectError as e:
         return ExtractResult(parse_error=str(e))
     embedded = _embedded_fonts(data, enc)
+    skipped: list[str] = []
     try:
-        # 畸形的 Style/Event 行在 strict=False 下仍可能抛错，记录而非中断（批量场景）
         doc = Document.load(str(path), encoding=ALIAS_BOM.get(enc, enc),
                             strict=False)
     except Exception as e:
-        return ExtractResult(parse_error=f"{type(e).__name__}: {e}")
-    return _extract(doc, embedded)
+        # 降级：剔除肇事坏行重载（单条畸形行不拖垮整文件）。行文本不可
+        # 解（>64KB 处非法序列等）或降级彻底失败才回原错误
+        bom_b, body_codec = _bom_and_codec(data, enc)
+        try:
+            text = data[len(bom_b):].decode(body_codec)
+        except UnicodeDecodeError:
+            return ExtractResult(parse_error=f"{type(e).__name__}: {e}")
+        doc, skipped = _reload_skip_bad_lines(text)
+        if doc is None:
+            return ExtractResult(parse_error=f"{type(e).__name__}: {e}")
+    r = _extract(doc, embedded)
+    r.skipped_lines = skipped
+    return r
 
 
 def _extract(doc: Document, embedded: list[str] | None = None) -> ExtractResult:

@@ -1246,6 +1246,10 @@
             <translation>解析失敗</translation>
         </message>
         <message>
+            <source>跳过 {0} 行</source>
+            <translation>跳過 {0} 行</translation>
+        </message>
+        <message>
             <source>{0} 种字体</source>
             <translation>{0} 種字型</translation>
         </message>

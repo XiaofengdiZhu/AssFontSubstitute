@@ -188,6 +188,66 @@ def test_transform_fn_comment_reference_only(tmp_path):
     assert len(by["華康註解換體"].chars) == 0
 
 
+def test_bad_line_degraded_not_whole_file_lost(tmp_path):
+    # 审查二轮 P1：单条畸形行（缺 10 域/坏时间）曾让 Document.load 整文件
+    # 报废——降级剔除坏行重载，其余行照常提取，skipped_lines 记行号
+    bad = "Dialogue: 0,xx:yy,0:00:05.00,Main,,0,0,0,,正文的中文字幕"
+    p = _write(tmp_path, ASS + bad + "\n")
+    r = extract_usages(p)
+    assert r.parse_error is None
+    assert len(r.skipped_lines) == 1
+    assert "第 16 行" in r.skipped_lines[0]      # bad 行在夹具末尾的行号
+    by = {u.norm_name: u for u in r.usages}
+    assert by["華康主體w5"].style_count == 1     # 好行完整保留
+    assert r.unknown_styles == ["Ghost"]
+    # 多条坏行：循环剔除
+    bad2 = "Dialogue: 0,0:00:00.00"
+    r2 = extract_usages(_write(tmp_path, ASS + bad + "\n" + bad2 + "\n"))
+    assert r2.parse_error is None
+    assert len(r2.skipped_lines) == 2
+    assert {u.norm_name for u in r2.usages} >= {"華康主體w5"}
+
+
+def test_bad_line_degraded_crlf_utf16be_and_style_family(tmp_path):
+    # 降级路径口径：CRLF 换行下行号与文本行一致；Style 家族失败形态
+    # （空样式名）同样降级；utf-16-be BOM 走 load 的 ALIAS_BOM 自动端序、
+    # 降级走 _bom_and_codec 手工剥 BOM + 显式端序正文解码——两路结果一致
+    bad = "Style: ,Arial,32"                     # 空样式名（Style 域失败家族）
+    lines = ASS.split("\n")                      # 末尾换行 → 尾随空串
+    text = "\r\n".join([*lines[:7], bad, *lines[7:]]) + "\r\n"
+    p = tmp_path / "crlf.ass"
+    p.write_bytes(b"\xef\xbb\xbf" + text.encode("utf-8"))
+    r = extract_usages(p)
+    assert r.parse_error is None
+    assert r.skipped_lines == [f"第 8 行无法解析已跳过：{bad}"]
+    assert {u.norm_name for u in r.usages} >= {"華康主體w5"}
+
+    p2 = tmp_path / "be.ass"
+    p2.write_bytes(b"\xfe\xff" + text.encode("utf-16-be"))
+    r2 = extract_usages(p2)
+    assert r2.parse_error is None
+    assert r2.skipped_lines == r.skipped_lines
+    assert {u.norm_name for u in r2.usages} == {u.norm_name for u in r.usages}
+
+
+def test_over_degrade_cap_falls_back_to_parse_error(tmp_path):
+    # 坏行超过 _MAX_DEGRADE_REMOVALS：视为文件整体损坏，回退原 parse_error
+    p = _write(tmp_path, ASS + "".join(f"Dialogue: 0,bad{i}\n"
+                                       for i in range(60)))
+    r = extract_usages(p)
+    assert r.parse_error is not None and not r.usages
+
+
+def test_undecodable_tail_still_parse_error(tmp_path):
+    # 降级的前提是行文本可解：>64KB 处非法序列 decode 失败 → 保持原错误
+    p = tmp_path / "big.ass"
+    body = ASS.encode("utf-8") + b"\x80" * 70000
+    p.write_bytes(b"\xef\xbb\xbf" + body)
+    r = extract_usages(p)
+    assert r.parse_error is not None
+    assert not r.usages
+
+
 def test_embedded_font_flagged(tmp_path):
     # [Fonts] 段 fontname: 行=内嵌字体：命中引用桶标 embedded=True，
     # 未引用的内嵌字体不建桶（无卡可标）；段外 "fontname:" 字样不算

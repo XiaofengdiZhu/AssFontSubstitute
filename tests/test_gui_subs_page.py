@@ -1054,6 +1054,24 @@ def test_tofu_frame_dashes_survive_corners(qapp):
     host.deleteLater()
 
 
+def test_file_row_skipped_warning_badge(qapp, tmp_path, monkeypatch):
+    # 审查二轮 P1：畸形行降级剔除的部分提取文件仍参与合并（error=None），
+    # 行内挂警示徽章列行数，tip 列明细；与整文件失败的 error 徽章不同
+    from qfluentwidgets import InfoBadge
+
+    from ass_font_substitute.gui.jobs import FileParse
+
+    page = _make_page(qapp, tmp_path, monkeypatch)
+    page._on_result("parse:s.ass", FileParse("s.ass", None, [], [], [],
+                                             skipped=["第 16 行无法解析已跳过：x"]))
+    page._rebuild_file_rows()
+    qapp.processEvents()
+    badges = page.findChildren(InfoBadge)
+    texts = [b.text() for b in badges]
+    assert any("跳过 1 行" in t for t in texts), texts
+    assert not any("解析失败" in t for t in texts), texts
+
+
 def test_file_row_checkbox_fixed_width(qapp, tmp_path, monkeypatch):
     # qfw CheckBox QSS min-width:28px（空文本拖 ~36px 空白）——选项行经
     # setCustomStyleSheet 覆写后定宽 24 生效且 polish 稳定

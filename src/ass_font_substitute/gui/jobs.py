@@ -178,6 +178,8 @@ class FileParse:
     unknown_styles: list[str]
     invalid_styles: list[str]
     checked: bool = True
+    # 降级剔除的畸形行描述（部分提取仍参与合并，与 error=整文件失败不同）
+    skipped: list[str] = field(default_factory=list)
 
     @property
     def font_count(self) -> int:
@@ -191,7 +193,8 @@ def parse_subtitle(path: str) -> FileParse:
         return FileParse(path, f"{type(e).__name__}: {e}", [], [], [])
     if r.parse_error:
         return FileParse(path, r.parse_error, [], [], [])
-    return FileParse(path, None, r.usages, r.unknown_styles, r.invalid_styles)
+    return FileParse(path, None, r.usages, r.unknown_styles, r.invalid_styles,
+                     skipped=r.skipped_lines)
 
 
 def classify_one(lib: LibraryIndex, usage: FontUsage, threshold: float,

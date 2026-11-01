@@ -102,6 +102,24 @@ def test_parse_subtitle(tmp_path, sub_file):
     assert bad.error is not None and bad.font_count == 0
 
 
+def test_parse_subtitle_degraded_partial(tmp_path):
+    # 降级部分提取透传：error=None（照常参与 checked_parses 合并）、
+    # skipped 列坏行、usages 保留好行——与整文件失败（error 表）不同
+    p = tmp_path / "bad.ass"
+    p.write_text(
+        "[Script Info]\nScriptType: v4.00+\n\n"
+        "[V4+ Styles]\nFormat: Name, Fontname, Fontsize\n"
+        "Style: Def,测试黑体,54\n\n"
+        "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, "
+        "MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:00.00,0:00:05.00,Def,,0,0,0,,永宇好\n"
+        "Dialogue: 0,0:00:00.00\n", "utf-8-sig")
+    r = parse_subtitle(str(p))
+    assert r.error is None
+    assert len(r.skipped) == 1 and "第 11 行" in r.skipped[0]
+    assert r.font_count == 1 and r.usages[0].chars == set("永宇好")
+
+
 def test_score_pick_smoke(ctx_stub, font_dir):
     from ass_font_substitute.gui.jobs import ensure_library
     from ass_font_substitute.gui.jobs import score_pick

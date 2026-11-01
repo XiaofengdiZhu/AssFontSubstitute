@@ -373,6 +373,14 @@ class SubsPage(QWidget):
                 # tip 挂徽章本体：容器只吃自身窄缝 Enter，悬徽章不冒泡
                 install_tip(badge, f.error)
             else:
+                # 部分提取：畸形行降级剔除（审查二轮 P1），文件仍参与合并，
+                # 徽章提示而非整文件报失败
+                if f.skipped:
+                    badge = padded_badge(
+                        InfoBadge.warning,
+                        self.tr("跳过 {0} 行").format(len(f.skipped)))
+                    rh.addWidget(badge, 0, Qt.AlignVCenter)
+                    install_tip(badge, "\n".join(f.skipped))
                 content = self.tr("{0} 种字体").format(f.font_count)
             rm = TransparentToolButton(FIF.REMOVE_FROM)
             # 危险动作：红色示警（icon() 第二参才是颜色，须关键字传）
