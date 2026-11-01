@@ -66,6 +66,7 @@ class Cache:
         self._pending_pair: dict[tuple, float] = {}
         self._nb_sum: int | None = None    # renders 字节总量缓存（trim 门用）
         self._pair_puts = 0
+        self._last_ts = 0.0                # used_at 单调闸（_now）
 
     def _ensure_schema(self):
         # 旧库 pairs 无 used_at 列：结构不兼容直接弃表重建（缓存可丢）
@@ -106,6 +107,22 @@ class Cache:
             # （cache=None 整个应用残废直到重启）
             pass
 
+    def _now(self) -> float:
+        """used_at 时间源：time.time() 回跳（NTP 校时/手动改钟）会让 LRU
+        驱逐序错乱、trim 挑错行；进程内钳制严格递增，跨重启仍走墙上时钟
+        （重启后大范围回退只影响一次驱逐序，可接受）。"""
+        t = time.time()
+        if t <= self._last_ts:
+            t = self._last_ts + 1e-6
+        self._last_ts = t
+        return t
+
+    def close(self):
+        """收尾：pending 记账落库 + 干净关连接（WAL 落盘清旁车）。正常退
+        出由 CoreWorker.run 调；异常路径连接随进程回收（WAL 前缀自洽）。"""
+        self.flush()
+        self.conn.close()
+
     def _kv(self, text_ver: str) -> str:
         # ALGO_VER 转定宽 2 位前缀（_purge_stale_algo 的 substr 依赖定宽）
         return f"{int(self.ALGO_VER):02d}\x00{text_ver}"
@@ -142,7 +159,7 @@ class Cache:
                 # 否则异常一路冒到上层被当「字体渲染失败」，重启不愈
                 self._delete_render(fingerprint, kv, row[1])
             else:
-                self._pending_render[(fingerprint, kv)] = time.time()
+                self._pending_render[(fingerprint, kv)] = self._now()
                 if len(self._pending_render) >= self.FLUSH_PENDING:
                     self.flush()
                 return bundle
@@ -172,7 +189,7 @@ class Cache:
                 (fingerprint, kv)).fetchone()
             self.conn.execute(
                 "INSERT OR REPLACE INTO renders VALUES (?,?,?,?,?)",
-                (fingerprint, kv, blob, len(blob), time.time()))
+                (fingerprint, kv, blob, len(blob), self._now()))
         # 同键若已有读命中记账：DB 刚写的时间更新，留旧记账反而在 flush
         # 时回退（对齐 put_pair）
         self._pending_render.pop((fingerprint, kv), None)
@@ -194,7 +211,7 @@ class Cache:
             (a, b, kv)).fetchone()
         if not row:
             return None
-        self._pending_pair[(a, b, kv)] = time.time()
+        self._pending_pair[(a, b, kv)] = self._now()
         if len(self._pending_pair) >= self.FLUSH_PENDING:
             self.flush()
         return CompareResult(*row)
@@ -205,7 +222,7 @@ class Cache:
         with self.conn:
             self.conn.execute(
                 "INSERT OR REPLACE INTO pairs VALUES (?,?,?,?,?,?,?)",
-                (a, b, kv, r.score, r.size_ratio, r.n_chars, time.time()))
+                (a, b, kv, r.score, r.size_ratio, r.n_chars, self._now()))
         # 同键若已有读命中记账：DB 刚写的时间更新，留旧记账反而在 flush 时回退
         self._pending_pair.pop((a, b, kv), None)
         # 节流：COUNT(*) 全表扫不逐条付，PAIRS_TRIM_EVERY 查一次足够
@@ -304,4 +321,4 @@ def _decode(blob: bytes) -> RenderBundle:
     z = np.load(io.BytesIO(body))
     chars = [str(c) for c in z["chars"]]
     tiles = {c: z[f"t{i}"] for i, c in enumerate(chars)}
-    return RenderBundle(tiles, ink, frozenset(chars))
+    return RenderBundle(tiles, ink)

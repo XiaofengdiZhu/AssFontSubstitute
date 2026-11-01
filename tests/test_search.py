@@ -102,20 +102,27 @@ def test_size_range_gate(tmp_path):
 
 
 def test_miss_path_render_failure_skips(tmp_path, monkeypatch):
-    # 未命中路径：候选无缓存 → 需渲染 → 渲染失败 → 跳过；耗尽而非崩溃
+    # 未命中路径：候选无缓存 → 需渲染 → 渲染失败 → 跳过；耗尽而非崩溃。
+    # 只炸候选渲染（target 正常渲）——整函数炸是 target_error 语义，
+    # 归 test_target_render_failure_flagged；旧码整函数炸也过此测试
+    # 属恰好双标志全置的假覆盖
     lib = _lib(tmp_path, {"name": "c0", "chars": CHARS, "family": "圓體0"})
     target = next(e for e in lib.entities() if e.psname == "TGT")
     cache = Cache(tmp_path / "cache.db")
+    tpath = str(search_mod._entity_path(target))
+    real = search_mod.render_bundle
 
     def explode(path, face_index, chars, var_axes=()):
-        raise RuntimeError("不应触发渲染")
+        if str(path) != tpath:
+            raise RuntimeError("候选坏了")
+        return real(path, face_index, chars, var_axes)
 
     monkeypatch.setattr(search_mod, "render_bundle", explode)
     s = FontSearcher(target, set("永中木水火土石田"), lib, cache,
                      sample_text=CHARS, cov_threshold=0.98)
     found = _drain(s)
     assert found == []
-    assert s.exhausted
+    assert s.exhausted and not s.target_error
 
 
 def test_rejected_results_still_cached(tmp_path, monkeypatch):
@@ -177,7 +184,8 @@ def test_target_render_failure_flagged(tmp_path, monkeypatch):
                      sample_text=CHARS, cov_threshold=0.98)
     found = _drain(s)
     assert found == []
-    assert s.target_error and s.exhausted
+    assert s.target_error
+    assert not s.exhausted                      # 提前退出≠评完池（语义收紧）
     assert calls == [tpath]                     # 恰一次，无重试风暴
 
 
@@ -603,3 +611,24 @@ def test_fvar_end_to_end_search(tmp_path):
     ranked = rank_pool(target, [e for e in ents
                                 if e.fingerprint != target.fingerprint], "t2s")
     assert ranked[0].display_name == "变化體 Black"  # 同 eff 900：罚项 0 居首
+
+
+def test_serial_target_error_stops_early(tmp_path, monkeypatch):
+    # 串行路径 target_error 提前退出（与 _pool_slice 同口径）：目标渲染
+    # 失败后不再逐候选空转（旧码评完全池、exhausted 误置 True）
+    lib = _lib(tmp_path,
+               {"name": "c0", "chars": CHARS, "family": "圓體0"},
+               {"name": "c1", "chars": CHARS, "family": "圓體1"})
+    target = next(e for e in lib.entities() if e.psname == "TGT")
+
+    def flaky(path, face_index, chars, var_axes=()):
+        raise RuntimeError("目标坏了")
+
+    monkeypatch.setattr(search_mod, "render_bundle", flaky)
+    s = FontSearcher(target, set("永中木水火土石田"), lib,
+                     Cache(tmp_path / "cache.db"),
+                     sample_text=CHARS, cov_threshold=0.98)
+    s.next_slice(max_evals=10, max_seconds=30.0)
+    assert s.target_error
+    assert s.compared == 1                    # 首候选即停，不评完池
+    assert not s.exhausted                    # 候选未评完，不得报 exhausted

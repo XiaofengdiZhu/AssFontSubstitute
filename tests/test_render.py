@@ -13,7 +13,7 @@ def test_render(tmp_path):
     build_font(p, chars="永中木", family="X體")
     b = render_bundle(p, 0, "永中木缺")
     assert set(b.tiles) == {"永", "中", "木"}     # 缺字跳过
-    assert b.available == frozenset("永中木")
+    assert set(b.tiles) == set("永中木")
     for t in b.tiles.values():
         assert t.shape == (48, 48) and t.dtype == np.uint8
         assert t.max() > 0                        # 方块字形非空
@@ -357,7 +357,7 @@ def test_render_bundle_with_var_axes(tmp_path, monkeypatch):
     b2 = render_bundle(p, 0, "永", var_axes=(900.0,))  # 实例态
     assert calls == [(900.0,)]
     assert len(b2.tiles) == len(b1.tiles) == 1
-    assert b2.available == frozenset("永")
+    assert set(b2.tiles) == set("永")
 
 
 def test_render_text_strip_with_var_axes(tmp_path):
@@ -418,3 +418,24 @@ def test_render_var_axes_on_static_font_rejected(tmp_path):
     build_font(p, chars="永", family="靜態體")
     with pytest.raises(ValueError):
         render_bundle(p, 0, "永", var_axes=(400.0,))
+
+
+def test_render_pass2_failure_falls_back_to_pass1(tmp_path, monkeypatch):
+    # pass2 重渲个别字失败 → 回退 pass1 位图（_fit 裁缩归一后仅清晰度
+    # 略降），不得整字丢弃（二轮审查 P2）
+    p = tmp_path / "f.ttf"
+    build_font(p, chars="永中木", family="X體")
+    real = render._render_char
+    seen_px: list[int] = []
+
+    def flaky(face, enc, ch, px):
+        seen_px.append(px)
+        if px != render.RULER_PX and ch == "中":
+            return None               # 仅 pass2 的「中」失败
+        return real(face, enc, ch, px)
+
+    monkeypatch.setattr(render, "_render_char", flaky)
+    b = render_bundle(p, 0, "永中木")
+    assert seen_px.count(render.RULER_PX) == 3    # pass1 全量
+    assert any(x != render.RULER_PX for x in seen_px)   # 确实进了 pass2
+    assert set(b.tiles) == set("永中木")

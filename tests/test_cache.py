@@ -1,6 +1,8 @@
+import sqlite3
 import time
 
 import numpy as np
+import pytest
 
 from ass_font_substitute.core.similarity.cache import Cache
 from ass_font_substitute.core.similarity.metrics import CompareResult
@@ -10,7 +12,7 @@ from ass_font_substitute.core.similarity.render import RenderBundle
 def _bundle(chars="永"):
     # 每字符灰度不同：解码值逐字符断言才能抓到 keys/values 错位
     tiles = {c: np.full((48, 48), 100 + i * 7, np.uint8) for i, c in enumerate(chars)}
-    return RenderBundle(tiles, 40.0, frozenset(chars))
+    return RenderBundle(tiles, 40.0)
 
 
 def test_render_lazy_and_hit(tmp_path):
@@ -302,3 +304,32 @@ def test_encode_deterministic(tmp_path):
 
     b = _bundle("永中木水8b")
     assert _encode(b) == _encode(b)
+
+
+
+def test_now_monotonic_under_clock_backjump(tmp_path, monkeypatch):
+    # time.time() 回跳（NTP 校时/改钟）不得让 used_at 倒序——LRU 驱逐序
+    # 靠它排序；进程内钳制严格递增，跨重启仍走墙上时钟
+    import ass_font_substitute.core.similarity.cache as cache_mod
+    c = Cache(tmp_path / "cache.db")
+    clock = {"v": 1000.0}
+    monkeypatch.setattr(cache_mod.time, "time", lambda: clock["v"])
+    a = c._now()
+    clock["v"] = 999.0                          # 回跳
+    b = c._now()
+    assert b > a
+    clock["v"] = 999.5                          # 仍低于钳制值
+    assert c._now() > b
+    c.close()
+
+
+def test_close_flushes_pending_and_closes(tmp_path):
+    c = Cache(tmp_path / "cache.db")
+    c.put_pair("aa", "bb", "00\x00v", CompareResult(0.9, 1.0, 10))
+    assert c.get_pair("aa", "bb", "00\x00v") is not None   # 产生 pending used_at
+    c.close()                                   # flush pending + 关连接
+    with pytest.raises(sqlite3.ProgrammingError):
+        c.conn.execute("SELECT 1")
+    c2 = Cache(tmp_path / "cache.db")           # 重开：行在且 used_at 已落
+    assert c2.get_pair("aa", "bb", "00\x00v") is not None
+    c2.close()

@@ -10,7 +10,7 @@ from tests.fonts import build_font
 
 
 def _bundle(tiles, ink=40.0):
-    return RenderBundle(dict(tiles), ink, frozenset(tiles))
+    return RenderBundle(dict(tiles), ink)
 
 
 def test_phash_identical():

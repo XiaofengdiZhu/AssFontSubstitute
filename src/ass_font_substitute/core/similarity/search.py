@@ -142,10 +142,12 @@ class FontSearcher:
         self.hit_count = 0
 
     def next(self) -> Candidate | None:
-        """推进到下一个「过全部门槛」的候选；None = 已暂停或耗尽（看 exhausted）。"""
-        if self.paused:
+        """推进到下一个「过全部门槛」的候选；None = 已暂停/目标失败或耗尽
+        （看 paused/target_error/exhausted）。target_error 提前退出与
+        next_slice 同口径（二轮审查 P2）：候选未评完不误置 exhausted。"""
+        if self.paused or self.target_error:
             return None
-        while True:
+        while not self.target_error:
             e = next(self._iter, None)
             if e is None:
                 self.exhausted = True
@@ -154,6 +156,7 @@ class FontSearcher:
             cand = self._evaluate(e)
             if cand is not None:
                 return cand
+        return None
 
     def next_slice(self, max_evals: int = EVAL_SLICE,
                    max_seconds: float = SLICE_SECONDS,
@@ -187,7 +190,10 @@ class FontSearcher:
         out: list[Candidate] = []
         deadline = time.perf_counter() + max_seconds
         evals = 0
-        while evals < max_evals and not self.paused:
+        # target_error 提前退出（二轮审查 P2）：与 _pool_slice 同口径——
+        # 目标渲染失败后逐候选 _evaluate 顶部短路虽是 µs 级，但 iter/函数
+        # 调用对 1.7 万库纯浪费，且 exhausted 语义会误置
+        while evals < max_evals and not self.paused and not self.target_error:
             if time.perf_counter() >= deadline:
                 break
             e = next(self._iter, None)

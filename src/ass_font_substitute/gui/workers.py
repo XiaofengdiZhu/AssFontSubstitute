@@ -58,7 +58,7 @@ class CoreWorker(QThread):
             except Exception as e:
                 self.failed.emit(tag, f"{type(e).__name__}: {e}")
         if cache is not None:
-            cache.flush()   # 读命中记账收尾：正常退出不带丢 used_at（LRU 序）
+            cache.close()   # 记账落库+干净关连接（WAL 落盘清旁车）
         from ass_font_substitute.gui.jobs import shutdown_ctx
         shutdown_ctx(ctx)   # 渲染进程池收尾
 

@@ -153,9 +153,10 @@ def _parse_cmap2(fh, sub_base: int) -> dict[int, int]:
 
 @dataclass
 class RenderBundle:
+    # available 字段拆除（二轮审查 P2 死字段）：不进 _encode blob（_decode
+    # 由 chars 现算），全库无消费方——语义=tiles.keys() 恒等
     tiles: dict[str, np.ndarray]
     ink_median: float
-    available: frozenset[str]
 
 
 def _gray_bitmap(bm) -> np.ndarray | None:
@@ -283,7 +284,7 @@ def render_bundle(path: Path, face_index: int, chars: str,
                 first[ch] = arr
                 heights[ch] = _ink_height(arr)
         if not heights:
-            return RenderBundle({}, 0.0, frozenset())
+            return RenderBundle({}, 0.0)
         median = float(np.median(sorted(heights.values())))
         px = _second_pass_px(median)
         tiles: dict[str, np.ndarray] = {}
@@ -292,11 +293,14 @@ def render_bundle(path: Path, face_index: int, chars: str,
             if arr is None:
                 continue
             if px != RULER_PX:               # 复用判定：锚后仍落量尺字号
-                arr = _render_char(face, enc, ch, px)
-                if arr is None:
-                    continue
+                arr2 = _render_char(face, enc, ch, px)
+                if arr2 is not None:
+                    arr = arr2
+                # 重渲失败回退 pass1 位图：丢字比个别字 tile 尺度偏差伤得
+                # 重（_fit 会裁缩归一，48px 位图直接 fit 只是清晰度略降，
+                # 二轮审查 P2 曾整字丢弃）
             tiles[ch] = _fit(arr)
-        return RenderBundle(tiles, median, frozenset(tiles))
+        return RenderBundle(tiles, median)
 
 
 STRIP_PX = 72          # 预览条带渲染尺寸：显示高 28 逻辑 px 的 ~2.5x 超采样
