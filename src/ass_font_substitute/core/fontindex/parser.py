@@ -24,30 +24,9 @@ RECORD_IDS = (1, 2, 3, 4, 16)
 TTC_EXTS = {".ttc", ".otc"}
 _VER_RE = re.compile(r"([\d]+(?:\.\d+)*)")
 
-# 字重错标补偿词表（spec §1，OS/2 usWeightClass 规范值核验无误）。仅英文
-# 词——CJK「黑体/粗」是类别语义。触发条件：ID1/4/16 文本名尾词（大小写
-# 不敏感）命中 ∧ 该行 weight==400（审查 S1 尾词限定：对齐 Windows「族名
-# +样式尾置」惯例，封「Black Ops One」（真 400 面）类假阳；camelCase
-# 尾缀（CorbelLight）无词边界不触发——假阴记账 spec §8）
-_WEIGHT_WORDS = {
-    "thin": 100, "extralight": 200, "ultralight": 200, "light": 300,
-    "medium": 500, "semibold": 600, "demibold": 600, "bold": 700,
-    "extrabold": 800, "ultrabold": 800, "black": 900, "heavy": 900,
-}
-
-
-def _compensate_weight(base: dict) -> int:
-    """错标补偿：名字尾词命中词表且 OS/2==400 → 按词表改写。多命中取
-    最大（"… Light" 与 "… Bold" 并存时取 700）。"""
-    if base["weight"] != 400:
-        return base["weight"]
-    hits = [w for nid in (1, 4, 16)
-            for _lg, s in (base["name_langs"].get(nid) or [])
-            for w in ([_WEIGHT_WORDS[s.rstrip().rsplit(" ", 1)[-1].lower()]]
-                      if s.rstrip() and
-                      s.rstrip().rsplit(" ", 1)[-1].lower() in _WEIGHT_WORDS
-                      else [])]
-    return max(hits) if hits else base["weight"]
+# 注：字重错标补偿不在解析期做（2026-11-02 拍板拆除）——比较/排序时按需
+# 经 probes.effective_weight 计算，库内元数据保真 OS/2 值，指纹不被补偿值
+# 污染，词表/规则迭代零重建零记忆失效。
 
 
 class FontParseError(Exception):
@@ -248,10 +227,8 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                 italic = bool(os2.fsSelection & 1) if os2 is not None else False
                 cmap = CmapRanges.from_cmap_subtables(tt["cmap"].tables)
                 # —— 公共属性（默认/实例行共用）——
-                # 错标补偿先于 base 组装（统一作用于默认/静态行；实例行
-                # weight 之后按轴值覆盖，不受补偿二次改写）
-                weight = _compensate_weight({"weight": weight,
-                                             "name_langs": by_lang})
+                # weight 保真 OS/2（错标补偿在比较/排序时经
+                # probes.effective_weight 按需计算，见模块头注）
                 base = {
                     "dir_path": str(path.parent), "rel_path": path.name,
                     "face_index": idx, "psname": psname, "version": version,

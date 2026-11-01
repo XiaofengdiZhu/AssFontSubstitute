@@ -354,3 +354,28 @@ def test_deep_corruption_degrades_per_dir(tmp_path):
     snap = load_library([str(d_ok), str(d_bad)])
     assert str(d_bad) in snap.offline_dirs
     assert str(d_ok) not in snap.offline_dirs
+
+
+def test_eff_weight_compensated_at_load(tmp_path):
+    # 2026-11-02 拍板：补偿在聚合装载时算成 eff_weight，weight 保真 OS/2；
+    # 实例行（inst_index>0）与「名称无重量词」实体 eff==raw
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "heavy.ttf", chars="永", family="演示 Heavy", weight=400)
+    build_font(d / "reg.ttf", chars="永", family="演示 Regular", weight=400)
+    build_vf(d / "vf.ttf", chars="永", family="重黑體 Heavy",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 400, "default": 400, "max": 900}],
+             instances=[{"name": "Black", "location": {"wght": 900}}])
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    conn.close()
+    ents = LibraryIndex.open([d]).entities()
+    by = {e.display_name: e for e in ents}
+    assert by["演示 Heavy"].weight == 400       # 库内保真
+    assert by["演示 Heavy"].eff_weight == 900   # 补偿在 eff
+    assert by["演示 Regular"].eff_weight == 400
+    assert by["重黑體 Heavy"].weight == 400     # VF 默认行：raw 保真
+    assert by["重黑體 Heavy"].eff_weight == 900  # 默认行走补偿（统一规则）
+    assert by["重黑體 Heavy Black"].weight == 900
+    assert by["重黑體 Heavy Black"].eff_weight == 900  # 实例行不补偿

@@ -436,36 +436,35 @@ def test_parse_static_unchanged(tmp_path):
     assert r.inst_index == 0 and r.var_axes == ()
 
 
-def test_weight_compensation_tail_word(tmp_path):
+def test_weight_verbatim_at_parse(tmp_path):
+    # 2026-11-02 拍板：补偿出 parser——库内 weight 保真 OS/2 原值，
+    # 「Heavy 名错标 400」不改写（补偿改在比较/排序时按需计算，
+    # probes.effective_weight；指纹随之保真，规则迭代零重建）
     from tests.fonts import build_font
     cases = [
-        ("演示 Heavy", 400, 900),      # 错标修复
-        ("演示 Bold", 400, 700),
-        ("演示 Light", 400, 300),
-        ("演示 Medium", 400, 500),
-        ("演示 Heavy", 900, 900),      # 正确标注不动
-        ("Black Ops One", 400, 400),   # 首词重量词不触发（S1 假阳）
-        ("演示 Condensed Bold", 400, 700),   # 尾词命中
-        ("CorbelLight", 400, 400),     # camelCase 无词边界不触发（假阴记账）
+        ("演示 Heavy", 400),           # 错标体：保真 400（不写 900）
+        ("演示 Bold", 400),
+        ("演示 Condensed Bold", 400),
+        ("Black Ops One", 400),
+        ("演示 Heavy", 900),           # 正确标注同样不动
+        ("演示 Thin", 100),
     ]
-    for fam, w400, expect in cases:
-        p = tmp_path / f"{fam.replace(' ', '_')}.ttf"
-        build_font(p, "永", family=fam, weight=w400)
+    for fam, os2 in cases:
+        p = tmp_path / f"{fam.replace(' ', '_')}_{os2}.ttf"
+        build_font(p, "永", family=fam, weight=os2)
         r, = parse_font_file(p)
-        assert r.weight == expect, (fam, r.weight)
+        assert r.weight == os2, (fam, r.weight)
 
 
-def test_weight_compensation_not_for_vf_instances(tmp_path):
+def test_weight_vf_axis_values_verbatim(tmp_path):
     from tests.fonts import build_vf
     p = tmp_path / "vf.ttf"
-    # 族名带 Heavy 的 VF：默认行（OS/2 400）补偿→900；Black 实例行
-    # weight=轴值 900，不受补偿二次改写
     build_vf(p, "永", family="重黑體 Heavy",
              axes=[{"name": "Weight", "tag": "wght",
                     "min": 400, "default": 400, "max": 900}],
              instances=[{"name": "Black", "location": {"wght": 900}}])
     dflt, black = parse_font_file(p)
-    assert dflt.weight == 900            # 默认行走补偿（统一规则）
+    assert dflt.weight == 400            # 默认行保真 OS/2
     assert black.weight == 900 and black.inst_index == 1
 
 

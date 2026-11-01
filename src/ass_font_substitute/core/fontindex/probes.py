@@ -72,3 +72,39 @@ def classify_category(aliases: list[str]) -> str:
             if kw in folded:
                 return cat
     return "未分类"
+
+
+# 字重错标补偿词表（spec 2026-11-01 拍板，对照 OS/2 规范 usWeightClass）：
+# 名字**尾词**（大小写不敏感）命中词表且 OS/2==400 → 按词表取值。尾词限定
+# 对齐 Windows「族名+样式尾置」命名惯例，封「Black Ops One」（真 400 面，
+# 族名首词 Black）类假阳；camelCase 尾缀（CorbelLight）无词边界不触发——
+# 假阴记账 spec §8。仅英文词——CJK「黑体/粗」是类别语义不入表。
+_WEIGHT_WORDS = {
+    "thin": 100, "extralight": 200, "ultralight": 200, "light": 300,
+    "medium": 500, "semibold": 600, "demibold": 600, "bold": 700,
+    "extrabold": 800, "ultrabold": 800, "black": 900, "heavy": 900,
+}
+
+
+def effective_weight(name_langs: dict[int, list[tuple[int, str]]],
+                     weight: int, inst_index: int = 0) -> int:
+    """错标补偿的有效字重：只在比较/排序时按需计算，**不改写库内元数据**
+    （2026-11-02 拍板：补偿出 parser——指纹保真 OS/2 值，词表/规则迭代
+    零重建零记忆失效；展示（W 徽标等）同样用原始值）。多命中取最大
+    （"… Light" 与 "… Bold" 并存时取 700）。
+
+    name_langs：ID1/4/16 平台 3 语言记录（PS 名 ID6 不进扫描域——corbell
+    实测 PS 名与族名形态漂移）；inst_index>0 的 VF 实例行 weight 来自
+    轴坐标（可信），不参与补偿。边角记账：无 wght 轴的 VF（纯 slnt/ital）
+    实例行 weight 继承 OS/2 而非轴值，守卫视其为可信是近似——此类 VF
+    命名实例趋零，接受。
+    """
+    if weight != 400 or inst_index:
+        return weight
+    hits = [w for nid in (1, 4, 16)
+            for _lg, s in (name_langs.get(nid) or [])
+            for w in ([_WEIGHT_WORDS[s.rstrip().rsplit(" ", 1)[-1].lower()]]
+                      if s.rstrip() and
+                      s.rstrip().rsplit(" ", 1)[-1].lower() in _WEIGHT_WORDS
+                      else [])]
+    return max(hits) if hits else weight

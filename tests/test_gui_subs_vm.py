@@ -61,11 +61,14 @@ def test_error_file_excluded_from_merge(vm):
 
 def _ent(fp, name, chars, category="黑", script="简", weight=400,
          italic=False):
+    # eff_weight 与 weight 同值：测试实体无名表语言记录（无补偿语境）；
+    # 库装载路径的补偿口径由 test_library.test_eff_weight_compensated_at_load 锁
     return FontEntity(fingerprint=fp, display_name=name, aliases=(name,),
                       psname=name, version=(1,), weight=weight, width=5,
                       italic=italic, script=script, category=category,
                       cmap=CmapRanges.from_chars([ord(c) for c in chars]),
-                      dir_path="d", rel_path=f"{fp}.ttf", face_index=0)
+                      dir_path="d", rel_path=f"{fp}.ttf", face_index=0,
+                      eff_weight=weight)
 
 
 FULL = "永宇的好"

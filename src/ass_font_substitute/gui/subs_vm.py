@@ -273,10 +273,12 @@ class SubsVM:
         """同名多实体取面键：覆盖率 > 非斜体 > 字重近 400 > 先入序。
         工具不改字重斜体（拍板 2026-10-30），预览与缺字条统一 Regular
         口径（preview_vm.sel_key 无筛选档同序）。cov 传预计算覆盖率
-        （make_card 去重路径 OptionItem 上现成）。"""
+        （make_card 去重路径 OptionItem 上现成）。字重用 eff_weight
+        （错标补偿有效值）——「XX Heavy」错标体不得按 raw 400 冒充
+        Regular 代表面。"""
         if cov is None:
             cov, _ = coverage_detail(e.cmap, chars)
-        return cov, not e.italic, -abs(e.weight - 400)
+        return cov, not e.italic, -abs(e.eff_weight - 400)
 
     def _dname(self, e: FontEntity) -> str:
         """选项展示名：按界面语言链从 name 表语言记录现挑。"""

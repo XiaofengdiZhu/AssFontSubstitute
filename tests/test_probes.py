@@ -67,3 +67,31 @@ def test_probe_sets_aligned():
 def test_probe_pairs_strict():
     assert len(PROBE_PAIRS) >= 60
     assert all(sc != tc for sc, tc in PROBE_PAIRS)
+
+
+def test_effective_weight_tail_word_table():
+    # 词表全量：尾词命中 ∧ OS/2==400 → 词表值（spec §1）
+    from ass_font_substitute.core.fontindex.probes import effective_weight
+    cases = [("Thin", 100), ("ExtraLight", 200), ("UltraLight", 200),
+             ("Light", 300), ("Medium", 500), ("SemiBold", 600),
+             ("DemiBold", 600), ("Bold", 700), ("ExtraBold", 800),
+             ("UltraBold", 800), ("Black", 900), ("Heavy", 900)]
+    for word, val in cases:
+        nl = {1: [(0x409, f"演示 {word}")]}
+        assert effective_weight(nl, 400) == val, (word,)
+
+
+def test_effective_weight_rules():
+    from ass_font_substitute.core.fontindex.probes import effective_weight
+    # 尾词多命中取最大；非 400 不动；首词重量词不触发（S1 假阳）；
+    # camelCase 无词边界不触发；PS 名不在扫描域（只收 ID1/4/16）
+    assert effective_weight({1: [(0x409, "A Light")], 4: [(0x409, "A Bold")]},
+                            400) == 700
+    assert effective_weight({1: [(0x409, "演示 Heavy")]}, 900) == 900
+    assert effective_weight({1: [(0x409, "Black Ops One")]}, 400) == 400
+    assert effective_weight({1: [(0x409, "CorbelLight")]}, 400) == 400
+    assert effective_weight({6: [(0x409, "Corbel-Heavy")]}, 400) == 400
+    # VF 实例行：轴值可信，inst_index>0 一律不补偿
+    assert effective_weight({1: [(0x409, "A Heavy")]}, 400, 1) == 400
+    # 无 name_langs（实例行置空口径）安全
+    assert effective_weight({}, 400) == 400

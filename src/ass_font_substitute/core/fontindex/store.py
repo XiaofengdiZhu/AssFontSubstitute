@@ -53,7 +53,11 @@ from ass_font_substitute.core.models import FontRecord
 # （inst_index NOT NULL DEFAULT 0，缺列 INSERT 落 0 与静态行兼容）。
 # v3：psname 选取改众数口径（parser._pick_psname）——腾祥书宋类厂商单条
 # ID6 错标记录的存量行需全量重解析才能修正去重键，升版本触发重建。
-SCHEMA_VERSION = 3
+# v4：字重错标补偿出 parser（拍板 2026-11-02：比较/排序时按
+# probes.effective_weight 计算，展示亦用原始值）——v2/v3 期被补偿改写
+# 成 900/700/… 的存量行需重解析回 OS/2 真值，指纹随之回归稳定
+# （此后补偿规则迭代零重建）。
+SCHEMA_VERSION = 4
 DB_NAME = "fontindex.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 

@@ -8,6 +8,7 @@ from dataclasses import field
 from pathlib import Path
 from urllib.parse import quote
 
+from ass_font_substitute.core.fontindex.probes import effective_weight
 from ass_font_substitute.core.fontindex.store import DB_NAME
 from ass_font_substitute.core.fontindex.store import FP_ALGO
 from ass_font_substitute.core.fontindex.store import fingerprint_of
@@ -70,6 +71,12 @@ class FontEntity:
     mtime_ns: int = 0
     inst_index: int = 0   # fvar 命名实例序号（静态行 0，fvar 声明序留空洞）
     var_axes: tuple[float, ...] = ()   # 实例坐标（静态行 ()，与轴 tag 序对齐）
+    # 错标补偿有效字重（probes.effective_weight 装载时算一次）：仅比较/
+    # 排序消费（rank_pool 粗排、同名取面键）；weight 恒保真 OS/2，展示
+    # 用 weight（W 徽标拍板显示原始值）。直构陷阱：默认 400 仅对
+    # weight==400 的直构实体正确——weight≠400 且无 name_langs 的直构
+    # 实体须显式传 eff_weight=weight，否则比较口径静默错位
+    eff_weight: int = 400
 
 
 class LibraryIndex:
@@ -128,7 +135,8 @@ class LibraryIndex:
                        script, cat, cmap, str(self.dirs[di]), rel, fi,
                        family_names=family, name_langs=nl,
                        size=size, mtime_ns=mtime,
-                       inst_index=ix, var_axes=vax)
+                       inst_index=ix, var_axes=vax,
+                       eff_weight=effective_weight(nl, w, ix))
             for (di, rel, fi, ps, ver, aliases, disp, family, nl, w, wd, it,
                  script, cat, cmap, fp, size, mtime, ix, vax)
             in best.values()]

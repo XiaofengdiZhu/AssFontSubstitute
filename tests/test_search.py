@@ -4,6 +4,7 @@ import numpy as np
 
 import ass_font_substitute.core.similarity.search as search_mod
 from ass_font_substitute.core.fontindex.library import LibraryIndex
+from ass_font_substitute.core.fontindex.store import fingerprint_of
 from ass_font_substitute.core.fontindex.store import open_db
 from ass_font_substitute.core.fontindex.store import update_index
 from ass_font_substitute.core.similarity.cache import Cache
@@ -563,14 +564,15 @@ def test_pool_slice_writes_render_cache(tmp_path):
 
 def test_fvar_end_to_end_search(tmp_path):
     """静态错标 Heavy（OS/2=400）+ VF（Light/Black 实例）同库：
-    1) 实体数与 weight 补偿正确（演示 Heavy 400→900）
+    1) 库内 weight 保真 OS/2（2026-11-02 拍板：补偿出 parser），实体带
+       eff_weight 补偿口径（演示 Heavy 400→900）
     2) find_by_name("变化體 Black") 命中实例实体
-    3) rank_pool(target=错标静态体) 不再把 VF@900 压底——补偿后双方
-       weight 均 900，罚项 0。判别力（实测反证）：无补偿时 target=400，
-       得分 default 1.0 > Light 0.9 > Black 0.5，Black 恰好垫底、断言
-       即碎；补偿后 Black 反超居首。探针/分类同分为前提：全库 cmap
-       只含「永宇」，PROBE_SC/TC 六十字零命中；类别全「未分类」（无
-       黑宋楷圆关键词）同 +1.0。"""
+    3) rank_pool(target=错标静态体) 不再把 VF@900 压底——粗排按
+       eff_weight：双方均 900，罚项 0。判别力（实测反证）：无补偿时
+       target=400，得分 default 1.0 > Light 0.9 > Black 0.5，Black 恰好
+       垫底、断言即碎；补偿后 Black 反超居首。探针/分类同分为前提：
+       全库 cmap 只含「永宇」，PROBE_SC/TC 六十字零命中；类别全
+       「未分类」（无黑宋楷圆关键词）同 +1.0。"""
     d = tmp_path / "lib"
     d.mkdir()
     build_font(d / "heavy.ttf", "永宇", family="演示 Heavy", weight=400)
@@ -586,13 +588,18 @@ def test_fvar_end_to_end_search(tmp_path):
     ents = li.entities()
     assert len(ents) == 4                      # 静态 1 + VF 默认/两实例
     by_key = {(e.display_name, e.weight) for e in ents}
-    assert ("演示 Heavy", 900) in by_key        # 补偿生效
-    assert ("变化體 Black", 900) in by_key
+    assert ("演示 Heavy", 400) in by_key        # 库内保真 OS/2（不写 900）
+    assert ("变化體 Black", 900) in by_key      # 实例行=轴值
+    heavy = next(e for e in ents if e.display_name == "演示 Heavy")
+    assert heavy.eff_weight == 900             # 补偿口径在 eff_weight
+    # 指纹保真：按 OS/2 400 计，不被补偿值污染（指纹稳定→记忆/缓存键稳）
+    assert heavy.fingerprint == fingerprint_of(
+        heavy.aliases, heavy.cmap, 400, heavy.width, heavy.italic)
     # 限定名命中实例实体；裸族名命中默认+实例全体
     black = li.find_by_name("变化體 Black")
     assert len(black) == 1 and black[0].weight == 900
     assert {e.inst_index for e in li.find_by_name("变化體")} == {0, 1, 2}
-    target = next(e for e in ents if e.display_name == "演示 Heavy")
+    target = heavy
     ranked = rank_pool(target, [e for e in ents
                                 if e.fingerprint != target.fingerprint], "t2s")
-    assert ranked[0].display_name == "变化體 Black"  # 同 900：字重罚项 0 居首
+    assert ranked[0].display_name == "变化體 Black"  # 同 eff 900：罚项 0 居首

@@ -111,9 +111,13 @@ class PreviewVM:
         def sel_key(e: FontEntity):
             # 无字重筛选：非斜体优先、字重近锚点（Regular 口径拍板
             # 2026-10-30，与 subs_vm._orig_face_key 同序——字幕场景斜体
-            # 必有正体可退）；有筛选（用户点名 W 桶）：字重优先，桶内
-            # 面全属目标字重，斜态才成区分项
+            # 必有正体可退；字重用 eff_weight 错标补偿口径——「XX Heavy」
+            # 错标体不得按 raw 400 冒充 Regular 代表面，2026-11-02）；
+            # 有筛选（用户点名 W 桶）：桶按 raw 字重选；桶内残差仍按
+            # raw 计（精确值胜同桶近似值），斜态次之
             it = e.italic if self.weight is None else False
+            if self.weight is None:
+                return it, abs(e.eff_weight - target), e.width
             return it, abs(e.weight - target), e.width
 
         rows: list[FamilyRow] = []

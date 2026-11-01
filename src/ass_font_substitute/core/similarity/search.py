@@ -79,13 +79,15 @@ def _probe_score(e: FontEntity, direction: str) -> float:
 
 def rank_pool(target: FontEntity | None, pool: list[FontEntity],
               direction: str) -> list[FontEntity]:
-    """元数据粗排：探针命中率 + 分类匹配 + weight/width 差；target=None 仅探针。"""
+    """元数据粗排：探针命中率 + 分类匹配 + weight/width 差；target=None 仅探针。
+    weight 用 eff_weight（错标补偿有效值，probes.effective_weight）——库存
+    值保真 OS/2，粗排按补偿后口径比较。"""
     def meta_score(e: FontEntity) -> float:
         s = _probe_score(e, direction)
         if target is not None:
             if e.category == target.category:
                 s += 1.0
-            s -= abs(e.weight - target.weight) / 1000
+            s -= abs(e.eff_weight - target.eff_weight) / 1000
             s -= abs(e.width - target.width) / 100
         return s
     return sorted(pool, key=meta_score, reverse=True)

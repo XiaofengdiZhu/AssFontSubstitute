@@ -35,7 +35,8 @@ def _ent(fp, name, category="黑", chars="永宇", weight=400, italic=False):
                       psname=name, version=(1,), weight=weight, width=5,
                       italic=italic, script="简", category=category,
                       cmap=CmapRanges.from_chars([ord(c) for c in chars]),
-                      dir_path="d", rel_path="r.ttf", face_index=0)
+                      dir_path="d", rel_path="r.ttf", face_index=0,
+                      eff_weight=weight)   # 直构实体同值（见 test_gui_subs_vm._ent 注）
 
 
 def test_picker_close_cancels_reco_and_none_payload_hides_rec(qapp, tmp_path):
