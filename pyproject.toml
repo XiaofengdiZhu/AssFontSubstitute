@@ -16,6 +16,9 @@ dependencies = [
     "opencc>=1.1",
     "pyside6>=6.7",
     "pyside6-fluent-widgets>=1.8",
+    "darkdetect>=0.8.0",
+    "shiboken6>=6.12.0",
+    "pysidesix-frameless-window>=0.8.2",
 ]
 
 [project.urls]
@@ -35,12 +38,12 @@ dev = [
 requires = ["uv_build>=0.11.32,<0.12.0"]
 build-backend = "uv_build"
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
 [[tool.uv.index]]
 url = "https://uv.agentsmirror.com/pypi/simple"
 default = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.ruff]
 target-version = "py312"

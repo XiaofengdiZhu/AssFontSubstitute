@@ -11,6 +11,7 @@ name = "ass-font-substitute"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "darkdetect" },
     { name = "fonttools" },
     { name = "freetype-py" },
     { name = "light-ass" },
@@ -18,6 +19,8 @@ dependencies = [
     { name = "opencc" },
     { name = "pyside6" },
     { name = "pyside6-fluent-widgets" },
+    { name = "pysidesix-frameless-window" },
+    { name = "shiboken6" },
 ]
 
 [package.dev-dependencies]
@@ -30,6 +33,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "darkdetect", specifier = ">=0.8.0" },
     { name = "fonttools", specifier = ">=4.53" },
     { name = "freetype-py", specifier = ">=2.4" },
     { name = "light-ass", specifier = ">=0.3" },
@@ -37,6 +41,8 @@ requires-dist = [
     { name = "opencc", specifier = ">=1.1" },
     { name = "pyside6", specifier = ">=6.7" },
     { name = "pyside6-fluent-widgets", specifier = ">=1.8" },
+    { name = "pysidesix-frameless-window", specifier = ">=0.8.2" },
+    { name = "shiboken6", specifier = ">=6.12.0" },
 ]
 
 [package.metadata.requires-dev]

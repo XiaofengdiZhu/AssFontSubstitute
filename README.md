@@ -11,7 +11,7 @@
 
 [前往 Release 下载](https://github.com/XiaofengdiZhu/AssFontSubstitute/releases)
 
-> 当前只有 Windows 平台安装包
+> 当前只有 Windows 平台绿色版压缩包
 
 ## 功能特性 & 使用方法
 

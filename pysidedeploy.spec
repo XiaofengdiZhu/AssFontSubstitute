@@ -37,7 +37,7 @@ qml_files =
 excluded_qml_plugins = 
 
 # qt modules used. comma separated
-modules = Core,DBus,Gui,Network,Svg,Test,Widgets
+modules = Core,Gui,Svg,Widgets
 
 # qt plugins used by the application. only relevant for desktop deployment
 # for qt plugins used in android application see [android][plugins]
@@ -73,7 +73,7 @@ bundle_id =
 team_id = 
 
 # app version (cfbundleshortversionstring)
-version = 1.0
+version = 1.0.0
 
 # minimum ios deployment target. default = read from the PySide6 wheel's embedded
 # qt-for-ios kit
