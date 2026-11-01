@@ -171,3 +171,26 @@ def test_wheel_never_changes_value(qapp):
 def test_paint_smoke(qapp):
     w = _mk(qapp)
     assert not w.grab().isNull()               # 底槽+强调色区段渲染不崩
+
+
+def test_non_left_button_never_releases(qapp):
+    # 审查二轮 P2：右/中键 release 曾发 sliderReleased（settings_page
+    # 把它当提交信号）——只认左键且 press 在先
+    from PySide6.QtCore import QEvent
+    from PySide6.QtCore import Qt
+
+    w = _mk(qapp, lo_v=90, hi_v=110)
+    w.grab()
+    fired = []
+    w.sliderReleased.connect(lambda: fired.append(1))
+
+    # 右键 press+release：press 被 ignore，release 不发
+    _mouse(w, QEvent.Type.MouseButtonPress, 150, Qt.MouseButton.RightButton)
+    _mouse(w, QEvent.Type.MouseButtonRelease, 150, Qt.MouseButton.RightButton)
+    assert fired == []
+    assert w.values() == (90, 110)              # 值也不动
+
+    # 左键 press+release：发一次
+    _mouse(w, QEvent.Type.MouseButtonPress, 150, Qt.MouseButton.LeftButton)
+    _mouse(w, QEvent.Type.MouseButtonRelease, 150, Qt.MouseButton.LeftButton)
+    assert fired == [1]

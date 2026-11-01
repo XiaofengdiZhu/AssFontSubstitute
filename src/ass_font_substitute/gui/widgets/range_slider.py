@@ -169,8 +169,16 @@ class RangeSlider(QWidget):
             e.ignore()
 
     def mouseReleaseEvent(self, e):
+        # 只认左键且有 press 在先：右/中键 release（press 已被 ignore，
+        # _drag 必 None）不发 sliderReleased——settings_page 把它当提交
+        # 信号，右键误触会把未改动的值重提交（二轮审查 P2）
+        if e.button() != Qt.MouseButton.LeftButton:
+            e.ignore()
+            return
+        was = self._drag is not None
         self._drag = None
-        self.sliderReleased.emit()
+        if was:
+            self.sliderReleased.emit()
         e.accept()
 
     def _apply_drag(self, x: int):
