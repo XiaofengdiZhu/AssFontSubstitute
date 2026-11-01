@@ -68,6 +68,8 @@ class FontEntity:
     name_langs: dict[int, list[tuple[int, str]]] = field(default_factory=dict)
     size: int = 0
     mtime_ns: int = 0
+    inst_index: int = 0   # fvar 命名实例序号（静态行 0，fvar 声明序留空洞）
+    var_axes: tuple[float, ...] = ()   # 实例坐标（静态行 ()，与轴 tag 序对齐）
 
 
 class LibraryIndex:
@@ -103,27 +105,32 @@ class LibraryIndex:
                 # 成功才并入：中途坏页前已解析的行不泄漏进聚合结果——
                 # 目录既判 offline，行必须整体剔除（口径一致）
                 raw.extend(buf)
-        # 身份 = psname，无则别名并集；排序保证平局保留目录顺序靠前、rel_path、face_index
-        best: dict[str, tuple] = {}
-        for item in sorted(raw, key=lambda t: (t[0], t[1], t[2])):
-            ps, ver = item[3], item[4]
-            key = ps if ps else "\x00".join(sorted(item[5]))
+        # 身份 = (psname, inst_index)，psname 缺则别名并集替代；同 VF 各实例
+        # 行共享 psname，键必须带 inst 维度，否则去重把实例折叠成默认行。
+        # 排序保证平局保留目录顺序靠前、rel_path、face_index、inst_index
+        best: dict[tuple, tuple] = {}
+        for item in sorted(raw, key=lambda t: (t[0], t[1], t[2], t[18])):
+            ps, ver, ix = item[3], item[4], item[18]
+            key = (ps if ps else "\x00".join(sorted(item[5])), ix)
             cur = best.get(key)
             if cur is None:
                 best[key] = item
             elif ver is not None and (cur[4] is None or ver > cur[4]):
-                self._skipped.append(f"{self.dirs[cur[0]]}/{cur[1]}#{cur[2]} 重复版本")
+                self._skipped.append(
+                    f"{self.dirs[cur[0]]}/{cur[1]}#{cur[2]}i{cur[18]} 重复版本")
                 best[key] = item
             else:
-                self._skipped.append(f"{self.dirs[item[0]]}/{item[1]}#{item[2]} 重复版本")
+                self._skipped.append(
+                    f"{self.dirs[item[0]]}/{item[1]}#{item[2]}i{item[18]} 重复版本")
         self._files_count = len({(item[0], item[1]) for item in raw})
         self._entities = [
             FontEntity(fp, disp, aliases, ps, ver, w, wd, it,
                        script, cat, cmap, str(self.dirs[di]), rel, fi,
                        family_names=family, name_langs=nl,
-                       size=size, mtime_ns=mtime)
+                       size=size, mtime_ns=mtime,
+                       inst_index=ix, var_axes=vax)
             for (di, rel, fi, ps, ver, aliases, disp, family, nl, w, wd, it,
-                 script, cat, cmap, fp, size, mtime)
+                 script, cat, cmap, fp, size, mtime, ix, vax)
             in best.values()]
         # 别名查找索引：find_by_name 每调用全实体×全别名重跑 normalize 曾是
         # 18k 实体库批量替换的秒级悬崖（matcher 每用量再触发多次全扫）
@@ -139,13 +146,13 @@ class LibraryIndex:
         conn = open_db(d / "fontindex.db")
         try:
             # v2：缓存键含 inst_index（同文件各实例行 face_index 相同，只按
-            # (rel, fi) 键会互相串指纹）；实例维度的实体接线在后续任务
+            # (rel, fi) 键会互相串指纹）
             cached = {(r[0], r[1], r[2]): (r[3], r[4]) for r in conn.execute(
                 "SELECT rel_path, face_index, inst_index, mtime_ns, fp "
                 "FROM fingerprints WHERE algo=?", (FP_ALGO,))}
             writeback = []
             for (rel, fi, ps, ver, al, disp, fam, nl, w, wd, it, cmb,
-                 script, cat, size, mtime, ix, _vax) in load_font_rows(conn):
+                 script, cat, size, mtime, ix, vax) in load_font_rows(conn):
                 aliases = tuple(json.loads(al))
                 version = tuple(json.loads(ver)) if ver else None
                 family = tuple(json.loads(fam)) if fam else ()
@@ -167,7 +174,7 @@ class LibraryIndex:
                     writeback.append((rel, fi, ix, mtime, fp))
                 raw.append((di, rel, fi, ps, version, aliases, disp, family,
                             name_langs, w, wd, bool(it), script, cat, cmap,
-                            fp, size, mtime))
+                            fp, size, mtime, ix, vax))
             if writeback:
                 with conn:
                     conn.executemany(

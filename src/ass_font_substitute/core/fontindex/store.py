@@ -86,7 +86,8 @@ def fingerprint_of(aliases: list[str], cmap: CmapRanges, weight: int, width: int
     纯语义身份：同语义字体（重打包/换路径/换 mtime）指纹稳定，渲染缓存
     与记忆可跨副本复用；文件是否变化由 update_index 的 size+mtime 门判定，
     fingerprints 表的 mtime_ns 列（与 fonts 行同事务写入）作装载侧防陈旧
-    兜底。update_index 时预计算入表（键 rel_path+face_index），LibraryIndex
+    兜底。update_index 时预计算入表（键 rel_path+face_index+inst_index），
+    LibraryIndex
     聚合读命中直取、缺失回写——避免每次打开重算。"""
     canon = json.dumps({
         "aliases": sorted(aliases),

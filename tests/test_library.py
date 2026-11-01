@@ -3,6 +3,7 @@ from ass_font_substitute.core.fontindex.library import normalize_name
 from ass_font_substitute.core.fontindex.store import open_db
 from ass_font_substitute.core.fontindex.store import update_index
 from tests.fonts import build_font
+from tests.fonts import build_vf
 
 
 def _mklib(d, n=2):
@@ -235,6 +236,57 @@ def test_name_langs_read_from_db_and_chain_pick(tmp_path):
     # 入库 display_name 不变（CJK 优先旧规则：表序首条 CJK——fontTools
     # 重排后 0x404 繁体在前），作链挑选兜底
     assert e.display_name == "微軟雅黑"
+
+
+def test_same_psname_instances_survive_dedup(tmp_path):
+    # 同一 VF 文件各实例行共享 psname——去重键加 inst 维度后不得折叠
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_vf(d / "vf.ttf", "永", family="变化體",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 300, "default": 400, "max": 900}],
+             instances=[{"name": "Light", "location": {"wght": 300}},
+                        {"name": "Black", "location": {"wght": 900}}])
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    li = LibraryIndex.open([d])
+    ents = li.entities()
+    assert len(ents) == 3
+    assert {e.inst_index for e in ents} == {0, 1, 2}
+    black = next(e for e in ents if e.inst_index == 2)
+    assert black.weight == 900 and black.var_axes == (900.0,)
+    assert next(e for e in ents if e.inst_index == 0).var_axes == ()
+    # find_by_name：限定名命中实例、族名命中默认+实例全体
+    assert any(e.inst_index == 2
+               for e in li.find_by_name(normalize_name("变化體 Black")))
+    assert ({e.inst_index for e in li.find_by_name(normalize_name("变化體"))}
+            >= {0, 1, 2})
+
+
+def test_cross_dir_duplicate_vf_dedup_per_instance(tmp_path):
+    # 两目录放同一 VF：按 (psname, inst_index) 对齐去重，每实例只留一份，
+    # 目录序靠前者胜，另一目录整份进 _skipped
+    d1 = tmp_path / "a"
+    d2 = tmp_path / "b"
+    spec = {"chars": "永", "family": "变化體",
+            "axes": [{"name": "Weight", "tag": "wght",
+                      "min": 300, "default": 400, "max": 900}],
+            "instances": [{"name": "Light", "location": {"wght": 300}},
+                          {"name": "Black", "location": {"wght": 900}}]}
+    for d in (d1, d2):
+        d.mkdir()
+        build_vf(d / "vf.ttf", **spec)
+        conn = open_db(d / "fontindex.db")
+        update_index(d, conn)
+        conn.close()
+    li = LibraryIndex.open([d1, d2])
+    ents = li.entities()
+    assert len(ents) == 3
+    assert {e.inst_index for e in ents} == {0, 1, 2}
+    assert all(e.dir_path == str(d1) for e in ents)
+    assert len([s for s in li.skipped() if "重复版本" in s]) == 3
+    assert all(str(d2) in s and "vf.ttf" in s
+               for s in li.skipped() if "重复版本" in s)
 
 
 def test_load_name_records_from_db(tmp_path):
