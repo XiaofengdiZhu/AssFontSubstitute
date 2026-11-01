@@ -243,8 +243,9 @@ def parse_font_file(path: Path) -> list[FontRecord]:
                 out.append(FontRecord(**base))     # inst_index=0, var_axes=()
                 tags = [a.axisTag for a in fvar.axes]
                 defaults = [float(a.defaultValue) for a in fvar.axes]
-                # 限定名用的族名记录：ID16 优先回退 ID1（与 _display_name
-                # 同序），非 @ 名，[(langID, 文本)]；按 CJK 优先排序，使
+                # 限定名用的族名记录：ID16 优先回退 ID1——ID16 优先系
+                # spec §1 拍板，与 _display_name 的 ID1 优先链不同源，
+                # 非 @ 名，[(langID, 文本)]；按 CJK 优先排序，使
                 # display 与 _display_name 的族名语言选择对齐（preflight
                 # 裁定）。fam_recs 仅含平台 3 记录，纯 Mac 名 VF 的实例行
                 # 将跳过（现实趋零，默认行仍带族别名）

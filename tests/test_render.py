@@ -1,3 +1,4 @@
+import freetype
 import numpy as np
 import pytest
 
@@ -328,7 +329,7 @@ def test_render_bundle_small_ink_rerenders(monkeypatch, tmp_path):
     assert 27 <= b.ink_median <= 31              # 量尺仍是 48px 口径
 
 
-def test_render_bundle_with_var_axes(tmp_path):
+def test_render_bundle_with_var_axes(tmp_path, monkeypatch):
     # VF 实例态渲染管道：带设计坐标渲染不炸、产出结构有效位图
     # （无 gvar 轮廓不随轴变——此处只锁管道口径，spec §6）
     p = tmp_path / "vf.ttf"
@@ -336,8 +337,25 @@ def test_render_bundle_with_var_axes(tmp_path):
              axes=[{"name": "Weight", "tag": "wght",
                     "min": 300, "default": 400, "max": 900}],
              instances=[{"name": "Black", "location": {"wght": 900}}])
+    # 正向断言：坐标在本字体的 wght 轴上确实生效——直接构造 Face 设
+    # (900.0,) 后回读 == (900.0,)，排除「字体本身设不进坐标」的假绿
+    with open(p, "rb") as fh:
+        probe = freetype.Face(fh, 0)
+        probe.set_var_design_coords([900.0])
+        assert probe.get_var_design_coords() == (900.0,)
+    # spy：render_bundle 的 var_axes 路径必须把全长坐标原样传进
+    # set_var_design_coords——回归成「接收参数但传默认值/传错值」时
+    # 在此变红；默认态（var_axes 空）则应完全不触碰坐标
+    calls: list[tuple[float, ...]] = []
+    orig = freetype.Face.set_var_design_coords
+    def _spy(self, coords, reset=False):
+        calls.append(tuple(coords))
+        return orig(self, coords, reset)
+    monkeypatch.setattr(freetype.Face, "set_var_design_coords", _spy)
     b1 = render_bundle(p, 0, "永")                     # 默认态
+    assert calls == []                                 # 默认态不设坐标
     b2 = render_bundle(p, 0, "永", var_axes=(900.0,))  # 实例态
+    assert calls == [(900.0,)]
     assert len(b2.tiles) == len(b1.tiles) == 1
     assert b2.available == frozenset("永")
 
