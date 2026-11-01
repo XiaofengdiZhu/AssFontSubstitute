@@ -1,5 +1,6 @@
 """处理字幕页功能冒烟（offscreen）：假 worker 不起线程，parse/classify/
 searcher/pull/apply 载荷经 _on_result 直喂，走真实 vm + UI 装配路径。"""
+import gc
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +21,14 @@ def qapp():
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     yield app
+
+
+@pytest.fixture(autouse=True)
+def _gc_dead_pages():
+    # 死页安全点回收：qfw 样式表迭代非 GC 安全，残留死页会让后续
+    # 测试文件（如 test_gui_smoke）随机炸 dictionary changed size
+    yield
+    gc.collect()
 
 
 def _ent(fp, name, chars="永宇"):
