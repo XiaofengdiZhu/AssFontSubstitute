@@ -43,6 +43,22 @@ def _plausible(text: str) -> bool:
     return sum(c in FREQ_NEUTRAL for c in text) >= 5
 
 
+def _freq_density(text: str) -> float:
+    """中性高频字密度：命中数 / 非 ASCII 字符数。命中绝对值随样本长度
+    线性涨（gb18030 硬解 big5/sjis 的乱码域随词汇多样性扩散，64KB 尺度
+    可越过 ≥5 绝对阈，宽词汇实测 20 命中→整文件误判 gb 重编码），密度
+    才是候选间可比量：真实文本 ≥ 数个百分点，乱码硬解 ~0.5%，两个数量
+    级间隔。调用方保证命中 ≥5，分母非零。
+
+    残余理论窗口（审查记账，实证封死）：真候选 <5 命中被底线拒、乱码
+    候选 ≥5 过底线 → 乱码以唯一候选胜出。构造探针未能复现——真文本
+    词频稀到 <5 命中时其字节流硬解乱码同样 0 命中（生僻字编码对撞不进
+    中性字码位）；乱码命中依赖宽词汇字节多样性，而宽词汇自然文本自身
+    必有命中。"""
+    na = sum(1 for c in text if ord(c) > 0x7F)
+    return sum(c in FREQ_NEUTRAL for c in text) / na if na else 0.0
+
+
 def _try_decode(sample: bytes, codec: str) -> str | None:
     """sample 末尾可能截半多字节字符（截断点不看边界）：逐字节回退重试，
     最多 3 字节（utf-8 CJK/utf-16 半字/utf-32 半字）；中段非法序列仍
@@ -141,6 +157,15 @@ def detect_encoding(data: bytes) -> str:
     if hyp:
         raise EncodingDetectError(
             "样本 NUL 密度呈 UTF-16 特征，但端序解码均不可判信")
+    # legacy 候选不再「首个过 _plausible 即判」（P2：绝对阈 ≥5 命中
+    # 封不住长文件——gb18030 硬解 big5/sjis 的乱码域随词汇多样性扩散，
+    # 命中数随样本长度线性涨，≥3KB 自然繁体文本即可过阈误判 gb18030，
+    # 改动行整行按 gb 重编码 → 乱码+混合编码文件）。改为全部解出后按
+    # _freq_density 选优，同密度（理论边界）维持 TRY_ORDER 优先序：
+    # utf-8 短路不变（结构判据）；_plausible 仍是入候选底线（≥5 命中
+    # 证据门槛不放松）。单候选场景与旧码一致；双候选场景即原误判窗口
+    # （旧码取 TRY_ORDER 首个=gb），行为有意改变
+    best: tuple[float, str] | None = None
     for codec in TRY_ORDER:
         text = _try_decode(sample, codec)
         if text is None:
@@ -151,10 +176,14 @@ def detect_encoding(data: bytes) -> str:
         # 整解——gb18030 约 0.2%、big5/sjis 约 7%（存在非 ASCII 合法
         # 环，纯结构上可构造，但自然文本必含不可组合的常用字：的/好/
         # 你等首字节落 80-BF 续字节区）；纯 ASCII 各候选同解，亦在此
-        # 收编。_plausible 仍守 gb/big5/sjis 候选（它们相互硬解无结构
-        # 屏障，必须靠高频字证据分辨）
+        # 收编。
         if codec == "utf-8":
             return codec
         if _plausible(text):
-            return codec
-    raise EncodingDetectError("无法识别编码（utf-8/gb18030/big5/shift_jis 均不合理）")
+            dens = _freq_density(text)
+            if best is None or dens > best[0]:
+                best = (dens, codec)
+    if best is None:
+        raise EncodingDetectError(
+            "无法识别编码（utf-8/gb18030/big5/shift_jis 均不合理）")
+    return best[1]

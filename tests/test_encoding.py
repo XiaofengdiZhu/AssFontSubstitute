@@ -103,6 +103,95 @@ def test_big5_beats_gb18030_misread():
     assert detect_encoding(big5_text.encode("big5")) == "big5"
 
 
+def _wide_vocab_legacy_sample(enc: str) -> bytes:
+    # 宽词汇自然文本（词汇多样性大 → gb18030 硬解乱码域扩散、中性高频
+    # 命中随长度涨过 ≥5 绝对阈：旧码 ≥3KB 即 10/10 误判 gb18030，
+    # 20KB 实测 20 命中）——密度选优的回归护栏
+    import random
+    pool = ("的一是了我們你他在這裡那個說話時間地方人們事情問題時候現在"
+            "因為所以但是可以會很也都還是有沒有自己什麼怎樣如何多麼少些"
+            "已經正在將要應該必須需要想要喜歡討厭知道覺得認為相信明白了"
+            "解記得忘記開始結束繼續停止選擇決定改變發生發現創造建造製作"
+            "使用操作學習工作生活休息睡覺起床吃飯喝水走路跑步開車坐車飛"
+            "機火車汽車腳踏車房子房間門窗桌子椅子床鋪衣服褲子鞋子帽子書"
+            "本紙張筆記電話電腦手機網路電視電影音樂歌曲遊戲運動健康疾病"
+            "醫院藥品醫生護士學校老師學生同學朋友家人父母兄弟姊妹兒子女")
+    random.seed(42)
+    body = "\r\n".join(
+        "Dialogue: 0,0:00:01.00,0:00:05.00,字幕,編劇,0,0,0,,"
+        + "".join(random.choice(pool) for _ in range(25))
+        for _ in range(200))
+    return ("[Script Info]\r\n\r\n" + body).encode(enc, errors="ignore")
+
+
+def test_big5_long_file_not_misjudged_gb18030():
+    data = _wide_vocab_legacy_sample("big5")
+    assert len(data) > 16 * 1024
+    assert detect_encoding(data) == "big5"
+
+
+def test_gb18030_long_file_wins_density_race():
+    # 真 gb 长文件且 big5 乱码候选也过 _plausible 的密度竞速：gb 流尾字
+    # 节避开 Python big5 拒收区时可被 big5 整解，混入「gb 编码后 big5
+    # 硬解恰落中性字」的字符（琌/辊，全 CJK 区扫描仅此两字）可把乱码
+    # 候选喂过 ≥5 底线（实测 138 命中/2.4%）。密度选优必须仍判真 gb
+    # （~24%，十倍间隔）——钉的是「big5 候选在场不翻盘」的 argmax 路径
+    # （旧码 TRY_ORDER 首判 gb 同结果，本测试护新路径）
+    def big5_safe(ch):
+        b = ch.encode("gb18030")
+        if len(b) != 2:
+            return False
+        try:
+            return ord(b.decode("big5")) > 0x7F
+        except UnicodeDecodeError:
+            return False
+
+    pool = [c for c in
+            "的一是了我們你他在這裡那個說話時間地方人們事情問題時候現在"
+            "因為所以但是可以會很也都還是有沒有自己什麼怎樣如何多麼少些"
+            "已經正在將要應該必須需要想要喜歡討厭知道覺得認為相信明白了"
+            "解記得忘記開始結束繼續停止選擇決定改變發生發現" if big5_safe(c)]
+    neutral_via_big5 = []   # gb 编码后 big5 硬解恰落 FREQ_NEUTRAL 的字符
+    for cp in range(0x4E00, 0x9FA6):
+        ch = chr(cp)
+        b = ch.encode("gb18030")
+        if len(b) == 2:
+            try:
+                if b.decode("big5") in (
+                        "的一是我人不他在有中大小上下山川日月金木水火土田"
+                        "石心手足口目耳好可何你我把來去出入同天地時中文字"
+                        "幕的一是在"):
+                    neutral_via_big5.append(ch)
+            except UnicodeDecodeError:
+                pass
+    assert neutral_via_big5 == ["琌", "辊"]
+
+    import random
+    mix = pool + neutral_via_big5
+    random.seed(42)
+    body = "\r\n".join(
+        "Dialogue: 0,0:00:01.00,0:00:05.00,字幕,编者,0,0,0,,"
+        + "".join(random.choice(mix) for _ in range(25)) for _ in range(200))
+    data = ("[Script Info]\r\n\r\n" + body).encode("gb18030")
+    assert len(data) > 16 * 1024
+    assert detect_encoding(data) == "gb18030"
+
+
+def test_shift_jis_long_file_not_misjudged_gb18030():
+    # sjis 同病护栏：宽词汇假名文本 20KB，gb 硬解 0 命中（当前安全），
+    # 钉住「gb 候选在场不翻盘」
+    import random
+    pool = ("のにはをたがでとしてれさもいますんとかどしばあこまるえんっ"
+            "つじぇゆきおわらすてぃぼーよなひふかきくけこさしすせそたち"
+            "つてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん")
+    random.seed(7)
+    body = "\r\n".join(
+        "Dialogue: 0,0:00:01.00,0:00:05.00,字幕,作者,0,0,0,,"
+        + "".join(random.choice(pool) for _ in range(25)) for _ in range(200))
+    data = ("[Script Info]\r\n\r\n" + body).encode("shift_jis")
+    assert detect_encoding(data) == "shift_jis"
+
+
 def test_failure():
     with pytest.raises(Exception):
         detect_encoding(bytes(range(0x80, 0xC0)) * 64)
