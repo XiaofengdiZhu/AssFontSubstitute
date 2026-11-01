@@ -77,8 +77,8 @@ def _utf16_hypotheses(sample: bytes) -> tuple[str, ...]:
     的字幕几乎不含 0x00——NUL 密度过低不猜，不动 legacy 流程。端序按
     零字节奇偶占比排候选（LE 的 ASCII 零落奇位、BE 落偶位；纯 ASCII 时
     两个 codec 解出的文本相同，端序只能靠它保回盘字节不翻）。<16 字节
-    样本不猜（真实 ASS 远大于此；极短 BOM-less UTF-16 仍走 legacy 误判
-    路径，属有意取舍）。"""
+    样本不猜（真实 ASS 远大于此；极短 BOM-less UTF-16 仍会被 utf-8 分支
+    误判，新旧同，属有意取舍）。"""
     n = len(sample) // 2 * 2
     if n < 16:
         return ()
@@ -145,10 +145,15 @@ def detect_encoding(data: bytes) -> str:
         text = _try_decode(sample, codec)
         if text is None:
             continue
-        # 纯 ASCII（utf-8 全文解出且无 U+FFFD、无 CJK）：各候选解码结果相同，
-        # 接受无歧义，直判 utf-8（否则纯 ASCII 字幕会被高频字校验误拒）。
-        if (codec == "utf-8" and "\ufffd" not in text
-                and not any(_is_cjk(c) for c in text)):
+        # utf-8 严格整解样本即判 utf-8（P2 放宽：合法 UTF-8 短文件的
+        # CJK 高频字常不足 5 个，曾被 _plausible 误拒）。依据（审查
+        # 精确化）：legacy 双字节字须恰好落进 utf-8 可组合子集才能被
+        # 整解——gb18030 约 0.2%、big5/sjis 约 7%（存在非 ASCII 合法
+        # 环，纯结构上可构造，但自然文本必含不可组合的常用字：的/好/
+        # 你等首字节落 80-BF 续字节区）；纯 ASCII 各候选同解，亦在此
+        # 收编。_plausible 仍守 gb/big5/sjis 候选（它们相互硬解无结构
+        # 屏障，必须靠高频字证据分辨）
+        if codec == "utf-8":
             return codec
         if _plausible(text):
             return codec

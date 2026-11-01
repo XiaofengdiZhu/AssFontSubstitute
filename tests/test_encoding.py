@@ -87,6 +87,16 @@ def test_nul_density_raise_when_neither_endian_sane():
         detect_encoding("hello world\r\n".encode("utf-32-le") * 100)
 
 
+def test_short_utf8_cjk_below_freq_threshold():
+    # P2：合法 UTF-8 短文件（CJK 高频字 <5）曾被 _plausible 误拒。
+    # utf-8 严格整解本身就是判据：legacy 双字节编码首字节 0x81+ 与
+    # utf-8 序列结构冲突，2 字节/3 字节单位错位，64KB 全文干净解出
+    # 几乎必为 utf-8（纯 ASCII 各候选同解，同在此收编）
+    assert detect_encoding("你好世界".encode()) == "utf-8"
+    assert detect_encoding("Style: 微軟\r\n".encode()) == "utf-8"
+    assert detect_encoding(b"[Script Info]\r\n") == "utf-8"
+
+
 def test_big5_beats_gb18030_misread():
     # 繁体高频文本：big5 解码命中高频字，gb18030 硬解必产生低频怪字
     big5_text = "這是繁體字幕的一句話，我們在這裡說話。" * 3
