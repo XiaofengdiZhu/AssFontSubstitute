@@ -26,6 +26,9 @@ class RangeSlider(QWidget):
     valueChanged = Signal(int, int)       # (low, high)
     sliderPressed = Signal()
     sliderReleased = Signal()
+    # 键盘步进落定（鼠标拖拽的提交挂 sliderReleased，键盘无 release——
+    # 设置页由此信号即时落盘，审查二轮 P1：键盘步进曾只刷数值框不落盘）
+    stepped = Signal()
 
     def __init__(self, minimum: int, maximum: int, low: int, high: int,
                  parent=None):
@@ -184,6 +187,7 @@ class RangeSlider(QWidget):
         if self._drag is not None:
             e.ignore()
             return
+        prev = (self._low, self._high)
         k = e.key()
         step = {Qt.Key.Key_Left: -1, Qt.Key.Key_Right: 1,
                 Qt.Key.Key_PageDown: -10, Qt.Key.Key_PageUp: 10}.get(k)
@@ -200,6 +204,10 @@ class RangeSlider(QWidget):
             e.ignore()
             return
         e.accept()
+        # 值未变（已在端点再按 Home 等）不发了：提交方是全量 JSON 落盘，
+        # 空按键不值得付一次写
+        if (self._low, self._high) != prev:
+            self.stepped.emit()
 
     def wheelEvent(self, e):
         # 滚轮不改值（防滚动设置页误改）；ignore 让事件冒泡给设置页滚动

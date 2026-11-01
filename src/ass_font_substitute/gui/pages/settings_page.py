@@ -489,6 +489,8 @@ class SettingsPage(ScrollArea):
 
         self.range_slider.valueChanged.connect(_on_slider_change)
         self.range_slider.sliderReleased.connect(_commit)
+        # 键盘步进无 release（sliderReleased 只走鼠标路径），落定即提交
+        self.range_slider.stepped.connect(_commit)
         self.spin.valueChanged.connect(_on_spin)
         self.spin_max.valueChanged.connect(_on_spin)
         card.hBoxLayout.addWidget(self.range_slider, 0,

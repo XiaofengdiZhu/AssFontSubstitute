@@ -431,6 +431,38 @@ def test_size_card_range_slider(qapp, tmp_path):
     page.spin_max.setValue(60)
     assert page.range_slider.values() == (60, 150)
     assert (s.get("size_min"), s.get("size_max")) == (0.60, 1.50)
+    # 键盘步进无 release（sliderReleased 只走鼠标路径）：落定即提交
+    # （审查二轮 P1：旧码只刷数值框，键盘改的区间从不落盘）
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    page.range_slider.setFocus()
+    QTest.keyClick(page.range_slider, Qt.Key.Key_Left)
+    assert page.range_slider.values() == (59, 150)   # 键盘首用默认 low 钮
+    assert (s.get("size_min"), s.get("size_max")) == (0.59, 1.50)
+    QTest.keyClick(page.range_slider, Qt.Key.Key_Left)
+    assert (s.get("size_min"), s.get("size_max")) == (0.58, 1.50)
+    # PageUp/Down 步 10，越界钳回（下界 50）
+    QTest.keyClick(page.range_slider, Qt.Key.Key_PageDown)
+    assert page.range_slider.values() == (50, 150)
+    assert (s.get("size_min"), s.get("size_max")) == (0.50, 1.50)
+    QTest.keyClick(page.range_slider, Qt.Key.Key_PageUp)
+    assert page.range_slider.values() == (60, 150)
+    assert (s.get("size_min"), s.get("size_max")) == (0.60, 1.50)
+    # Home/End 作用 low/high 钮：已在端点=值无变化，stepped 照发
+    # （空落盘一次，与框改值路径同口径，可接受）
+    QTest.keyClick(page.range_slider, Qt.Key.Key_Home)
+    assert page.range_slider.values() == (50, 150)
+    # 键盘作用钮记忆最后拖动侧：直设内部态模拟先拖过 high 钮
+    page.range_slider._last_knob = "high"
+    QTest.keyClick(page.range_slider, Qt.Key.Key_Left)
+    assert page.range_slider.values() == (50, 149)
+    assert (s.get("size_min"), s.get("size_max")) == (0.50, 1.49)
+    # 拖拽中键盘 ignore：不改值也不落盘
+    page.range_slider._drag = "low"
+    QTest.keyClick(page.range_slider, Qt.Key.Key_Left)
+    assert page.range_slider.values() == (50, 149)
+    assert (s.get("size_min"), s.get("size_max")) == (0.50, 1.49)
+    page.range_slider._drag = None
     # 滚轮拦截：框属性补挂到 card 后 _WheelFreeCard 名单才命中
     from PySide6.QtCore import QEvent
     wheel = QEvent(QEvent.Type.Wheel)
