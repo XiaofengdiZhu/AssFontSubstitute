@@ -123,14 +123,16 @@ def _embedded_fonts(data: bytes, enc: str) -> list[str]:
 _MAX_DEGRADE_REMOVALS = 50
 
 
-def _reload_skip_bad_lines(text: str) -> tuple[Document | None, list[str]]:
+def _reload_skip_bad_lines(text: str) -> tuple[Document | None, list[str], str]:
     """单条畸形行降级装载：light_ass 行级不容错（Event 10 域 unpack /
     AssTime / Style 域解析在 strict=False 下也照抛），一条坏行曾让
     Document.load 整文件报废（审查二轮 P1，批量场景一颗老鼠屎坏一锅粥）。
 
     降级：坏行存在性对行前缀单调（坏行仍在的前缀必失败）→ 二分找最小
     失败前缀（O(log n) 次全量解析），其末行即肇事者；剔除后重载，循环
-    处理多条坏行。返回 (doc, 剔除行描述)；彻底失败返回 (None, [])。
+    处理多条坏行。返回 (doc, 剔除行描述, 实际参与解析的文本)——第三个
+    返回值供提取侧的文本级扫描与 doc 内容保持同源（Format 行被剔除时
+    扫原文会全量误判失效）。彻底失败返回 (None, [], "")。
     行文本按原编码不可解时调用方直接走原错误，不进本函数。"""
     lines = text.splitlines(keepends=True)
     removed: set[int] = set()
@@ -155,14 +157,14 @@ def _reload_skip_bad_lines(text: str) -> tuple[Document | None, list[str]]:
             # 全量失败已知，二分终会探到 len(keep)——culprit 理论必有值；
             # None 分支纯防御（未来 light_ass 出非行局部失败形态时兜底）
             if culprit is None:
-                return None, skipped
+                return None, skipped, ""
             orig = [i for i in range(len(lines)) if i not in removed][culprit - 1]
             removed.add(orig)
             snippet = lines[orig].strip()
             skipped.append(f"第 {orig + 1} 行无法解析已跳过：{snippet[:40]}")
             continue
-        return doc, skipped
-    return None, skipped
+        return doc, skipped, "".join(keep)
+    return None, skipped, ""
 
 
 # str.splitlines 独有断行符（\r\n|\r|\n 之外）：light_ass 按行切文用
@@ -173,6 +175,45 @@ def _reload_skip_bad_lines(text: str) -> tuple[Document | None, list[str]]:
 # 降级路径共用同一段归一后文本
 _SPLIT_ONLY_TABLE = dict.fromkeys((0x0B, 0x0C, 0x1C, 0x1D, 0x1E,
                                    0x85, 0x2028, 0x2029))
+
+
+def _missing_fontname_styles(text: str) -> set[str]:
+    """styles 段 Format 缺 fontname 列或 Style 行列数不足到 fontname 位
+    的样式名：light_ass 对取不到的 fontname 回退默认值 'Arial'——幻影
+    桶吞正文用字、覆盖率决策错位（审查二轮 P2）。返回应判失效的样式名
+    （doc.styles 的键与此处文本解析同源，直接按名对上）。
+
+    口径备忘（审查核验）：Style 行先于 Format 行时 light_ass 回落
+    DEFAULT_STYLE_FORMAT（fontname 位 1），扫描同口径；样式名只 lstrip
+    不 rstrip，带尾随空格的名字此处对不上 doc.styles 键（极罕见，漏判
+    方向无害）；缩进的 Format/Style 行 light_ass 整体忽略而扫描会判，
+    方向同样无害。"""
+    from light_ass.constants import DEFAULT_STYLE_FORMAT
+
+    section = ""
+    fmt: list[str] | None = None
+    bad: set[str] = set()
+    for line in text.splitlines():
+        s = line.strip()
+        low = s.lower()
+        if s.startswith("[") and s.endswith("]"):
+            section = low
+            continue
+        if section != "[v4+ styles]":
+            continue
+        if low.startswith("format:"):
+            fmt = [f.strip().lower() for f in s[len("format:"):].split(",")]
+            continue
+        if low.startswith("style:"):
+            eff = fmt if fmt is not None \
+                else [f.lower() for f in DEFAULT_STYLE_FORMAT]
+            fi = eff.index("fontname") if "fontname" in eff else None
+            parts = s[len("style:"):].split(",")
+            if fi is None or fi >= len(parts):
+                name = parts[0].strip() if parts else ""
+                if name:
+                    bad.add(name)
+    return bad
 
 
 def extract_usages(path: Path) -> ExtractResult:
@@ -192,22 +233,29 @@ def extract_usages(path: Path) -> ExtractResult:
         return ExtractResult(parse_error=f"UnicodeDecodeError: {e}")
     text = text.translate(_SPLIT_ONLY_TABLE)
     skipped: list[str] = []
+    scan_text = text
     try:
         doc = Document.from_string(text, strict=False)
     except Exception as e:
         # 降级：剔除肇事坏行重载（单条畸形行不拖垮整文件）；彻底失败
-        # 才回原错误
-        doc, skipped = _reload_skip_bad_lines(text)
+        # 才回原错误。文本级扫描（缺列样式判定）改扫实际参与解析的
+        # 文本——Format 行本身是肇事行时扫原文会全量误判失效
+        doc, skipped, scan_text = _reload_skip_bad_lines(text)
         if doc is None:
             return ExtractResult(parse_error=f"{type(e).__name__}: {e}")
-    r = _extract(doc, embedded)
+    r = _extract(doc, embedded, _missing_fontname_styles(scan_text))
     r.skipped_lines = skipped
     return r
 
 
-def _extract(doc: Document, embedded: list[str] | None = None) -> ExtractResult:
+def _extract(doc: Document, embedded: list[str] | None = None,
+             broken_styles: set[str] | None = None) -> ExtractResult:
     buckets: dict[str, FontUsage] = {}
-    style_fonts = {name: st.fontname for name, st in doc.styles.items()}
+    broken = broken_styles or set()
+    # fontname 缺列的样式判失效（light_ass 回退默认 'Arial'，幻影桶见
+    # _missing_fontname_styles）：不建桶、不计样式字体，入 invalid_styles
+    style_fonts = {name: st.fontname for name, st in doc.styles.items()
+                   if name not in broken}
     # VSFilter/libass 对样式名不敏感匹配：`main` 引用 `Main` 样式按
     # 大小写敏感取值会整行丢字+误报 unknown_styles；精确命中优先
     style_fonts_cf: dict[str, str] = {}
@@ -215,6 +263,10 @@ def _extract(doc: Document, embedded: list[str] | None = None) -> ExtractResult:
         style_fonts_cf.setdefault(name.casefold(), fname)
     used_styles: set[str] = set()
     invalid_styles = [n for n, f in style_fonts.items() if not f]
+    invalid_styles += sorted(broken)
+    # 事件引用失效样式常带大小写漂移（VSFilter 不敏感匹配正是
+    # style_fonts_cf 存在的理由），失效判定须同口径
+    broken_cf = {b.casefold() for b in broken}
 
     def lookup_style(s: str) -> str | None:
         return style_fonts.get(s) or style_fonts_cf.get(s.casefold())
@@ -235,7 +287,10 @@ def _extract(doc: Document, embedded: list[str] | None = None) -> ExtractResult:
     for ev in doc.events:
         style_font = lookup_style(ev.style)
         if style_font is None:
-            used_styles.add(ev.style)
+            # 失效样式（fontname 缺列）≠ 未知样式，不进 unknown 误报；
+            # Comment 行不渲染，未知样式引用不构成信号
+            if ev.style.casefold() not in broken_cf and not ev.comment:
+                used_styles.add(ev.style)
             continue
         current = style_font
         is_comment = ev.comment

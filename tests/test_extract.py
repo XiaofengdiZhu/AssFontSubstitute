@@ -45,6 +45,93 @@ def test_empty_fontname_style(tmp_path):
     assert "Alt" in r.invalid_styles
 
 
+def test_missing_fontname_column_no_phantom_arial(tmp_path):
+    # 审查二轮 P2：Style 行列数不足到 fontname 位时 light_ass 回退默认
+    # fontname 'Arial'——幻影桶吞正文用字（覆盖率决策错位）。缺列样式
+    # 判失效入 invalid_styles：不建桶、正文不误归 Arial、不误报 unknown。
+    # （列数够但整体左移的畸形行 fontname 位有值，light_ass 无法识别，
+    # 不属本修）
+    bad = ASS.replace("Style: Main,華康主體W5,52,&H00FFFFFF", "Style: Main")
+    r = extract_usages(_write(tmp_path, bad))
+    by = {u.norm_name: u for u in r.usages}
+    assert "arial" not in by
+    assert "Main" in r.invalid_styles
+    assert not any("永" in u.chars for u in r.usages)   # 正文不误归他桶
+    assert r.unknown_styles == ["Ghost"]                # 失效≠未知且不误伤
+
+
+def test_format_without_fontname_all_styles_invalid(tmp_path):
+    # Format 行整体缺 fontname 列：全部样式判失效。样式值须能按位移后
+    # 的格式解析（fontsize 位给数字），否则行在 light_ass 侧解析即炸、
+    # 走降级剔除路径（样式直接丢失，非 Arial 回退）
+    bad = ASS.replace("Format: Name, Fontname, Fontsize, PrimaryColour",
+                      "Format: Name, Fontsize, PrimaryColour")
+    bad = bad.replace("Style: Main,華康主體W5,52,&H00FFFFFF",
+                      "Style: Main,52,&H00FFFFFF")
+    bad = bad.replace("Style: Alt,華康副體W7,48,&H00FFFFFF",
+                      "Style: Alt,48,&H00FFFFFF")
+    r = extract_usages(_write(tmp_path, bad))
+    by = {u.norm_name: u for u in r.usages}
+    assert "arial" not in by
+    assert set(r.invalid_styles) >= {"Main", "Alt"}
+    assert not any("永" in u.chars for u in r.usages)
+
+
+def test_broken_style_casefold_reference_not_unknown(tmp_path):
+    # 审查补刀：事件引用失效样式常带大小写漂移（VSFilter 不敏感匹配），
+    # 失效判定须同口径——broken 'Main'、引用 'main' 不进 unknown
+    bad = ASS.replace("Style: Main,華康主體W5,52,&H00FFFFFF", "Style: Main")
+    bad = bad.replace("Dialogue: 0,0:00:00.00,0:00:05.00,Main,,",
+                      "Dialogue: 0,0:00:00.00,0:00:05.00,main,,")
+    r = extract_usages(_write(tmp_path, bad))
+    assert "main" not in r.unknown_styles
+    assert "Main" in r.invalid_styles
+    assert "arial" not in {u.norm_name for u in r.usages}
+
+
+def test_style_line_before_format_line_no_phantom_arial(tmp_path):
+    # 审查补刀：Style 行先于 Format 行时 light_ass 回落默认 Format
+    # （fontname 位 1）——扫描同口径，缺列照样判失效
+    text = ("[Script Info]\nTitle: t\n\n[V4+ Styles]\n"
+            "Style: Main\n"
+            "Format: Name, Fontname, Fontsize, PrimaryColour\n"
+            "Style: Alt,華康副體W7,48,&H00FFFFFF\n"
+            "\n"
+            "[Events]\n"
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, "
+            "MarginV, Effect, Text\n"
+            "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,永和的中文字\n")
+    r = extract_usages(_write(tmp_path, text))
+    assert "arial" not in {u.norm_name for u in r.usages}
+    assert "Main" in r.invalid_styles
+
+
+def test_degraded_style_lines_not_judged_broken(tmp_path):
+    # N4 钉死：缺列扫描改扫降级后文本——被剔除的样式行不再冤枉入
+    # invalid（诚实报 unknown），存活的 Arial 回退行照判失效
+    text = ("[Script Info]\nTitle: t\n\n[V4+ Styles]\n"
+            "Format: Name, Fontsize, PrimaryColour\n"
+            "Style: Main,華康主體W5,52,&H00FFFFFF\n"   # 位移解析炸 → 剔除
+            "Style: Alt,48,&H00FFFFFF\n"               # 可解析 → Arial 回退
+            "\n"
+            "[Events]\n"
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, "
+            "MarginV, Effect, Text\n"
+            "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,永和的中文字\n")
+    r = extract_usages(_write(tmp_path, text))
+    assert len(r.skipped_lines) == 1
+    assert "arial" not in {u.norm_name for u in r.usages}
+    assert "Alt" in r.invalid_styles
+    assert "Main" in r.unknown_styles
+
+
+def test_comment_unknown_style_not_reported(tmp_path):
+    # 审查二轮 P2：Comment 行不渲染，引用未知样式不构成误报信号
+    line = ("Comment: 0,0:00:11.00,0:00:12.00,GhostNote,,0,0,0,,註解\n")
+    r = extract_usages(_write(tmp_path, ASS + line))
+    assert "GhostNote" not in r.unknown_styles
+
+
 def test_merge(tmp_path):
     a = extract_usages(_write(tmp_path, name="a.ass"))
     b = extract_usages(_write(tmp_path, ASS.replace("永和的中文字", "另外的字"), "b.ass"))
