@@ -179,7 +179,13 @@ def _reco_job(ctx, chars, cov_threshold, direction, cancel=None):
     s = make_searcher(ctx, target=None, chars=set(chars),
                       threshold=cov_threshold, n_pause=10 ** 9,
                       min_sim=0.0, size_range=(0.0, 10.0), direction=direction)
-    cands, state = pull_chunk(s, cancel=cancel, chunk=10 ** 9)
+    # 分片推进到终态（60cd763 起 pull_chunk 无 chunk 参数，一片至多
+    # EVAL_SLICE 次对比即回执）；每片间检查取消标志，弹窗已关则提前退
+    cands = []
+    state = "running"
+    while state == "running":
+        batch, state = pull_chunk(s, cancel=cancel)
+        cands += batch
     if state == "cancelled":
         return None                    # 跳过 fp2e 全池倒排的构建
     fp2e = {e.fingerprint: e for e in ctx.lib.entities()}

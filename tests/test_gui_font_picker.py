@@ -228,3 +228,39 @@ def test_picker_hides_weight_filter_and_face_controls(qapp, tmp_path):
     rows = dlg.pvm.filtered()
     assert len(rows) == 1 and rows[0].selected.fingerprint == "up300"
     dlg.deleteLater()
+
+
+def test_reco_job_executes_pull_loop(qapp, tmp_path):
+    # 审查二轮 P0-1 回归：_reco_job 必须真执行——曾传已删的 chunk 参数
+    # （60cd763 重构漏改 picker），worker 内必 TypeError 且 pickreco 不在
+    # failed 白名单，推荐区永久静默失效；旧测试只测回执 plumbing 故没红。
+    # target=None 走纯元数据串行路径，无需进程池
+    from types import SimpleNamespace
+
+    from ass_font_substitute.core.fontindex.library import LibraryIndex
+    from ass_font_substitute.core.fontindex.store import open_db
+    from ass_font_substitute.core.fontindex.store import update_index
+    from ass_font_substitute.core.similarity.cache import Cache
+    from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.widgets.font_picker import _reco_job
+    from tests.fonts import build_font
+
+    d = tmp_path / "lib"
+    d.mkdir()
+    build_font(d / "cand.ttf", chars="永中木水火土石田8Aa0?",
+               family="候選圓", psname="CAND")
+    build_font(d / "far.ttf", chars="8Aa0?", family="黑體遠", psname="FAR")
+    conn = open_db(d / "fontindex.db")
+    update_index(d, conn)
+    conn.close()
+    lib = LibraryIndex.open([d])
+    s = Settings(tmp_path / "s.json")
+    ctx = SimpleNamespace(lib=lib, cache=Cache(tmp_path / "cache.db"),
+                          settings=s)
+    out = _reco_job(ctx, set("永中"), 0.8, "t2s")
+    assert [e.psname for e in out] == ["CAND"]   # 低覆盖 far 不达标
+
+    # 弹窗已关：取消标志即刻生效，返回 None 不白算
+    out2 = _reco_job(ctx, set("永中"), 0.8, "t2s",
+                     cancel={"cancelled": True})
+    assert out2 is None
