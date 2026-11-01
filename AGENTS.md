@@ -10,7 +10,9 @@ ASS 字体替补：Windows 桌面 GUI 工具（PySide6 + QFluentWidgets）。简
   - `coverage/` 覆盖率匹配；`similarity/` 渲染（freetype）、度量、缓存、进程池搜索
   - `decision/` 替换记忆库
 - `src/ass_font_substitute/gui/` — 界面层
-  - `*_vm.py`、`jobs.py`、`drop.py`、`paths.py`、`name_lang.py` 等保持零 Qt，供测试直喂
+  - `*_vm.py`、`jobs.py`、`drop.py`、`paths.py`、`name_lang.py` 等保持零 Qt，供测试直喂；
+    对话框/翻译/控件类封装（`lastdir.py`、`vm_text.py`、`script_filter.py` 控件等）属刻意
+    Qt 边界，不受此约束，勿去 Qt 化
   - `pages/` 四页（library / browse / subs / settings），`widgets/` 自绘控件
   - `translations/afs_zh-Hant.{ts,qm}` 繁体译文（两者都入库）
 - `main.py` — 打包入口（pyside6-deploy 需要 .py 文件入口）
