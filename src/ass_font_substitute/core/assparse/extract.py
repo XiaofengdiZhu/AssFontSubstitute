@@ -11,7 +11,6 @@ from light_ass.curly.tags import FontNameTag
 from light_ass.curly.tags import ResetStyleTag
 from light_ass.curly.tags import TransformTag
 
-from ass_font_substitute.core.assparse.encoding import ALIAS_BOM
 from ass_font_substitute.core.assparse.encoding import EncodingDetectError
 from ass_font_substitute.core.assparse.encoding import detect_encoding
 from ass_font_substitute.core.assparse.rewrite import _bom_and_codec
@@ -166,6 +165,16 @@ def _reload_skip_bad_lines(text: str) -> tuple[Document | None, list[str]]:
     return None, skipped
 
 
+# str.splitlines 独有断行符（\r\n|\r|\n 之外）：light_ass 按行切文用
+# splitlines，在这些字符上会把一条 Dialogue 劈成两行——后半句掉进
+# Unknown section 静默丢弃，用字不计数 → 覆盖率虚高放行缺字候选。
+# rewrite 的 _LINE_RE 只认 \r\n|\r|\n（这些字符算正文内容），两边口径
+# 不对称。解析前归一剔除（与 rewrite 对齐；分隔符本身不计入用字集），
+# 降级路径共用同一段归一后文本
+_SPLIT_ONLY_TABLE = dict.fromkeys((0x0B, 0x0C, 0x1C, 0x1D, 0x1E,
+                                   0x85, 0x2028, 0x2029))
+
+
 def extract_usages(path: Path) -> ExtractResult:
     path = Path(path)
     data = path.read_bytes()
@@ -174,18 +183,20 @@ def extract_usages(path: Path) -> ExtractResult:
     except EncodingDetectError as e:
         return ExtractResult(parse_error=str(e))
     embedded = _embedded_fonts(data, enc)
+    # 主路径与降级路径共用同一手工解码（_bom_and_codec 剥 BOM + 显式端
+    # 序正文 codec）：解析前归一劈行符必须发生在喂给 light_ass 之前
+    bom_b, body_codec = _bom_and_codec(data, enc)
+    try:
+        text = data[len(bom_b):].decode(body_codec)
+    except UnicodeDecodeError as e:
+        return ExtractResult(parse_error=f"UnicodeDecodeError: {e}")
+    text = text.translate(_SPLIT_ONLY_TABLE)
     skipped: list[str] = []
     try:
-        doc = Document.load(str(path), encoding=ALIAS_BOM.get(enc, enc),
-                            strict=False)
+        doc = Document.from_string(text, strict=False)
     except Exception as e:
-        # 降级：剔除肇事坏行重载（单条畸形行不拖垮整文件）。行文本不可
-        # 解（>64KB 处非法序列等）或降级彻底失败才回原错误
-        bom_b, body_codec = _bom_and_codec(data, enc)
-        try:
-            text = data[len(bom_b):].decode(body_codec)
-        except UnicodeDecodeError:
-            return ExtractResult(parse_error=f"{type(e).__name__}: {e}")
+        # 降级：剔除肇事坏行重载（单条畸形行不拖垮整文件）；彻底失败
+        # 才回原错误
         doc, skipped = _reload_skip_bad_lines(text)
         if doc is None:
             return ExtractResult(parse_error=f"{type(e).__name__}: {e}")

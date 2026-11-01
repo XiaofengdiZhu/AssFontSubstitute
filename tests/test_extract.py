@@ -210,8 +210,8 @@ def test_bad_line_degraded_not_whole_file_lost(tmp_path):
 
 def test_bad_line_degraded_crlf_utf16be_and_style_family(tmp_path):
     # 降级路径口径：CRLF 换行下行号与文本行一致；Style 家族失败形态
-    # （空样式名）同样降级；utf-16-be BOM 走 load 的 ALIAS_BOM 自动端序、
-    # 降级走 _bom_and_codec 手工剥 BOM + 显式端序正文解码——两路结果一致
+    # （空样式名）同样降级；utf-16-be BOM 走 _bom_and_codec 手工剥 BOM +
+    # 显式端序正文解码，与旧 load(ALIAS_BOM) 路径结果一致
     bad = "Style: ,Arial,32"                     # 空样式名（Style 域失败家族）
     lines = ASS.split("\n")                      # 末尾换行 → 尾随空串
     text = "\r\n".join([*lines[:7], bad, *lines[7:]]) + "\r\n"
@@ -246,6 +246,37 @@ def test_undecodable_tail_still_parse_error(tmp_path):
     r = extract_usages(p)
     assert r.parse_error is not None
     assert not r.usages
+
+
+def test_splitline_only_separators_counted_as_content(tmp_path):
+    # 审查二轮 P1：str.splitlines 独有断行符（U+2028/\v/\f/\x85/\x1c-\x1e/
+    # U+2029）上 light_ass 会把一条 Dialogue 劈成两行，后半句静默不计数
+    # → 覆盖率虚高放行缺字候选；rewrite 的 _LINE_RE 只认 \r\n|\r|\n。
+    # 解析前归一剔除，分隔符两侧文字都计入用字集
+    for cp in (0x2028, 0x0B, 0x0C, 0x85, 0x1C, 0x1D, 0x1E, 0x2029):
+        line = ("Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,"
+                f"甲{chr(cp)}乙的中文字幕")
+        r = extract_usages(_write(tmp_path, ASS + line + "\n"))
+        assert r.parse_error is None, hex(cp)
+        by = {u.norm_name: u for u in r.usages}
+        assert {"甲", "乙"} <= by["華康主體w5"].chars, hex(cp)
+
+
+def test_splitline_separator_with_bad_line_keeps_line_numbers(tmp_path):
+    # 归一须发生在喂 light_ass 之前（主/降级共用同一段归一后文本）：
+    # 分隔符剔除不位移行号——降级报的"第 N 行"仍按 \r\n|\r|\n 口径对原始
+    # 文件行数；若降级收到未归一文本，splitlines 会把分隔符行劈成两行，
+    # 行号 +1 且好行后半句丢失
+    sep = chr(0x2028)
+    good = ("Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,"
+            f"甲{sep}乙的中文字幕")
+    bad = "Dialogue: 0,xx:yy,0:00:05.00,Main,,0,0,0,,坏行不拖全文件"
+    r = extract_usages(_write(tmp_path, ASS + good + "\n" + bad + "\n"))
+    assert r.parse_error is None
+    assert len(r.skipped_lines) == 1
+    assert "第 17 行" in r.skipped_lines[0]     # good=16、bad=17（分隔符不占行）
+    by = {u.norm_name: u for u in r.usages}
+    assert {"甲", "乙"} <= by["華康主體w5"].chars  # 分隔符行两侧文字照常计字
 
 
 def test_embedded_font_flagged(tmp_path):
