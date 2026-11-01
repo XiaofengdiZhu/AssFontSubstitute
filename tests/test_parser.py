@@ -294,3 +294,76 @@ def test_parse_at_variant_names_excluded_from_aliases(tmp_path):
     # 命名卡原始记录——test_parse_name_records 已断言其保留）
     assert all(not t.startswith("@")
                for recs in r.name_langs.values() for _, t in recs)
+
+
+def test_parse_vf_enumerates_named_instances(tmp_path):
+    from tests.fonts import build_vf
+    p = tmp_path / "vf.ttf"
+    build_vf(p, "永宇", family="变化體",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 300, "default": 400, "max": 900}],
+             instances=[{"name": "Light", "location": {"wght": 300}},
+                        {"name": "Black", "location": {"wght": 900}}])
+    recs = parse_font_file(p)
+    assert len(recs) == 3                      # 默认 + Light + Black
+    assert [r.inst_index for r in recs] == [0, 1, 2]
+    dflt, light, black = recs
+    assert dflt.var_axes == ()                 # 默认行走默认态
+    assert light.var_axes == (300.0,) and light.weight == 300
+    assert black.var_axes == (900.0,) and black.weight == 900
+    # 默认行 weight=OS/2（400），width 沿用 OS/2（审查 B1：wdth 不折算）
+    assert dflt.weight == 400
+    assert light.width == black.width == dflt.width
+    # 限定名别名：族名+子族名同 langID 配对（fixture 族名 zh-CN/zh-TW/en？）
+    # fixture 默认族名记录语言以 _EXTRA_LANGS 为准——断言限定名存在即可
+    assert any("Light" in a for a in light.aliases)
+    assert any("Black" in a for a in black.aliases)
+    # display ∈ aliases 不变量（审查 B3）
+    assert light.display_name in light.aliases
+    assert black.display_name in black.aliases
+    # name_langs 置空（审查 B2：GUI 展示链走 display_name 回退）
+    assert light.name_langs == {} and black.name_langs == {}
+    # cmap 同文件共享（同一 CmapRanges 对象）
+    assert light.cmap is dflt.cmap and black.cmap is dflt.cmap
+    # psname/version 文件级沿用
+    assert light.psname == dflt.psname and black.version == dflt.version
+
+
+def test_parse_vf_skips_default_equal_and_nameless_instances(tmp_path):
+    from tests.fonts import build_vf
+    p = tmp_path / "vf.ttf"
+    build_vf(p, "永", family="变化體",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 400, "default": 400, "max": 900}],
+             instances=[{"name": "Regular", "location": {"wght": 400}},   # 坐标=默认 → 跳过
+                        {"name": "Black", "location": {"wght": 900}}])
+    recs = parse_font_file(p)
+    # inst_index 保持 fvar 声明序、跳过的实例留空洞（与 face_index
+    # 允许空洞先例一致，preflight 裁定）：Regular=声明序 1 被跳过
+    assert [r.inst_index for r in recs] == [0, 2]
+    assert recs[1].weight == 900
+
+
+def test_parse_static_unchanged(tmp_path):
+    from tests.fonts import build_font
+    p = tmp_path / "s.ttf"
+    build_font(p, "永", family="靜態體")
+    r, = parse_font_file(p)
+    assert r.inst_index == 0 and r.var_axes == ()
+
+
+def test_parse_vf_missing_subfamily_name_skipped(tmp_path):
+    # subfamilyNameID 指向不存在的 name 记录 → 该实例跳过（拍板：无名不合成）
+    from fontTools.ttLib import TTFont
+
+    from tests.fonts import build_vf
+    p = tmp_path / "vf.ttf"
+    build_vf(p, "永", family="变化體",
+             axes=[{"name": "Weight", "tag": "wght",
+                    "min": 300, "default": 400, "max": 900}],
+             instances=[{"name": "Black", "location": {"wght": 900}}])
+    tt = TTFont(str(p))
+    tt["fvar"].instances[0].subfamilyNameID = 999   # 悬空 nameID
+    tt.save(str(p))
+    recs = parse_font_file(p)
+    assert len(recs) == 1 and recs[0].inst_index == 0

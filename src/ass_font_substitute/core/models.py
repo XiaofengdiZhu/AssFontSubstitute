@@ -121,6 +121,11 @@ class FontRecord:
     # 命名卡原始记录 (nameID, platformID, langID, 文本)，ID1/2/3/4/16
     # 全平台全语言（SCHEMA v8 入库，详情打开同步读零闪烁）
     name_records: tuple[tuple[int, int, int, str], ...] = ()
+    # fvar 命名实例序：0=默认实例/静态，1..N=命名实例（fvar 声明序；
+    # 跳过的实例留空洞，与 face_index 允许空洞先例一致）
+    inst_index: int = 0
+    # fvar 轴坐标（axes 声明序全长）；空=默认态（静态字体/默认实例行）
+    var_axes: tuple[float, ...] = ()
 
 
 @dataclass
