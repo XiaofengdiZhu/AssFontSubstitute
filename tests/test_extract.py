@@ -325,6 +325,74 @@ def test_over_degrade_cap_falls_back_to_parse_error(tmp_path):
     assert r.parse_error is not None and not r.usages
 
 
+def _count_full_parses(monkeypatch):
+    """替身统计整文件 Document.from_string 调用次数（逐行探针走
+    Events/Styles/ScriptInfo.from_lines，不计入）。"""
+    import ass_font_substitute.core.assparse.extract as ex
+    real = ex.Document.from_string
+    calls: list[int] = []
+
+    def fake_from_string(text, strict=True, **kw):
+        calls.append(1)
+        return real(text, strict=strict, **kw)
+
+    monkeypatch.setattr(ex, "Document", type("DocSpy", (),
+                                             {"from_string": staticmethod(
+                                                 fake_from_string)}))
+    return calls
+
+
+def test_many_bad_lines_probed_once_not_bisect(monkeypatch, tmp_path):
+    # 审查三轮 P1 回归：坏行行级局部 → 逐行探针预筛 O(n)，50 条坏行只许
+    # 2 次整文件解析（主路径失败 1 + 剔除复核 1）。旧二分 = 每条坏行
+    # ~log2(n) 次全量解析，17.5MB 实测 312s；若本用例回退二分兜底，
+    # 调用次数立刻爆表报红
+    body = [f"Dialogue: 0,0:00:{i % 60:02d}.00,0:00:{(i % 60) + 1:02d}.00,"
+            f"Main,,0,0,0,,第{i}句中文字幕" for i in range(5000)]
+    for i in range(0, 5000, 100):            # 50 条坏行均匀散布
+        body[i] = f"Dialogue: 0,bad{i}"
+    text = ASS + "\n".join(body) + "\n"
+    calls = _count_full_parses(monkeypatch)
+    r = extract_usages(_write(tmp_path, text))
+    assert r.parse_error is None
+    assert len(r.skipped_lines) == 50
+    assert len(calls) == 2, f"全量解析 {len(calls)} 次，快路径失效"
+    by = {u.norm_name: u for u in r.usages}
+    assert by["華康主體w5"].style_count == 1  # 好行照常提取
+
+
+def test_probe_covers_info_style_and_custom_format(monkeypatch, tmp_path):
+    # 探针三节覆盖：Script Info 坏键值（Timer 非数字，parse_int 系宽容
+    # 回 0 不可用）、Style 空名、非默认 Format 节（同名 [Events] 合并后
+    # 探针须带新 Format）的坏行——任一漏探都会落二分兜底，调用数爆表
+    text = (ASS
+            .replace("Title: t", "Timer: x")
+            .replace("[Events]\n", "Style: ,Arial,32\n[Events]\n")  # 空样式名
+            + "[Events]\n"
+            + "Format: Start, End, Style, Name, Effect, Text\n"
+            + "Dialogue: xx:yy,0:00:05.00,Main,,0,{\\fn華康行內體}字\n")
+    calls = _count_full_parses(monkeypatch)
+    r = extract_usages(_write(tmp_path, text))
+    assert r.parse_error is None
+    assert len(r.skipped_lines) == 3
+    assert len(calls) == 2, f"全量解析 {len(calls)} 次，快路径失效"
+    # 好行与 Format 无关的引用照常提取
+    assert "華康主體w5" in {u.norm_name for u in r.usages}
+
+
+def test_probe_misfire_falls_back_to_bisect(monkeypatch, tmp_path):
+    # 预筛非终判：探针漏报形态（此处以坏行伪装成探针通过的行为模拟——
+    # monkeypatch 探针放行全部行）复核解析必失败，须回退二分兜底找回
+    # 肇事行，不误判整文件报废
+    import ass_font_substitute.core.assparse.extract as ex
+    bad = "Dialogue: 0,xx:yy,0:00:05.00,Main,,0,0,0,,坏行不拖全文件"
+    monkeypatch.setattr(ex, "_flag_culprit_lines", lambda lines: set())
+    r = extract_usages(_write(tmp_path, ASS + bad + "\n"))
+    assert r.parse_error is None
+    assert len(r.skipped_lines) == 1
+    assert "第 16 行" in r.skipped_lines[0]
+
+
 def test_undecodable_tail_still_parse_error(tmp_path):
     # 降级的前提是行文本可解：>64KB 处非法序列 decode 失败 → 保持原错误
     p = tmp_path / "big.ass"

@@ -10,6 +10,9 @@ from light_ass.curly.parsed_line import TextNode
 from light_ass.curly.tags import FontNameTag
 from light_ass.curly.tags import ResetStyleTag
 from light_ass.curly.tags import TransformTag
+from light_ass.events import Events
+from light_ass.script_info import ScriptInfo
+from light_ass.styles import Styles
 
 from ass_font_substitute.core.assparse.encoding import EncodingDetectError
 from ass_font_substitute.core.assparse.encoding import detect_encoding
@@ -119,8 +122,71 @@ def _embedded_fonts(data: bytes, enc: str) -> list[str]:
 
 
 # 降级剔除坏行的上限：正常字幕坏行是个位数，超限视为文件整体损坏，
-# 继续二分只是烧 CPU（每轮 O(log n) 次全量解析）
+# 继续剔除只是烧 CPU（二分兜底每轮 O(log n) 次全量解析）
 _MAX_DEGRADE_REMOVALS = 50
+
+
+def _flag_culprit_lines(lines: list[str]) -> set[int]:
+    """O(n) 逐行预筛肇事行。light_ass 按节独立解析（ScriptInfo / Styles /
+    Events 各 from_lines 一节），Dialogue/Style/Info 行的解析失败行级局部
+    （域 unpack / AssTime / Style 域在 strict=False 下也照抛）——用该节
+    当前生效的 Format 行 + 本行做迷你探针（strict=False 与整文件同口径），
+    探针失败即预筛为肇事行。其余行的失败形态 light_ass 根本不产
+    （Unknown 节整体丢弃、节内杂行 strict=False 一律忽略），不探。
+
+    分节切分复刻 light_ass.document._split_into_sections 口径：lstrip 后
+    '[' 开头且含 ']' 才是节头、节名 .title() 归一、同名节 setdefault 合并
+    （后现身的同名节沿用先前 Format，故 fmt 按节名记、不随节头重置）；
+    节头前的行入 Unknown 被丢，不探。Format 生效关系 = 节内最后一条
+    （from_lines 后者覆写前者），探针带上它保证非默认 Format 的域错同样
+    现形。
+
+    只作预筛不终判：误报（剔除好行）与漏报（非行局部失败形态）均由
+    调用方剔除后的整文件复核解析兜底。"""
+    flagged: set[int] = set()
+    section: str | None = None
+    fmt: dict[str, str | None] = {}   # 节名 -> 最后一条 Format 行
+    for i, ln in enumerate(lines):
+        # 探针行剥行尾断行符（from_lines 按行收 Sequence，不自行切分，
+        # 尾部 \r\n 会混进末域把好行也判炸）
+        ln = ln.rstrip("\r\n")
+        stripped = ln.lstrip(" \t")
+        if stripped[:1] == "[":
+            end = stripped.find("]")
+            if end > 0:
+                section = stripped[1:end].title()
+                fmt.setdefault(section, None)
+                continue
+        if section is None:
+            continue
+        if section == "Events":
+            if ln[:7].lower() == "format:":
+                fmt[section] = ln
+                continue
+            if ln[:9].lower() == "dialogue:" or ln[:8].lower() == "comment:":
+                f = fmt.get(section)
+                probe = [ln] if f is None else [f, ln]
+                try:
+                    Events.from_lines(probe, strict=False)
+                except Exception:
+                    flagged.add(i)
+        elif section == "V4+ Styles":
+            if ln[:7].lower() == "format:":
+                fmt[section] = ln
+                continue
+            if ln[:6].lower() == "style:":
+                f = fmt.get(section)
+                probe = [ln] if f is None else [f, ln]
+                try:
+                    Styles.from_lines(probe, strict=False)
+                except Exception:
+                    flagged.add(i)
+        elif section == "Script Info":
+            try:
+                ScriptInfo.from_lines([ln], strict=False)
+            except Exception:
+                flagged.add(i)
+    return flagged
 
 
 def _reload_skip_bad_lines(text: str) -> tuple[Document | None, list[str], str]:
@@ -128,13 +194,32 @@ def _reload_skip_bad_lines(text: str) -> tuple[Document | None, list[str], str]:
     AssTime / Style 域解析在 strict=False 下也照抛），一条坏行曾让
     Document.load 整文件报废（审查二轮 P1，批量场景一颗老鼠屎坏一锅粥）。
 
-    降级：坏行存在性对行前缀单调（坏行仍在的前缀必失败）→ 二分找最小
-    失败前缀（O(log n) 次全量解析），其末行即肇事者；剔除后重载，循环
-    处理多条坏行。返回 (doc, 剔除行描述, 实际参与解析的文本)——第三个
-    返回值供提取侧的文本级扫描与 doc 内容保持同源（Format 行被剔除时
-    扫原文会全量误判失效）。彻底失败返回 (None, [], "")。
+    快路径（审查三轮 P1，坏行行级局部性）：_flag_culprit_lines 逐行探针
+    预筛肇事行，一次剔除后整文件复核解析——O(n) 探针 + 1 次全量解析，
+    旧二分在 50 条坏行时需数百次全量解析（17.5MB 文件实测 312s）。
+
+    兜底路径（坏行存在性对行前缀单调：坏行仍在的前缀必失败）→ 二分找
+    最小失败前缀，其末行即肇事者；剔除后重载，循环处理。快路径预筛
+    空手/超上限/复核仍失败时走此路，行为与旧实现等价。
+
+    返回 (doc, 剔除行描述, 实际参与解析的文本)——第三个返回值供提取侧
+    的文本级扫描与 doc 内容保持同源（Format 行被剔除时扫原文会全量误判
+    失效）。彻底失败返回 (None, [], "")。
     行文本按原编码不可解时调用方直接走原错误，不进本函数。"""
     lines = text.splitlines(keepends=True)
+
+    def _skip_msg(i: int) -> str:
+        return f"第 {i + 1} 行无法解析已跳过：{lines[i].strip()[:40]}"
+
+    flagged = _flag_culprit_lines(lines)
+    if 0 < len(flagged) <= _MAX_DEGRADE_REMOVALS:
+        keep = [ln for i, ln in enumerate(lines) if i not in flagged]
+        try:
+            doc = Document.from_string("".join(keep), strict=False)
+            return doc, [_skip_msg(i) for i in sorted(flagged)], "".join(keep)
+        except Exception:
+            pass  # 预筛结论作废（漏报/非行局部失败形态），回退二分兜底
+
     removed: set[int] = set()
     skipped: list[str] = []
     # N 条坏行要 N 次剔除 + 1 次成功解析 = N+1 轮：上限 50 指剔除数，
@@ -160,8 +245,7 @@ def _reload_skip_bad_lines(text: str) -> tuple[Document | None, list[str], str]:
                 return None, skipped, ""
             orig = [i for i in range(len(lines)) if i not in removed][culprit - 1]
             removed.add(orig)
-            snippet = lines[orig].strip()
-            skipped.append(f"第 {orig + 1} 行无法解析已跳过：{snippet[:40]}")
+            skipped.append(_skip_msg(orig))
             continue
         return doc, skipped, "".join(keep)
     return None, skipped, ""
