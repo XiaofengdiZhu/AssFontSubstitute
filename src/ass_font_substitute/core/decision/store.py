@@ -44,11 +44,12 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def _rebuild_corrupt(db_path: Path) -> sqlite3.Connection:
-    """记忆库损坏（非空但非法）→ 备份 .corrupt 重建空库（记忆可丢：只
-    影响回放默认值，不损字幕数据）。旁车一并隔离，防旧 WAL 回放污染。
-    主库被占用转译 OperationalError（打不上≠损坏，别炸调用方）。"""
-    return _rebuild(db_path, ".corrupt")
+def _rebuild_corrupt(db_path: Path) -> None:
+    """记忆库损坏（非空但非法）→ 备份 .corrupt 隔离（记忆可丢：只影响
+    回放默认值，不损字幕数据）。旁车一并隔离，防旧 WAL 回放污染。
+    主库被占用转译 OperationalError（打不上≠损坏，别炸调用方）。
+    只隔离不回连：重建由调用方再走 _connect 完成。"""
+    _rebuild(db_path, ".corrupt")
 
 
 def _rebuild_stale(db_path: Path) -> None:
