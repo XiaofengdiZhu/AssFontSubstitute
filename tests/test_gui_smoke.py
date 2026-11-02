@@ -661,7 +661,7 @@ def test_dir_library_stats_maps_normalized_paths(qapp, tmp_path, monkeypatch):
     fwd = str(tmp_path).replace("\\", "/")
     snap = SimpleNamespace(lib=SimpleNamespace(
         entities=lambda: [ent],
-        skipped=lambda: [f"{tmp_path!s}\\a.ttf#1 重复版本"]))
+        skipped=lambda: [(str(tmp_path), "a.ttf", 1, 0)]))
     out = _dir_library_stats(snap, [fwd])
     assert out[fwd] == {"fonts": 1, "sc": 1, "tc": 0, "skipped": 1}
     # 未知目录（非本库目录）不进结果
@@ -829,8 +829,8 @@ def test_failures_dialog_constructs(qapp, tmp_path, monkeypatch):
     for data in ({"bad": {}, "skipped": []},
                  {"bad": {"J:/fonts": [("a.ttf", "PostScript 名解析失败")],
                           "K:/x": [("b.otf", "坏表")]},
-                  "skipped": ["J:/fonts/old.ttf#旧版 1.0"]}):
-        dlg = _FailuresDialog(data, retry=lambda dr, rel: None, parent=host)
+                  "skipped": [("J:/fonts", "old.ttf", 0, 1)]}):
+        dlg = _FailuresDialog(data, retry_all=lambda bad: None, parent=host)
         assert dlg.titleLabel.text() == "失败清单"
         dlg.deleteLater()
     host.deleteLater()
@@ -949,6 +949,34 @@ def test_startup_stale_auto_updates_once(qapp, tmp_path, monkeypatch):
     assert _StubIndexWorker.calls == [([str(d)], None)]
     page._auto_update_stale()
     assert _StubIndexWorker.calls == [([str(d)], None)]   # 标志已耗，不再发
+    w.close()
+
+
+def test_user_cancel_consumes_auto_update(qapp, tmp_path, monkeypatch):
+    # 审查三轮 P2：用户手动取消一次更新 = 亲自裁定本次不开更——显式
+    # 取消须一并消费启动自动开更时机，否则 stale 目录仍在，libdetail
+    # 迟到到达时 _auto_update_stale 补发开更、覆盖用户取消
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
+    import ass_font_substitute.gui.pages.library_page as lp_mod
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    d = tmp_path / "fonts"
+    d.mkdir()
+    w = AFSWindow(Settings(tmp_path / "settings.json"))
+    page = w.library_page
+    page.vm.add_dir(str(d))
+    page.vm.dirs[0].state = "stale"
+    monkeypatch.setattr(lp_mod, "IndexWorker", _StubIndexWorker)
+    _StubIndexWorker.calls = []
+    page._launch_update([str(d)])
+    assert _StubIndexWorker.calls == [([str(d)], None)]
+    page._cancel_update()
+    assert page._auto_started is True
+    # 迟到的 libdetail 触发：不再补发（用户的取消不被覆盖）
+    _StubIndexWorker.calls = []
+    page._auto_update_stale()
+    assert _StubIndexWorker.calls == []
     w.close()
 
 

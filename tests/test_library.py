@@ -33,7 +33,11 @@ def test_version_dedup(tmp_path):
     assert len(ents) == 2  # X-Medium 去重 + Y-Light
     x = next(e for e in ents if e.psname == "X-Medium")
     assert x.version == (2, 0)
-    assert any("重复版本" in s for s in lib.skipped())
+    assert any(e.psname == "X-Medium" for e in ents)
+    # 审查三轮 P2：skipped 结构化 (dir, rel, face, inst)，展示文案归 GUI
+    assert len(lib.skipped()) == 1
+    d0, rel0, _fi0, _ix0 = lib.skipped()[0]
+    assert d0 == str(d) and rel0 == "old.ttf"
 
 
 def test_find_by_name_normalized(tmp_path):
@@ -284,9 +288,8 @@ def test_cross_dir_duplicate_vf_dedup_per_instance(tmp_path):
     assert len(ents) == 3
     assert {e.inst_index for e in ents} == {0, 1, 2}
     assert all(e.dir_path == str(d1) for e in ents)
-    assert len([s for s in li.skipped() if "重复版本" in s]) == 3
-    assert all(str(d2) in s and "vf.ttf" in s
-               for s in li.skipped() if "重复版本" in s)
+    assert len([s for s in li.skipped() if str(d2) == s[0]]) == 3
+    assert all(rel == "vf.ttf" for d, rel, fi, ix in li.skipped())
 
 
 def test_load_name_records_from_db(tmp_path):

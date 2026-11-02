@@ -68,6 +68,37 @@ def test_picker_close_cancels_reco_and_none_payload_hides_rec(qapp, tmp_path):
     assert not dlg.rec_title.isVisible()
 
 
+def test_picker_close_cancels_pending_plist_renders(qapp, tmp_path):
+    # 审查三轮 P2：弹窗关闭不撤已物化行的 plist 预览渲染单——26 个废
+    # 任务塞死工作者串行队列，后续手选评分排其后秒级延迟。关闭（done→
+    # finished）须把两列表物化行在途渲染全部出队（font_detail 同款）
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+
+    s = Settings(tmp_path / "s.json")
+    w = _FakeWorker()
+    handles: list = []
+
+    def _submit(tag, fn, *args, **kw):
+        h = SimpleNamespace(cancelled=False)
+        handles.append((tag, h))
+        return h
+
+    w.submit = _submit
+    ents = [_ent(f"fp{i}", f"字体{i}") for i in range(30)]
+    host = QWidget()
+    host.resize(1100, 750)
+    dlg = FontPickerDialog(s, w, ents, parent=host)
+    plist = [(t, h) for t, h in handles if t.startswith("plist:")]
+    assert plist, "行物化应已派预览渲染单"
+    dlg.finished.emit(0)
+    assert all(h.cancelled for _, h in plist)
+
+
 def test_double_click_accepts_and_closes(qapp, tmp_path, monkeypatch):
     # 双击=快捷接受：置 selected 并调 accept（qfw done 走淡出动画，
     # result 非同步可断，钉 accept 调用本身；真关闭链路由实机手测覆盖）

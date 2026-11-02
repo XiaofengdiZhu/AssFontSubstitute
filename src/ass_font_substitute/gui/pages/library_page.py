@@ -46,7 +46,7 @@ from ass_font_substitute.gui.drop import split_dropped
 from ass_font_substitute.gui.jobs import ensure_library
 from ass_font_substitute.gui.jobs import probe_dir_status
 from ass_font_substitute.gui.jobs import read_failures
-from ass_font_substitute.gui.jobs import retry_bad
+from ass_font_substitute.gui.jobs import retry_bad_batch
 from ass_font_substitute.gui.lastdir import pick_existing_dir
 from ass_font_substitute.gui.library_vm import LibraryVM
 from ass_font_substitute.gui.pages.subs_page import _REMOVE_RED
@@ -530,13 +530,21 @@ class LibraryPage(ScrollArea):
         """失败清单的重试回调：索引更新在途时拒绝（retry_bad rw 开库
         DELETE+重解析，与 IndexWorker 并发写同一 fontindex.db → 锁冲突
         /重复重建）。"""
+        self._submit_retry_batch({dr: [(rel, "")]})
+
+    def _submit_retry_batch(self, bad: dict[str, list[tuple[str, str]]]):
+        """重试回调（重试全部按目录聚合）：每目录一单——一次 DELETE 清
+        该目录全部坏行 + 单次 update_dir，逐文件曾是 N 坏文件 = N 次全
+        目录扫描（审查三轮 P2）。门禁与单文件路径同款。"""
         if self._index_worker is not None:
             InfoBar.warning(self.tr("索引更新中"),
                             self.tr("请等索引更新完成后再重试失败文件"),
                             parent=self)
             return
-        self._retry_outstanding += 1
-        self.worker.submit(f"retry:{dr}:{rel}", _retry_job, dr, rel)
+        for dr, rows in bad.items():
+            self._retry_outstanding += 1
+            self.worker.submit(f"retry:{dr}", _retry_batch_job, dr,
+                               [rel for rel, _reason in rows])
 
     def _retry_settled(self):
         """重试收尾去抖：逐笔回执各刷一轮全目录探测曾是 N 坏文件=N 轮
@@ -735,6 +743,10 @@ class LibraryPage(ScrollArea):
     def _cancel_update(self):
         if self._index_worker is not None:
             self._index_worker.cancel()
+            # 用户显式取消 = 亲自裁定本次不开更：消费掉启动自动开更时机，
+            # 否则 stale 目录仍在，libdetail 迟到到达时 _auto_update_stale
+            # 会补发开更，覆盖用户的取消（审查三轮 P2）
+            self._auto_started = True
 
     def shutdown(self) -> bool:
         """退出汇合：取消在途索引更新并等待线程收尾（窗口关闭时先于
@@ -756,7 +768,7 @@ class LibraryPage(ScrollArea):
 
         def show(payload):
             dlg = _FailuresDialog(payload,
-                                  retry=self._submit_retry,
+                                  retry_all=self._submit_retry_batch,
                                   parent=self)
             dlg.exec()
 
@@ -767,9 +779,9 @@ class LibraryPage(ScrollArea):
 class _FailuresDialog(MessageBoxBase):
     """失败清单：只读全文 + 重试全部（fluent 风格弹窗）。"""
 
-    def __init__(self, data, retry, parent=None):
+    def __init__(self, data, retry_all, parent=None):
         super().__init__(parent)
-        self._retry = retry
+        self._retry_all = retry_all
         self._bad = data.get("bad", {}) or {}
 
         self.titleLabel = SubtitleLabel(self.tr("失败清单"))
@@ -789,7 +801,10 @@ class _FailuresDialog(MessageBoxBase):
         skipped = data.get("skipped", [])
         if skipped:
             lines.append(self.tr("【跳过的重复版本】"))
-            lines.extend(f"  {s}" for s in skipped)
+            # 结构化条目 (dir, rel, face, inst)，文案在 GUI 侧拼 tr——
+            # core 拼简体串曾残留繁体界面（审查三轮 P2）
+            lines.extend(f"  {d}/{rel}#{fi}i{ix} {self.tr('重复版本')}"
+                         for d, rel, fi, ix in skipped)
         text.setPlainText("\n".join(lines))
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(hint)
@@ -809,9 +824,7 @@ class _FailuresDialog(MessageBoxBase):
 
     def validate(self) -> bool:
         if self._bad:
-            for d, rows in self._bad.items():
-                for rel, _reason in rows:
-                    self._retry(d, rel)
+            self._retry_all(self._bad)
         return True
 
 
@@ -819,8 +832,8 @@ def _dir_library_stats(snap, dirs: list[str]) -> dict:
     """每目录库内统计（worker 线程纯数据）：字体/支持简繁/重复跳过数。
 
     实体 dir_path 是 str(Path(dir)) 规范化形（反斜杠），目录表是原样
-    字符串（可能正斜杠），按 Path 归一映射回原键；skipped 条目形如
-    「<目录>/<rel>#<face> 重复版本」，同样按归一前缀归目录。"""
+    字符串（可能正斜杠），按 Path 归一映射回原键；skipped 条目是结构化
+    (dir, rel, face, inst)，dir 同样按归一键对上。"""
     out = {d: {"fonts": 0, "sc": 0, "tc": 0, "skipped": 0} for d in dirs}
     by_norm = {str(Path(d)): d for d in dirs}
     for e in snap.lib.entities():
@@ -833,11 +846,10 @@ def _dir_library_stats(snap, dirs: list[str]) -> dict:
             s["sc"] += 1
         if e.script in ("繁", "简繁"):
             s["tc"] += 1
-    for item in snap.lib.skipped():
-        for d_norm, key in by_norm.items():
-            if item.startswith(d_norm + "/") or item.startswith(d_norm + "\\"):
-                out[key]["skipped"] += 1
-                break
+    for d_dir, _rel, _fi, _ix in snap.lib.skipped():
+        key = by_norm.get(str(Path(d_dir)))
+        if key is not None:
+            out[key]["skipped"] += 1
     return out
 
 
@@ -860,5 +872,5 @@ def _failures_job(ctx, dirs):
     return read_failures(ctx)
 
 
-def _retry_job(ctx, d, rel):
-    return retry_bad(ctx, d, rel)
+def _retry_batch_job(ctx, d, rels):
+    return retry_bad_batch(ctx, d, rels)

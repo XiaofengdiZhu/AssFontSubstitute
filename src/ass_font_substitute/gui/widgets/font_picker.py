@@ -134,6 +134,12 @@ class FontPickerDialog(MessageBoxBase):
 
         self._reload_all()
 
+        # 关弹窗（取消/选定/ESC/宿主窗口关闭，均经 done→finished）即撤
+        # 已物化行在途渲染单 + 置推荐任务取消标志：关闭后回传没人接，
+        # 废任务塞死工作者串行队列，后续手选评分排其后秒级延迟（审查
+        # 三轮 P2；font_detail._on_finished 同款口径）
+        self.finished.connect(self._on_finished)
+
         if chars:
             self._reco_tag = f"pickreco:{next(_PICKRECO_SEQ)}"
             worker.result.connect(self._on_reco)
@@ -141,11 +147,13 @@ class FontPickerDialog(MessageBoxBase):
             worker.submit(self._reco_tag, _reco_job, chars,
                           float(settings.get("cov_threshold")), direction,
                           self._reco_cancel)
-            # 关弹窗（取消/选定/ESC/宿主窗口关闭，均经 done→finished）即
-            # 置取消标志：任务在 pull_chunk 每候选处检查，提前退出不白算
-            self.finished.connect(lambda _: self._reco_cancel.__setitem__(
-                "cancelled", True))
         # 复用字体库预览的文字；对话框自己不发 blib（实体由调用方传入）
+
+    def _on_finished(self, _result):
+        self.all_list.cancel_pending()
+        self.rec_list.cancel_pending()
+        if self._reco_cancel is not None:
+            self._reco_cancel["cancelled"] = True
 
     def _preview(self):
         return self.tools.text()
@@ -186,6 +194,7 @@ class FontPickerDialog(MessageBoxBase):
     _reco = None
     _reco_tag = None   # ctor chars 分支赋值；未提交时 _on_reco 不可达，
                        # None 兜底比对恒 False 防 AttributeError
+    _reco_cancel = None  # 同上：未提交推荐任务时 _on_finished 判空跳过
 
 
 def _reco_job(ctx, chars, cov_threshold, direction, cancel=None):

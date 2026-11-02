@@ -238,6 +238,15 @@ class FontListWidget(QListWidget):
     def _on_scroll_range_changed(self, *_args):
         self._materialize_visible()
 
+    def cancel_pending(self):
+        """物化行全部在途渲染出队（宿主弹窗关闭路径）：关闭后回传没人
+        接，废任务塞死工作者串行队列，后续手选评分排其后秒级延迟
+        （审查三轮 P2；font_detail._on_finished 同款口径）。"""
+        for i in self._materialized:
+            bar = getattr(self.itemWidget(self.item(i)), "bar", None)
+            if bar is not None:
+                bar.cancel()
+
     def set_rows(self, rows: list[FamilyRow]):
         for i in self._materialized:            # 重建前取消在途渲染，见下
             bar = getattr(self.itemWidget(self.item(i)), "bar", None)

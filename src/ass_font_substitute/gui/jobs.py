@@ -164,10 +164,20 @@ def read_failures(ctx) -> dict:
 
 def retry_bad(ctx, dir_path: str, rel: str):
     """手动重试：移出 bad 清单后增量更新（size/mtime 未变的也会强制重解析）。"""
+    return retry_bad_batch(ctx, dir_path, [rel])
+
+
+def retry_bad_batch(ctx, dir_path: str, rels: list[str]):
+    """按目录聚合重试：一次事务清掉该目录全部坏行 + 单次增量更新。
+    失败清单「重试全部」逐文件各跑一遍 update_dir 曾是 N 坏文件 = N 次
+    全目录扫描（审查三轮 P2）；同一目录聚合后只扫一次。"""
     conn = open_db(Path(dir_path) / "fontindex.db")
-    conn.execute("DELETE FROM bad WHERE rel_path=?", (rel,))
-    conn.commit()
-    conn.close()
+    try:
+        conn.executemany("DELETE FROM bad WHERE rel_path=?",
+                         [(r,) for r in rels])
+        conn.commit()
+    finally:
+        conn.close()
     return update_dir(dir_path)
 
 
