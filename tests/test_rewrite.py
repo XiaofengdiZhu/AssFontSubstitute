@@ -371,3 +371,59 @@ def test_out_branch_atomic_and_no_tmp_leftover(tmp_path, monkeypatch):
     monkeypatch.setattr(rw.os, "replace", real_replace)
     assert out2.read_text(encoding="utf-8") == "旧内容"
     assert not list(tmp_path.glob("*.tmp*"))
+
+
+NO_FORMAT_ASS = ("[Script Info]\r\n"
+                 "Title: t\r\n"
+                 "\r\n"
+                 "[V4+ Styles]\r\n"
+                 "Style: Main,華康主體W5,52\r\n"
+                 "\r\n"
+                 "[Events]\r\n"
+                 "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\n"
+                 "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,甲的中文字幕\r\n")
+
+
+def test_style_without_format_line_still_rewritten(tmp_path):
+    # 审查三轮 P1：styles 段缺 Format 行时 light_ass/extract 按
+    # DEFAULT_STYLE_FORMAT 解析建桶（fontname 位 1），rewrite 曾静默
+    # 跳过——同一文件「提得到、改不掉」
+    p = tmp_path / "in.ass"
+    p.write_bytes(NO_FORMAT_ASS.encode("utf-8-sig"))
+    out = tmp_path / "out.ass"
+    r = rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out)
+    text = out.read_text(encoding="utf-8-sig")
+    assert "Style: Main,思源黑体,52" in text
+    assert r.changed_lines == [4]
+
+
+def test_style_format_without_fontname_column_skipped(tmp_path):
+    # Format 行存在但缺 fontname 列：extract 已判样式失效
+    # （_missing_fontname_styles），rewrite 维持跳过口径一致
+    ass = NO_FORMAT_ASS.replace(
+        "Style: Main,華康主體W5,52\r\n",
+        "Format: Name, Fontsize\r\nStyle: Main,52\r\n")
+    p = tmp_path / "in.ass"
+    p.write_bytes(ass.encode("utf-8-sig"))
+    out = tmp_path / "out.ass"
+    r = rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out)
+    assert r.changed_lines == []
+
+
+def test_escaped_brace_body_text_untouched(tmp_path):
+    # 审查三轮 P2：正文里的字面 \{\fnX\}（libass 视 \{ 为字面 {）不是
+    # override 块，曾因块匹配正则缺 (?<!\\) 守卫被改写——用户可见文本
+    # 被篡改。extract 侧同口径（_BLOCK_ESCAPED_PATTERN）本就不建桶
+    line = ("Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,"
+            "\\{\\fn華康主體W5\\}后的中文字幕\r\n")
+    ass = ASS.replace(
+        "Dialogue: 0,0:00:00.00,0:00:05.00,Main,,0,0,0,,{\\fn華康主體W5}甲{\\fn0}乙\r\n",
+        line)
+    p = tmp_path / "in.ass"
+    p.write_bytes(ass.encode("utf-8-sig"))
+    out = tmp_path / "out.ass"
+    r = rewrite_file(p, {"華康主體W5": "思源黑体"}, out=out)
+    text = out.read_text(encoding="utf-8-sig")
+    assert "\\{\\fn華康主體W5\\}后的中文字幕" in text
+    # Style 行 + Comment 行（真块 {\fn...}丙 照常改写）；换入的字面行不动
+    assert r.changed_lines == [5, 11]

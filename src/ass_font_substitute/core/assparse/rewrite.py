@@ -6,6 +6,8 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from light_ass.constants import DEFAULT_STYLE_FORMAT
+
 from ass_font_substitute.core.assparse.encoding import BOMS
 from ass_font_substitute.core.assparse.encoding import EncodingDetectError
 from ass_font_substitute.core.assparse.encoding import detect_encoding
@@ -139,7 +141,14 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
             continue
         if low.startswith("style:") and "styles" in section:
             fmt = formats.get(section)
-            if not fmt or "fontname" not in fmt:
+            if fmt is None:
+                # 缺 Format 行：light_ass/libass/VSFilter 均按默认 Format
+                # 解析（extract 建桶同口径），回落后照样改写——否则同一
+                # 文件「提得到、改不掉」静默漏替（审查三轮 P1）。Format
+                # 行存在但缺 fontname 列：extract 已判样式失效
+                # （_missing_fontname_styles），维持跳过口径一致
+                fmt = [f.lower() for f in DEFAULT_STYLE_FORMAT]
+            if "fontname" not in fmt:
                 continue
             parts = stripped[len("Style:"):].split(",")
             fi = fmt.index("fontname")
@@ -163,8 +172,11 @@ def rewrite_file(src: Path, mapping: dict[str, str], out: Path | None = None,
                 def _sub_fn(mo: re.Match) -> str:
                     return (r"\fn" + mo.group(1) + m[mo.group(2)]
                             + mo.group(3))
+                # lookbehind 挡 \{（libass 视为字面 {，其后到 } 是正文）：
+                # 与 light_ass _BLOCK_ESCAPED_PATTERN 同口径，否则正文里
+                # 的字面 \{\fnX\} 被用户可见地改写（审查三轮 P2）
                 new_line = re.sub(
-                    r"\{[^{}]*\}",
+                    r"(?<!\\)\{[^{}]*\}",
                     lambda b: fn_re.sub(_sub_fn, b.group(0)),
                     line)
             else:
