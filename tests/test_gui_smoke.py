@@ -290,6 +290,7 @@ def test_index_worker_cancel_dir(qapp, tmp_path, monkeypatch):
     assert ("J:/a", False) in done          # a 照常完成
 
 
+@pytest.mark.slow
 def test_window_geometry_restore(qapp, tmp_path, monkeypatch):
     # 位置/大小记忆：屏内存档按档恢复；屏外存档弃用回默认；max 标记
     # 独立恢复；关闭时把当前几何落盘
@@ -690,6 +691,7 @@ def test_window_applies_stored_theme_and_effect(qapp, tmp_path, monkeypatch):
         w.close()
 
 
+@pytest.mark.slow
 def test_theme_color_custom_follow_and_fallback(qapp, tmp_path, monkeypatch):
     # 强调色三态：自定义 #rrggbb 直接生效；跟随系统取 monkeypatch 的系统色；
     # 系统色取不到回落 qfw 出厂色 #009faa。setThemeColor 全局，finally 复位

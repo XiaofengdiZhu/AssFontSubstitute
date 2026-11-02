@@ -66,9 +66,9 @@ def test_core_worker_roundtrip_and_cancelled(qapp, tmp_path, monkeypatch):
 
 
 def test_core_worker_shutdown_cancels_queued(qapp, tmp_path, monkeypatch):
-    from ass_font_substitute.gui.settings_store import Settings
-    from ass_font_substitute.gui.workers import CoreWorker
-    w = CoreWorker(Settings(tmp_path / "settings.json"))
+    # 走 _mk（AFS_DATA_DIR 隔离）：直构 CoreWorker 曾写真实 Data/cache.db
+    # （审查三轮 P1，conftest autouse fixture 兜底后 _mk 仍是对齐写法）
+    w = _mk(qapp, tmp_path, monkeypatch)
     w.start()
     # 排队任务后立即 shutdown：句柄全置 cancelled，不再执行
     handles = [w.submit(f"q{i}", lambda ctx: 1) for i in range(5)]
@@ -79,9 +79,7 @@ def test_core_worker_shutdown_cancels_queued(qapp, tmp_path, monkeypatch):
 
 def test_core_worker_shutdown_idempotent(qapp, tmp_path, monkeypatch):
     # closeEvent「继续等待」路径二次调用：残留哨兵 None 不得炸 item[0]
-    from ass_font_substitute.gui.settings_store import Settings
-    from ass_font_substitute.gui.workers import CoreWorker
-    w = CoreWorker(Settings(tmp_path / "settings.json"))
+    w = _mk(qapp, tmp_path, monkeypatch)
     w.start()
     w.shutdown()
     w.shutdown()                                # 二次幂等

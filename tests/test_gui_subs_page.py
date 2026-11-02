@@ -1156,6 +1156,7 @@ def test_bottom_bar_pinned_to_viewport(qapp, tmp_path, monkeypatch):
     assert foot.mapTo(page, QPoint(0, 0)).y() == y      # 滚动不挪底栏
 
 
+@pytest.mark.slow
 def test_option_row_retheme_tracks_accent_and_theme(qapp, tmp_path, monkeypatch):
     # 选中行描边/底色烤着 themeColor() 派生值，须跟两路刷新：换强调色
     # （themeColorChanged，且信号发出时 themeColor() 尚是旧值——实测慢
@@ -1308,6 +1309,7 @@ def _icon_ink_luma(btn):
     return best
 
 
+@pytest.mark.slow
 def test_cont_btn_icon_follows_theme(qapp):
     """搜索钮图标随亮暗主题换色（用户报告 2026-10-30）：qfw 按钮收
     FluentIconBase 才逐 paint 以 Theme.AUTO 重渲；收 .icon() 得到的
