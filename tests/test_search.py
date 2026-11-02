@@ -28,7 +28,7 @@ def _lib(tmp_path, *extra):
         kw = dict(kw)
         name = kw.pop("name", f"c{i}")
         build_font(d / f"{name}.ttf", psname=name.upper(), **kw)
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     return LibraryIndex.open([d])
 
@@ -589,7 +589,7 @@ def test_fvar_end_to_end_search(tmp_path):
                     "min": 300, "default": 400, "max": 900}],
              instances=[{"name": "Light", "location": {"wght": 300}},
                         {"name": "Black", "location": {"wght": 900}}])
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     conn.close()
     li = LibraryIndex.open([d])

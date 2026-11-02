@@ -337,7 +337,7 @@ def test_reco_job_executes_pull_loop(qapp, tmp_path):
     build_font(d / "cand.ttf", chars="永中木水火土石田8Aa0?",
                family="候選圓", psname="CAND")
     build_font(d / "far.ttf", chars="8Aa0?", family="黑體遠", psname="FAR")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     conn.close()
     lib = LibraryIndex.open([d])

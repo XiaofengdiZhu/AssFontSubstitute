@@ -12,7 +12,7 @@ def _mklib(d, n=2):
     d.mkdir(parents=True, exist_ok=True)
     for i in range(n):
         build_font(d / f"f{i}.ttf", chars="永中木", family=f"{d.name}體{i}")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     conn.close()
 
@@ -26,7 +26,7 @@ def test_version_dedup(tmp_path):
                version="Version 2.000")
     build_font(d / "newer_offdir.ttf", chars="永", family="Y體", psname="Y-Light",
                version="Version 1.000")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     lib = LibraryIndex.open([d])
     ents = lib.entities()
@@ -45,7 +45,7 @@ def test_find_by_name_normalized(tmp_path):
     d.mkdir()
     build_font(d / "a.ttf", chars="永", family="華康測試體W5",
                extra_aliases={"zh-CN": "华康测试体 W5"})
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     lib = LibraryIndex.open([d])
     assert lib.find_by_name(normalize_name(" 华康测试体 W5 "))
@@ -60,7 +60,7 @@ def test_fingerprints_precomputed_and_reused(tmp_path, monkeypatch):
     d.mkdir()
     build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA")
     build_font(d / "b.ttf", chars="永中木", family="乙體", psname="YI")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     lib = LibraryIndex.open([d])
     fps = {e.fingerprint for e in lib.entities()}
@@ -80,12 +80,12 @@ def test_fingerprint_recomputed_when_file_changes(tmp_path):
     d.mkdir()
     build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA",
                version="Version 1.000")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     fp1 = LibraryIndex.open([d]).entities()[0].fingerprint
     build_font(d / "a.ttf", chars="永中木", family="甲體", psname="JIA",
                version="Version 1.000")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     fp2 = LibraryIndex.open([d]).entities()[0].fingerprint
     assert fp1 != fp2
@@ -98,12 +98,12 @@ def test_fingerprint_stable_when_only_version_changes(tmp_path):
     d.mkdir()
     build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA",
                version="Version 1.000")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     fp1 = LibraryIndex.open([d]).entities()[0].fingerprint
     build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA",
                version="Version 2.000")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     fp2 = LibraryIndex.open([d]).entities()[0].fingerprint
     assert fp1 == fp2
@@ -115,7 +115,7 @@ def test_fingerprint_stale_mtime_recomputed(tmp_path):
     d = tmp_path / "lib"
     d.mkdir()
     build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     conn.execute("UPDATE fingerprints SET mtime_ns=1")
     conn.commit()
@@ -130,10 +130,10 @@ def test_removed_file_cleans_fingerprints(tmp_path):
     d.mkdir()
     build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA")
     build_font(d / "b.ttf", chars="永中木", family="乙體", psname="YI")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     (d / "b.ttf").unlink()
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     n = conn.execute("SELECT COUNT(*) FROM fingerprints").fetchone()[0]
     assert n == 1
@@ -156,7 +156,7 @@ def test_display_name_prefers_cjk_alias(tmp_path):
     build_font(d / "a.ttf", chars="永", family="微软雅黑",
                extra_aliases={"en-US": "Microsoft YaHei"})
     build_font(d / "b.ttf", chars="永", family="Arial")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     ents = LibraryIndex.open([d]).entities()
     a = next(e for e in ents if "微软雅黑" in e.aliases)
@@ -171,7 +171,7 @@ def test_category_read_from_db(tmp_path):
     d = tmp_path / "lib"
     d.mkdir()
     build_font(d / "a.ttf", chars="永", family="微软雅黑")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     conn.execute("UPDATE fonts SET category='未分类'")
     conn.commit()
@@ -185,7 +185,7 @@ def test_display_name_read_from_db(tmp_path):
     d = tmp_path / "lib"
     d.mkdir()
     build_font(d / "a.ttf", chars="永", family="微软雅黑")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     conn.execute("UPDATE fonts SET display_name='改过的名'")
     conn.commit()
@@ -200,7 +200,7 @@ def test_size_mtime_read_from_db(tmp_path):
     d.mkdir()
     p = d / "a.ttf"
     build_font(p, chars="永", family="A體")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     e = LibraryIndex.open([d]).entities()[0]
     assert e.size == p.stat().st_size
@@ -213,7 +213,7 @@ def test_family_names_read_from_db(tmp_path):
     d = tmp_path / "lib"
     d.mkdir()
     build_font(d / "a.ttf", chars="永", family="Punchello")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     e = LibraryIndex.open([d]).entities()[0]
     assert e.family_names == ("Punchello",)
@@ -228,7 +228,7 @@ def test_name_langs_read_from_db_and_chain_pick(tmp_path):
     d.mkdir()
     build_font(d / "a.ttf", chars="永", family="Microsoft YaHei",
                extra_aliases={"zh-CN": "微软雅黑", "zh-TW": "微軟雅黑"})
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     e = LibraryIndex.open([d]).entities()[0]
     assert e.name_langs[1] == [
@@ -251,7 +251,7 @@ def test_same_psname_instances_survive_dedup(tmp_path):
                     "min": 300, "default": 400, "max": 900}],
              instances=[{"name": "Light", "location": {"wght": 300}},
                         {"name": "Black", "location": {"wght": 900}}])
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     li = LibraryIndex.open([d])
     ents = li.entities()
@@ -280,7 +280,7 @@ def test_cross_dir_duplicate_vf_dedup_per_instance(tmp_path):
     for d in (d1, d2):
         d.mkdir()
         build_vf(d / "vf.ttf", **spec)
-        conn = open_db(d / "fontindex.db")
+        conn = open_db(d / "AssFontSubstitute.db")
         update_index(d, conn)
         conn.close()
     li = LibraryIndex.open([d1, d2])
@@ -299,7 +299,7 @@ def test_load_name_records_from_db(tmp_path):
     d = tmp_path / "lib"
     d.mkdir()
     build_font(d / "a.ttf", chars="永", family="TestFam")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     conn.close()
     recs = load_name_records(str(d), "a.ttf", 0)
@@ -319,7 +319,7 @@ def test_load_name_records_uri_escaping(tmp_path):
     d = tmp_path / "字 体 库#1"
     d.mkdir()
     build_font(d / "a.ttf", chars="永", family="TestFam")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     conn.close()
     recs = load_name_records(str(d), "a.ttf", 0)
@@ -338,7 +338,7 @@ def test_deep_corruption_degrades_per_dir(tmp_path):
     # 深层损坏形态一：cmap blob 坏——装载 SELECT 正常、zlib.decompress
     # 层 zlib.error（open_db 头级探测挡不住；纯页翻转 FF 小库上 SQLite
     # 静默视作空表，不触发装载异常）
-    conn = open_db(d_bad / "fontindex.db")
+    conn = open_db(d_bad / "AssFontSubstitute.db")
     conn.execute("UPDATE cmap_data SET data=X'00ff00ff00'")
     conn.commit()
     conn.close()
@@ -358,7 +358,7 @@ def test_deep_corruption_degrades_per_dir(tmp_path):
     # 即炸，buf 恒空，测不到泄漏防护）
     build_font(d_two / "f0.ttf", chars="永", family="兩體0")
     build_font(d_two / "f1.ttf", chars="中木國", family="兩體1")
-    conn = open_db(d_two / "fontindex.db")
+    conn = open_db(d_two / "AssFontSubstitute.db")
     update_index(d_two, conn)
     last = conn.execute("SELECT MAX(id) FROM cmap_data").fetchone()[0]
     conn.execute("UPDATE cmap_data SET data=X'00ff00ff00' WHERE id=?", (last,))
@@ -387,7 +387,7 @@ def test_eff_weight_compensated_at_load(tmp_path):
              axes=[{"name": "Weight", "tag": "wght",
                     "min": 400, "default": 400, "max": 900}],
              instances=[{"name": "Black", "location": {"wght": 900}}])
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     conn.close()
     ents = LibraryIndex.open([d]).entities()
@@ -411,8 +411,8 @@ def test_ro_uri_shapes():
 
     from ass_font_substitute.core.fontindex.library import ro_uri
 
-    assert ro_uri(Path("D:/库 目 录/fontindex.db")) == (
-        "file:///D:/%E5%BA%93%20%E7%9B%AE%20%E5%BD%95/fontindex.db")
+    assert ro_uri(Path("D:/库 目 录/AssFontSubstitute.db")) == (
+        "file:///D:/%E5%BA%93%20%E7%9B%AE%20%E5%BD%95/AssFontSubstitute.db")
     unc = Path(r"//nas/share/x.db")
     raw = unc.resolve().as_uri()
     assert raw.startswith("file://nas/") and not raw.startswith("file:///nas/")

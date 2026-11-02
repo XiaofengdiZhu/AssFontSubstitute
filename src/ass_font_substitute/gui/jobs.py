@@ -11,6 +11,7 @@ from ass_font_substitute.core.assparse.rewrite import rewrite_file
 from ass_font_substitute.core.coverage.matcher import classify_usage
 from ass_font_substitute.core.fontindex.library import LibraryIndex
 from ass_font_substitute.core.fontindex.library import ro_uri
+from ass_font_substitute.core.fontindex.store import DB_NAME
 from ass_font_substitute.core.fontindex.store import open_db
 from ass_font_substitute.core.fontindex.store import scan_dir
 from ass_font_substitute.core.fontindex.store import update_index
@@ -40,7 +41,7 @@ def probe_dir_status(dir_path: str) -> DirStatus:
     d = Path(dir_path)
     if not d.is_dir():
         return DirStatus(dir_path, "missing")
-    dbf = d / "fontindex.db"
+    dbf = d / DB_NAME
     if not dbf.exists():
         disk = scan_dir(d)
         st = DirStatus(dir_path, "stale")
@@ -97,7 +98,7 @@ def load_library(dirs: list[str]) -> LibrarySnapshot:
     usable, offline = [], []
     for d in dirs:
         try:
-            open_db(Path(d) / "fontindex.db").close()
+            open_db(Path(d) / DB_NAME).close()
             usable.append(Path(d))
         except sqlite3.Error:
             offline.append(d)
@@ -107,13 +108,13 @@ def load_library(dirs: list[str]) -> LibrarySnapshot:
 
 
 def lib_key(dirs) -> tuple:
-    """聚合库快照失效键：目录串 + 各目录 fontindex.db 的 st_mtime_ns
+    """聚合库快照失效键：目录串 + 各目录 AssFontSubstitute.db 的 st_mtime_ns
     （缺库为 None）。IndexWorker 重建/更新索引后 mtime 变化 → 键变，
     ensure_library 弃旧快照，聚合库即时反映新字体。"""
     out = []
     for d in dirs:
         try:
-            mtime = (Path(d) / "fontindex.db").stat().st_mtime_ns
+            mtime = (Path(d) / DB_NAME).stat().st_mtime_ns
         except OSError:                     # 缺库/不可达 → None
             mtime = None
         out.append((d, mtime))
@@ -122,20 +123,20 @@ def lib_key(dirs) -> tuple:
 
 def ensure_library(ctx, dirs: list[str]) -> LibrarySnapshot:
     """聚合库按需（重）建：目录集与各索引 mtime 不变则复用 ctx 上缓存；
-    目录增删或索引更新（fontindex.db mtime 变）都触发重建。"""
+    目录增删或索引更新（AssFontSubstitute.db mtime 变）都触发重建。"""
     key = lib_key(dirs)
     if getattr(ctx, "snapshot", None) is not None and getattr(ctx, "lib_key", None) == key:
         return ctx.snapshot
     snap = load_library(dirs)
     # 缓存键取装载后的实况：load_library 会为尚无索引的目录建空库骨架
-    # （fontindex.db 由无到有），骨架创建本身不算索引更新
+    # （AssFontSubstitute.db 由无到有），骨架创建本身不算索引更新
     ctx.snapshot, ctx.lib, ctx.lib_key = snap, snap.lib, lib_key(dirs)
     return snap
 
 
 def update_dir(dir_path: str, progress=None, max_threads: int = 1,
                force: bool = False):
-    conn = open_db(Path(dir_path) / "fontindex.db")
+    conn = open_db(Path(dir_path) / DB_NAME)
     try:
         return update_index(Path(dir_path), conn, progress=progress,
                             max_threads=max_threads, force=force)
@@ -147,7 +148,7 @@ def read_failures(ctx) -> dict:
     """各目录 bad 清单 + 跨目录跳过（重复版本）。mode=ro 只读。"""
     out: dict[str, list[tuple[str, str]]] = {}
     for d in ctx.settings.get("font_dirs"):
-        dbf = Path(d) / "fontindex.db"
+        dbf = Path(d) / DB_NAME
         if not dbf.exists():
             continue
         try:
@@ -171,7 +172,7 @@ def retry_bad_batch(ctx, dir_path: str, rels: list[str]):
     """按目录聚合重试：一次事务清掉该目录全部坏行 + 单次增量更新。
     失败清单「重试全部」逐文件各跑一遍 update_dir 曾是 N 坏文件 = N 次
     全目录扫描（审查三轮 P2）；同一目录聚合后只扫一次。"""
-    conn = open_db(Path(dir_path) / "fontindex.db")
+    conn = open_db(Path(dir_path) / DB_NAME)
     try:
         conn.executemany("DELETE FROM bad WHERE rel_path=?",
                          [(r,) for r in rels])

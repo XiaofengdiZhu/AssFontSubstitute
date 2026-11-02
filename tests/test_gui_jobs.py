@@ -61,7 +61,7 @@ def test_probe_does_not_create_db(tmp_path):
     d = tmp_path / "empty"
     d.mkdir()
     probe_dir_status(str(d))
-    assert not (d / "fontindex.db").exists()
+    assert not (d / "AssFontSubstitute.db").exists()
 
 
 def test_load_library_filters_offline(tmp_path, font_dir):
@@ -80,7 +80,7 @@ def test_ensure_library_caches_snapshot(ctx_stub, font_dir):
 
 
 def test_ensure_library_invalidated_by_index_update(ctx_stub, font_dir):
-    # 回归：IndexWorker 更新索引（fontindex.db mtime 变）后必须弃旧快照，
+    # 回归：IndexWorker 更新索引（AssFontSubstitute.db mtime 变）后必须弃旧快照，
     # 否则聚合库永远看不到新字体
     update_dir(str(font_dir))                            # 先建索引：1 款字体
     s1 = ensure_library(ctx_stub, [str(font_dir)])

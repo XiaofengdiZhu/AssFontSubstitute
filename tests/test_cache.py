@@ -333,3 +333,40 @@ def test_close_flushes_pending_and_closes(tmp_path):
     c2 = Cache(tmp_path / "cache.db")           # 重开：行在且 used_at 已落
     assert c2.get_pair("aa", "bb", "00\x00v") is not None
     c2.close()
+
+
+def test_schema_version_pinned_on_legacy_db(tmp_path):
+    # 存量库无版本标记：补钉当前版本、数据保留（decision 同款口径）。
+    # 模拟存量：先建库写行，再抹掉版本标记行
+    from ass_font_substitute.core.similarity.cache import SCHEMA_VERSION
+    p = tmp_path / "cache.db"
+    c = Cache(p)
+    c.put_pair("aa", "bb", "v", CompareResult(0.9, 1.0, 10))
+    c.close()
+    conn = sqlite3.connect(p)
+    conn.execute("DELETE FROM schema_version")
+    conn.commit()
+    conn.close()
+    c2 = Cache(p)
+    assert c2.conn.execute(
+        "SELECT v FROM schema_version").fetchone()[0] == SCHEMA_VERSION
+    assert c2.get_pair("aa", "bb", "v") is not None    # 数据未清
+    c2.close()
+
+
+def test_schema_version_mismatch_wipes(tmp_path):
+    # 版本不符：缓存可丢，清空重建（不走 .bak 备份仪式）
+    from ass_font_substitute.core.similarity.cache import SCHEMA_VERSION
+    p = tmp_path / "cache.db"
+    c = Cache(p)
+    c.put_pair("aa", "bb", "v", CompareResult(0.9, 1.0, 10))
+    c.close()
+    conn = sqlite3.connect(p)
+    conn.execute("UPDATE schema_version SET v=?", (SCHEMA_VERSION + 1,))
+    conn.commit()
+    conn.close()
+    c2 = Cache(p)
+    assert c2.conn.execute(
+        "SELECT v FROM schema_version").fetchone()[0] == SCHEMA_VERSION
+    assert c2.pair_count == 0 and c2.render_bytes == 0
+    c2.close()

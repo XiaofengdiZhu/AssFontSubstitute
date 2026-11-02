@@ -11,6 +11,11 @@ import numpy as np
 from ass_font_substitute.core.similarity.metrics import CompareResult
 from ass_font_substitute.core.similarity.render import RenderBundle
 
+# schema 版本（fontindex/decision 同款标记）：未来改键结构时递增。存量库
+# 无此表属正常（旧库即视为当前版本补钉，行数据仍受 ALGO_VER 前缀清洗
+# 管）；版本不符直接清空重建——缓存可丢，不走 .bak 备份仪式。
+SCHEMA_VERSION = 1
+
 DDL = """
 CREATE TABLE IF NOT EXISTS renders(
   fingerprint TEXT, text_ver TEXT, blob BLOB, nbytes INTEGER, used_at REAL,
@@ -18,6 +23,7 @@ CREATE TABLE IF NOT EXISTS renders(
 CREATE TABLE IF NOT EXISTS pairs(
   fpa TEXT, fpb TEXT, text_ver TEXT, score REAL, size_ratio REAL, n_chars INT,
   used_at REAL, PRIMARY KEY(fpa, fpb, text_ver));
+CREATE TABLE IF NOT EXISTS schema_version(v INTEGER NOT NULL);
 """
 
 DEFAULT_LIMIT = 500 * 1024 * 1024
@@ -74,6 +80,23 @@ class Cache:
         if cols and "used_at" not in cols:
             self.conn.execute("DROP TABLE pairs")
         self.conn.executescript(DDL)
+        row = self.conn.execute("SELECT v FROM schema_version").fetchone()
+        if row is None:
+            # 存量库（无版本标记）补钉当前版本，数据保留
+            self.conn.execute("INSERT INTO schema_version VALUES (?)",
+                              (SCHEMA_VERSION,))
+            self.conn.commit()
+        elif row[0] != SCHEMA_VERSION:
+            # 版本不符：缓存可丢，弃表重建（decision 的 .bak 备份对缓存
+            # 无意义——内容本就可全量再生成）。须 DROP 后重跑 DDL：
+            # DELETE 只清行，未来改列结构的升版下 CREATE TABLE IF NOT
+            # EXISTS 不会替换旧形状表，按新列序 INSERT 会直穿
+            self.conn.execute("DROP TABLE renders")
+            self.conn.execute("DROP TABLE pairs")
+            self.conn.executescript(DDL)
+            self.conn.execute("UPDATE schema_version SET v=?",
+                              (SCHEMA_VERSION,))
+            self.conn.commit()
         self._purge_stale_algo()
         self._enable_auto_vacuum()
 

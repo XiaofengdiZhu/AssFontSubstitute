@@ -57,8 +57,11 @@ from ass_font_substitute.core.models import FontRecord
 # probes.effective_weight 计算，展示亦用原始值）——v2/v3 期被补偿改写
 # 成 900/700/… 的存量行需重解析回 OS/2 真值，指纹随之回归稳定
 # （此后补偿规则迭代零重建）。
-SCHEMA_VERSION = 4
-DB_NAME = "fontindex.db"
+# 2026-11-03 随库文件改名（fontindex.db → AssFontSubstitute.db）重置为 1
+# （发布基线，拍板 2026-11-03）：旧名库不迁移，新名首建即全量重建，重置
+# 无副作用；此后结构性变更照旧递增。
+SCHEMA_VERSION = 1
+DB_NAME = "AssFontSubstitute.db"
 WHITELIST = {".ttf", ".otf", ".ttc", ".otc"}
 
 # 指纹算法版本：fingerprint_of 的规范化方式变化时递增，旧缓存整批失效重算

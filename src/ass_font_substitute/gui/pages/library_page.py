@@ -528,7 +528,7 @@ class LibraryPage(ScrollArea):
 
     def _submit_retry(self, dr: str, rel: str):
         """失败清单的重试回调：索引更新在途时拒绝（retry_bad rw 开库
-        DELETE+重解析，与 IndexWorker 并发写同一 fontindex.db → 锁冲突
+        DELETE+重解析，与 IndexWorker 并发写同一 AssFontSubstitute.db → 锁冲突
         /重复重建）。"""
         self._submit_retry_batch({dr: [(rel, "")]})
 

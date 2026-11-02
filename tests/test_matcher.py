@@ -19,7 +19,7 @@ def _lib(tmp_path):
     build_font(d / "sc.ttf", chars="永和的中文字", family="华康测试体W5")
     # 繁体原字体：缺 "中"
     build_font(d / "tc.ttf", chars="永和的文字", family="華康原體W5")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     return LibraryIndex.open([d])
 
@@ -30,7 +30,7 @@ def test_twin_under_coverage_falls_back_to_missing(tmp_path):
     d.mkdir()
     # 简体替身：名称恰为繁名 t2s 转换结果（孪生可命中），但 cmap 缺 "中"
     build_font(d / "sc.ttf", chars="永和的文字", family="华康测试体W5")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     lib = LibraryIndex.open([d])
     r = classify_usage(_usage("華康測試體W5", "永和的中文字"), lib)
@@ -44,7 +44,7 @@ def test_in_library_low_coverage_prefers_twin(tmp_path):
     d.mkdir()
     build_font(d / "tc.ttf", chars="永和的文字", family="華康原體W5")    # 本名在库，缺 "中"
     build_font(d / "sc.ttf", chars="永和的中文字", family="华康原体W5")  # t2s(華康原體W5) 精确命中
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     lib = LibraryIndex.open([d])
     r = classify_usage(_usage("華康原體W5", "永和的中文字"), lib)
@@ -59,7 +59,7 @@ def test_in_library_low_coverage_twin_under_coverage_still_replace(tmp_path):
     d.mkdir()
     build_font(d / "tc.ttf", chars="永和的文字", family="華康原體W5")
     build_font(d / "sc.ttf", chars="永和的文字", family="华康原体W5")  # 孪生也缺 "中"
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     lib = LibraryIndex.open([d])
     r = classify_usage(_usage("華康原體W5", "永和的中文字"), lib)
@@ -76,7 +76,7 @@ def test_twin_via_in_library_alias_expansion(tmp_path):
                psname="DFYuanTi-B5")      # 别名 = {DFYuanTi-B5, 華康原體W5}，缺 "中"
     build_font(d / "sc.ttf", chars="永和的中文字", family="华康原体W5",
                psname="DFYuanTi-GB")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     lib = LibraryIndex.open([d])
     r = classify_usage(_usage("DFYuanTi-B5", "永和的中文字"), lib)
@@ -93,7 +93,7 @@ def test_alias_expansion_excludes_self(tmp_path):
     d.mkdir()
     build_font(d / "tc.ttf", chars="永和的文字", family="華康原體W5",
                psname="DFYuanTi-B5")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     lib = LibraryIndex.open([d])
     r = classify_usage(_usage("DFYuanTi-B5", "永和的中文字"), lib)
@@ -138,7 +138,7 @@ def test_default_threshold_is_95(tmp_path):
     chars = "永和的文字春夏秋冬山川田石目心手白木水火土金竹米"   # 24 字
     assert len(chars) == 24
     build_font(d / "f.ttf", chars=chars, family="覆蓋體")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     lib = LibraryIndex.open([d])
     u = _usage("覆蓋體", chars + "中")            # 24/25 = 96%
@@ -172,7 +172,7 @@ def test_classify_ignores_invisible_at_threshold_boundary(tmp_path):
     covered = "永和的文字春夏秋冬山川田石目心手白木水"    # 19 字
     assert len(covered) == 19
     build_font(d / "f.ttf", chars=covered, family="边线体")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     lib = LibraryIndex.open([d])
     invisible = "️‍﻿ \u2009̈­"                # FE0F/200D/FEFF/2009/200B/0308/00AD

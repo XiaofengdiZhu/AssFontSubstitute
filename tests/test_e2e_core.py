@@ -69,7 +69,7 @@ def test_core_e2e(tmp_path):
     build_font(lib_dir / "lowcov.ttf", chars="永", family="低覆蓋圓")
     build_font(lib_dir / "keep.ttf", chars=_ALL, family="全覆蓋圓")
     build_font(lib_dir / "cand.ttf", chars=_ALL, family="候選圓體")
-    conn = open_db(lib_dir / "fontindex.db")
+    conn = open_db(lib_dir / "AssFontSubstitute.db")
     update_index(lib_dir, conn)
     conn.close()
     lib = LibraryIndex.open([lib_dir])

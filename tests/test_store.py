@@ -17,7 +17,7 @@ def _mklib(d, n=2):
 def test_connect_wal_synchronous_normal(tmp_path):
     # WAL + synchronous=NORMAL：逐文件事务 COMMIT 免每次 fsync；
     # synchronous 非持久是连接级参数，经 open_db 的每个连接都必须带上
-    conn = open_db(tmp_path / "fontindex.db")
+    conn = open_db(tmp_path / "AssFontSubstitute.db")
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1   # NORMAL
     conn.close()
@@ -27,7 +27,7 @@ def test_incremental(tmp_path):
     d = tmp_path / "fonts"
     d.mkdir()
     _mklib(d)
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     r1 = update_index(d, conn)
     assert r1.added == 2 and r1.fonts == 2
     s1 = stats(conn)
@@ -53,7 +53,7 @@ def test_force_rebuild_clears_and_reparses(tmp_path):
     d = tmp_path / "fonts"
     d.mkdir()
     _mklib(d)
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     assert update_index(d, conn).fonts == 2
     (d / "bad.ttf").write_bytes(b"junk")
     r2 = update_index(d, conn)
@@ -80,7 +80,7 @@ def test_bad_file_retry(tmp_path):
     d.mkdir()
     bad = d / "bad.ttf"
     bad.write_bytes(b"junk")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     r = update_index(d, conn)
     assert r.bad == 1
     build_font(bad, chars="永", family="Fixed體")  # mtime/size 变 → 自动重试
@@ -92,18 +92,18 @@ def test_schema_mismatch_backs_up_and_rebuilds(tmp_path):
     # spec §5：索引版本不符 → 改名备份旧库（.bak，覆盖旧备份）后全量重建
     d = tmp_path / "fonts"
     d.mkdir()
-    db = d / "fontindex.db"
+    db = d / "AssFontSubstitute.db"
     old = sqlite3.connect(db)
     old.executescript(DDL)
     old.execute("INSERT INTO schema_version VALUES (99)")
     old.execute("INSERT INTO files VALUES ('old.ttf', 1, 1)")
     old.commit()
     old.close()
-    (d / "fontindex.db.bak").write_bytes(b"stale backup")   # 既有 .bak 须被覆盖
+    (d / "AssFontSubstitute.db.bak").write_bytes(b"stale backup")   # 既有 .bak 须被覆盖
     conn = open_db(db)                    # 隔离失败须折成 OperationalError（offline 语义）
     assert stats(conn) == {"files": 0, "fonts": 0, "support_sc": 0, "support_tc": 0}
     assert conn.execute("SELECT v FROM schema_version").fetchone()[0] == SCHEMA_VERSION
-    bak = d / "fontindex.db.bak"
+    bak = d / "AssFontSubstitute.db.bak"
     assert bak.read_bytes() != b"stale backup"
     backup = sqlite3.connect(bak)
     assert backup.execute("SELECT v FROM schema_version").fetchone()[0] == 99
@@ -116,7 +116,7 @@ def test_corrupt_db_backs_up_and_rebuilds(tmp_path):
     # 直崩无重建——备份 .corrupt 重建空库
     d = tmp_path / "fonts"
     d.mkdir()
-    db = d / "fontindex.db"
+    db = d / "AssFontSubstitute.db"
     db.write_bytes(b"this is not a sqlite database" * 10)
     conn = open_db(db)
     assert conn.execute("SELECT v FROM schema_version").fetchone()[0] \
@@ -124,7 +124,7 @@ def test_corrupt_db_backs_up_and_rebuilds(tmp_path):
     assert stats(conn) == {"files": 0, "fonts": 0, "support_sc": 0,
                            "support_tc": 0}
     conn.close()
-    assert (d / "fontindex.db.corrupt").read_bytes().startswith(
+    assert (d / "AssFontSubstitute.db.corrupt").read_bytes().startswith(
         b"this is not a sqlite database")
     # 重建后的库可正常使用
     conn2 = open_db(db)
@@ -141,23 +141,23 @@ def test_schema_mismatch_quarantines_wal_sidecars(tmp_path):
 
     d = tmp_path / "fonts"
     d.mkdir()
-    db = d / "fontindex.db"
+    db = d / "AssFontSubstitute.db"
     db.write_bytes(b"main db bytes")
-    (d / "fontindex.db-wal").write_bytes(b"stale wal")
-    (d / "fontindex.db-shm").write_bytes(b"stale shm")
+    (d / "AssFontSubstitute.db-wal").write_bytes(b"stale wal")
+    (d / "AssFontSubstitute.db-shm").write_bytes(b"stale shm")
     bak = _quarantine(db, ".bak")
     assert bak.read_bytes() == b"main db bytes"
-    assert not (d / "fontindex.db-wal").exists()
-    assert not (d / "fontindex.db-shm").exists()
-    assert (d / "fontindex.db.bak-wal").read_bytes() == b"stale wal"
-    assert (d / "fontindex.db.bak-shm").read_bytes() == b"stale shm"
+    assert not (d / "AssFontSubstitute.db-wal").exists()
+    assert not (d / "AssFontSubstitute.db-shm").exists()
+    assert (d / "AssFontSubstitute.db.bak-wal").read_bytes() == b"stale wal"
+    assert (d / "AssFontSubstitute.db.bak-shm").read_bytes() == b"stale shm"
 
 
 def test_schema_v2_with_xxh_column_migrates(tmp_path):
     # 真实 v2 旧库形状（files/fingerprints 含 xxh 列）→ 备份重建后照常索引
     d = tmp_path / "fonts"
     d.mkdir()
-    db = d / "fontindex.db"
+    db = d / "AssFontSubstitute.db"
     old = sqlite3.connect(db)
     old.executescript("""
     CREATE TABLE IF NOT EXISTS schema_version(v INTEGER NOT NULL);
@@ -174,9 +174,9 @@ def test_schema_v2_with_xxh_column_migrates(tmp_path):
       rel_path TEXT, face_index INTEGER, xxh TEXT, algo INTEGER, fp TEXT,
       PRIMARY KEY(rel_path, face_index));
     """)
-    # 历史编号 v2（xxh 时代）在新发布基线下属任意旧版（基线重置为 1 后
-    # 现行版本已用到 2），改标 1 触发版本不符——旧形状库照常备份重建
-    old.execute("INSERT INTO schema_version VALUES (1)")
+    # 历史编号 v2（xxh 时代）属任意旧版：改标 99 触发版本不符——旧形状库
+    # 照常备份重建（现行版本 1，夹具不能再标 1）
+    old.execute("INSERT INTO schema_version VALUES (99)")
     old.execute("INSERT INTO files VALUES ('v2.ttf', 1, 1, 'deadbeef')")
     old.commit()
     old.close()
@@ -185,7 +185,7 @@ def test_schema_v2_with_xxh_column_migrates(tmp_path):
     assert conn.execute("SELECT v FROM schema_version").fetchone()[0] == SCHEMA_VERSION
     assert update_index(d, conn).added == 1
     assert stats(conn)["fonts"] == 1
-    bak = sqlite3.connect(d / "fontindex.db.bak")
+    bak = sqlite3.connect(d / "AssFontSubstitute.db.bak")
     assert bak.execute("SELECT xxh FROM files").fetchone()[0] == "deadbeef"
     bak.close()
     conn.close()
@@ -207,7 +207,7 @@ def test_update_index_persists_instances(tmp_path):
     d.mkdir()
     build_vf(d / "vf.ttf", "永", family="变化體", axes=_VF_AXES,
              instances=_VF_INSTANCES)
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     rows = conn.execute(
         "SELECT inst_index, weight, var_axes FROM fonts ORDER BY inst_index"
@@ -237,7 +237,7 @@ def test_rescan_same_file_idempotent(tmp_path):
     d.mkdir()
     build_vf(d / "vf.ttf", "永", family="变化體", axes=_VF_AXES,
              instances=_VF_INSTANCES)
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     assert update_index(d, conn).fonts == 3
     import os
     os.utime(d / "vf.ttf")          # mtime 变 → changed → 重灌
@@ -254,10 +254,10 @@ def test_rescan_same_file_idempotent(tmp_path):
 
 
 def test_v1_db_backed_up_and_rebuilt(tmp_path):
-    # v1（无实例维度）旧库：版本不符 → .bak 备份（覆盖既有）+ v2 全量重建
+    # v1（无实例维度）旧库：版本不符 → .bak 备份（覆盖既有）+ 全量重建
     d = tmp_path / "lib"
     d.mkdir()
-    db = d / "fontindex.db"
+    db = d / "AssFontSubstitute.db"
     old = sqlite3.connect(db)
     old.executescript("""
     CREATE TABLE IF NOT EXISTS schema_version(v INTEGER NOT NULL);
@@ -277,19 +277,19 @@ def test_v1_db_backed_up_and_rebuilt(tmp_path):
       rel_path TEXT, face_index INTEGER, mtime_ns INTEGER, algo INTEGER, fp TEXT,
       PRIMARY KEY(rel_path, face_index));
     """)
-    old.execute("INSERT INTO schema_version VALUES (1)")
+    old.execute("INSERT INTO schema_version VALUES (99)")
     old.execute("INSERT INTO files VALUES ('old.ttf', 1, 1)")
     old.commit()
     old.close()
-    (d / "fontindex.db.bak").write_bytes(b"stale backup")
+    (d / "AssFontSubstitute.db.bak").write_bytes(b"stale backup")
     build_font(d / "a.ttf", chars="永", family="新體")
     conn = open_db(db)                    # 隔离失败须折成 OperationalError（offline 语义）
     assert conn.execute("SELECT v FROM schema_version").fetchone()[0] \
         == SCHEMA_VERSION
     assert update_index(d, conn).added == 1
     assert stats(conn)["fonts"] == 1
-    bak = sqlite3.connect(d / "fontindex.db.bak")
-    assert bak.execute("SELECT v FROM schema_version").fetchone()[0] == 1
+    bak = sqlite3.connect(d / "AssFontSubstitute.db.bak")
+    assert bak.execute("SELECT v FROM schema_version").fetchone()[0] == 99
     assert bak.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 1
     bak.close()
 
@@ -304,7 +304,7 @@ def test_load_font_rows_instance_columns(tmp_path):
     build_vf(d / "vf.ttf", "永", family="变化體", axes=_VF_AXES,
              instances=_VF_INSTANCES)
     build_font(d / "s.ttf", chars="永", family="静體")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     got = {}
     for row in load_font_rows(conn):
@@ -320,11 +320,11 @@ def test_whitelist_and_self_exclude(tmp_path):
     d.mkdir()
     _mklib(d, n=1)
     (d / "note.txt").write_text("x")
-    (d / "fontindex.db").write_bytes(b"")
+    (d / "AssFontSubstitute.db").write_bytes(b"")
     sub = d / "sub"
     sub.mkdir()
     build_font(sub / "nested.ttf", chars="永", family="Z體")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     r = update_index(d, conn)
     assert r.added == 2  # 递归含 sub，排除 txt 与 db 自身
 
@@ -333,7 +333,7 @@ def test_update_index_precomputes_fingerprints(tmp_path):
     d = tmp_path / "lib"
     d.mkdir()
     build_font(d / "a.ttf", chars="永中", family="甲體", psname="JIA")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     rows = conn.execute(
         "SELECT rel_path, face_index, mtime_ns, algo, fp FROM fingerprints").fetchall()
@@ -351,7 +351,7 @@ def test_update_index_parallel_executor(tmp_path):
     d.mkdir()
     _mklib(d, n=4)
     (d / "bad.ttf").write_bytes(b"junk")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     with ThreadPoolExecutor(max_workers=2) as ex:
         r = update_index(d, conn, executor=ex)
     # added=发现数（scan 阶段计数，含坏文件），非入库数
@@ -378,7 +378,7 @@ def test_update_index_parallel_fingerprints(tmp_path):
                             {"chars": "中", "family": "B體", "weight": 700},
                             {"chars": "木", "family": "C體", "weight": 900}])
     _mklib(d, n=1)
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     with ThreadPoolExecutor(max_workers=2) as ex:
         r = update_index(d, conn, executor=ex)
     assert r.added == 2 and stats(conn)["fonts"] == 4
@@ -411,7 +411,7 @@ def test_cmap_dedup_and_roundtrip(tmp_path):
     build_ttc(d / "same.ttc", [{"chars": "永中", "family": "A體", "weight": 400},
                                {"chars": "永中", "family": "A體", "weight": 700}])
     build_font(d / "diff.ttf", chars="木", family="B體")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     with ThreadPoolExecutor(max_workers=2) as ex:
         r = update_index(d, conn, executor=ex)
     assert r.added == 2 and stats(conn)["fonts"] == 3
@@ -438,7 +438,7 @@ def test_cmap_gc_on_incremental(tmp_path):
     build_font(d / "a.ttf", chars="永中木水火", family="A體")
     build_font(d / "b.ttf", chars="永中木水火", family="B體")   # 与 a 共享 cmap
     build_font(d / "c.ttf", chars="山河大海", family="C體")     # 独占 cmap
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     assert conn.execute("SELECT COUNT(*) FROM cmap_data").fetchone()[0] == 2
     (d / "c.ttf").unlink()
@@ -457,7 +457,7 @@ def test_update_index_defers_checkpoints(tmp_path):
     d = tmp_path / "fonts"
     d.mkdir()
     _mklib(d, n=3)
-    db = d / "fontindex.db"
+    db = d / "AssFontSubstitute.db"
     conn = open_db(db)
     update_index(d, conn)
     assert conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0] == 1000
@@ -472,7 +472,7 @@ def test_update_index_parallel_cancel(tmp_path):
     d = tmp_path / "fonts"
     d.mkdir()
     _mklib(d, n=5)
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     seen = []
 
     def progress(done, total, res):
@@ -499,7 +499,7 @@ def test_update_index_broken_pool_falls_back(tmp_path, monkeypatch):
     d = tmp_path / "fonts"
     d.mkdir()
     _mklib(d, n=3)
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     with ThreadPoolExecutor(max_workers=2) as ex:
         r = update_index(d, conn, executor=ex)
     assert not r.cancelled and r.added == 3
@@ -511,7 +511,7 @@ def test_update_index_real_process_pool(tmp_path):
     d = tmp_path / "fonts"
     d.mkdir()
     _mklib(d, n=2)
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     r = update_index(d, conn, max_threads=2)
     assert r.added == 2 and stats(conn)["fonts"] == 2
 
@@ -526,7 +526,7 @@ def test_name_langs_roundtrip(tmp_path):
     d.mkdir()
     build_font(d / "a.ttf", chars="永", family="TestFam",
                extra_aliases={"zh-CN": "简体家族", "zh-TW": "繁體家族"})
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     row = next(load_font_rows(conn))
     nl = json.loads(row[7])            # 列序见 test_cmap_dedup_and_roundtrip
@@ -544,7 +544,7 @@ def test_name_records_blob_roundtrip(tmp_path):
     d = tmp_path / "fonts"
     d.mkdir()
     build_font(d / "a.ttf", chars="永", family="TestFam")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     (blob,) = conn.execute(
         "SELECT name_records FROM fonts WHERE rel_path='a.ttf'").fetchone()
@@ -573,7 +573,7 @@ def test_update_index_parallel_deleted_between_scan_and_dispatch(tmp_path, monke
         return [*real_scan(root), ghost]   # 扫描窗口内还在，stat 前被删
 
     monkeypatch.setattr(st_mod, "scan_dir", scan_with_ghost)
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     with ThreadPoolExecutor(max_workers=2) as ex:
         r = update_index(d, conn, executor=ex)
     assert r.added == 3                       # 幽灵不计入
@@ -596,7 +596,7 @@ def test_update_index_parallel_deleted_between_scan_and_dispatch(tmp_path, monke
                 raise OSError(2, "gone")
         return real_stat(self, *a, **kw)
     monkeypatch.setattr(type(victim), "stat", stat_delete_on_second)
-    conn2 = open_db(d / "fontindex.db")
+    conn2 = open_db(d / "AssFontSubstitute.db")
     with ThreadPoolExecutor(max_workers=2) as ex:
         r2 = update_index(d, conn2, executor=ex)
     assert r2.changed == 2                    # changed 在扫描期已计（幻影计数，
@@ -604,7 +604,7 @@ def test_update_index_parallel_deleted_between_scan_and_dispatch(tmp_path, monke
                                               # 不炸不跳整个任务
     assert stats(conn2)["fonts"] == 3
     monkeypatch.undo()                        # 下轮真实扫描：removed 收敛
-    conn3 = open_db(d / "fontindex.db")
+    conn3 = open_db(d / "AssFontSubstitute.db")
     r3 = update_index(d, conn3, executor=ThreadPoolExecutor(max_workers=2))
     assert r3.removed == 1 and stats(conn3)["fonts"] == 2
 
@@ -651,7 +651,7 @@ def test_serial_progress_reaches_total_on_skip(tmp_path, monkeypatch):
         return real_parse(p)
 
     monkeypatch.setattr(store_mod, "parse_font_file", parse_then_delete_next)
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     calls = []
     update_index(
         d, conn, max_threads=1,

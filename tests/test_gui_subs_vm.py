@@ -332,7 +332,7 @@ def lib_env(tmp_path):
     build_font(d / "f.ttf", chars="永中木", family="FAR方", shape="box")
     from ass_font_substitute.core.fontindex.store import open_db
     from ass_font_substitute.core.fontindex.store import update_index
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     conn.close()
     from ass_font_substitute.core.fontindex.library import LibraryIndex

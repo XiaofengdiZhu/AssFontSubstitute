@@ -45,7 +45,7 @@ def world(tmp_path):
     # 搜索器直接跳过——见 FontSearcher._evaluate）
     build_font(d / "song.ttf", chars="永中木的水好", family="测试宋体",
                shape="box")
-    conn = open_db(d / "fontindex.db")
+    conn = open_db(d / "AssFontSubstitute.db")
     update_index(d, conn)
     conn.close()
     sub = tmp_path / "demo.ass"

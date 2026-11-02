@@ -165,7 +165,7 @@ class LibraryIndex:
         """单目录装载；任何异常（sqlite3.Error / zlib.error / json 等）
         由 _load 捕获降级 offline——sqlite3.Error 之外的类型同样可能
         （坏块穿透到解压/JSON 层），故这里捕 Exception。"""
-        conn = open_db(d / "fontindex.db")
+        conn = open_db(d / DB_NAME)
         try:
             # v2：缓存键含 inst_index（同文件各实例行 face_index 相同，只按
             # (rel, fi) 键会互相串指纹）
