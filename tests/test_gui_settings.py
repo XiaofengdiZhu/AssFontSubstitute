@@ -269,8 +269,11 @@ def test_wheel_filter_blocks_only_registered(qapp):
     other = QSlider(host)
     card.slider = slider
     wheel = QEvent(QEvent.Type.Wheel)
-    assert card.eventFilter(slider, wheel) is True      # 注册过的控件被拦
-    assert card.eventFilter(other, wheel) is False      # 未注册的放行
+    # 全拦语义（2026-11-03 拍板 B）：卡内任意子控件 Wheel 均拦——旧白
+    # 名单只认 slider/spin/spin_max，五张带 ComboBox 的卡挂设永不匹配
+    # 成死代码，qfw 哪天让 ComboBox 吃滚轮就会误改设置
+    assert card.eventFilter(slider, wheel) is True
+    assert card.eventFilter(other, wheel) is True
     assert card.eventFilter(slider, QEvent(QEvent.Type.None_)) is False
 
 
@@ -463,11 +466,13 @@ def test_size_card_range_slider(qapp, tmp_path):
     assert page.range_slider.values() == (50, 149)
     assert (s.get("size_min"), s.get("size_max")) == (0.50, 1.49)
     page.range_slider._drag = None
-    # 滚轮拦截：框属性补挂到 card 后 _WheelFreeCard 名单才命中
+    # 滚轮拦截：全拦语义（2026-11-03 拍板 B），slider/spin/任意子控件
+    # 均拦（含此前永不匹配的 ComboBox 挂设，现为活保护）
     from PySide6.QtCore import QEvent
     wheel = QEvent(QEvent.Type.Wheel)
     assert page.size_card.eventFilter(page.spin, wheel) is True
     assert page.size_card.eventFilter(page.spin_max, wheel) is True
+    assert page.size_card.eventFilter(page.lang_combo, wheel) is True   # ComboBox 挂设现为活保护
     # 框定宽：数值位数变化不顶滑块挪位
     assert page.spin.minimumWidth() == page.spin.maximumWidth() > 0
     page.deleteLater()

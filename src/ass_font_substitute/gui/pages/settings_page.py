@@ -86,13 +86,14 @@ def _sample_brief(text: str) -> str:
 
 
 class _WheelFreeCard(SettingCard):
-    """滚轮事件拦截：卡片内控件不响应滚轮，避免滚动设置页时误改数值。
-    只拦经 installEventFilter 挂进来的控件——每个交互控件都要显式挂。"""
+    """滚轮事件拦截：卡片内任意子控件不响应滚轮，避免滚动设置页时
+    误改数值。此前白名单只认 slider/spin/spin_max 属性，五张带
+    ComboBox 的卡挂了过滤器永不匹配（qfw ComboBox 现不响应滚轮故无
+    实害，审查三轮）；qfw 若哪天让 ComboBox 吃滚轮，滚轮滑过设置页
+    就会误改语言/主题——改全拦，卡内无滚动子控件，无副作用。"""
 
     def eventFilter(self, watched, event):
-        if event.type() == QEvent.Type.Wheel and watched in (
-                getattr(self, "slider", None), getattr(self, "spin", None),
-                getattr(self, "spin_max", None)):
+        if event.type() == QEvent.Type.Wheel:
             return True
         return super().eventFilter(watched, event)
 
