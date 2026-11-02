@@ -46,6 +46,9 @@ scripts\build_portable.bat                        # 打包（cmd 下跑，需 VS
 - 人工纠偏放 `gen_translations.py` 的 `_OVERRIDES`；源串从代码消失时 `test_gui_i18n` 会报红。
 - vm 层数据保持简体源值（兼作逻辑键）；只在渲染处经 `gui/vm_text.py`（context `"vm"`）翻译。动态值须用 `QT_TRANSLATE_NOOP` 登记，否则 lupdate 提取不到。
 - `userData`/设置里存源值，不存译文。
+- 动态拼接文案（f-string/format）的字面量必须提出模板单独过 `tr` 再拼：
+  lupdate 提取不到 f-string 内嵌的 `tr()`，且 `.ts` 同步守卫对此盲区
+  （fresh 与已提交两边同样看不见，恒等不报红），繁体界面会残留简体。
 - `gui/lang_names_data.py` 为生成数据（生成脚本已删），勿手改结构。
 
 ## UI 约定
