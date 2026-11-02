@@ -52,8 +52,9 @@ def test_picker_close_cancels_reco_and_none_payload_hides_rec(qapp, tmp_path):
     host.resize(1100, 750)
     dlg = FontPickerDialog(s, w, ents, chars=set("永宇"), parent=host)
 
-    # 提交带了取消标志字典（列表里混有预览渲染的 plist 任务，按 tag 找）
-    reco = next(t for t in w.submits if t[0] == "pickreco")
+    # 提交带了取消标志字典（列表里混有预览渲染的 plist 任务，按 tag 前缀找；
+    # 三轮审查后 tag 带弹窗实例序号 pickreco:N）
+    reco = next(t for t in w.submits if t[0].startswith("pickreco:"))
     cancel = reco[2][3]
     assert cancel == {"cancelled": False}
 
@@ -62,7 +63,7 @@ def test_picker_close_cancels_reco_and_none_payload_hides_rec(qapp, tmp_path):
     assert cancel["cancelled"] is True
 
     # 取消/空载荷的回执：解订阅、不显示推荐区
-    dlg._on_reco("pickreco", None)
+    dlg._on_reco(dlg._reco_tag, None)
     assert dlg._reco is None
     assert not dlg.rec_title.isVisible()
 
@@ -439,3 +440,42 @@ def test_filter_bar_strike_resets_after_fill(qapp):
     bar.fill()
     assert bar.cb_script.currentIndex() == 0
     assert bar.cb_script.font().strikeOut() is False
+
+
+def test_stale_cancel_receipt_does_not_steal_new_dialog_subscription(
+        qapp, tmp_path, monkeypatch):
+    # 审查三轮 P1 回归：worker.result 单通道广播 + tag 固定 "pickreco"
+    # 时，前一弹窗已取消任务的迟到回执会冒充新弹窗的回执（_on_reco 收
+    # 首个同 tag 回执即 disconnect）——B 的「推荐」区静默永不出现。
+    # tag 改 pickreco:N（自增序号，不用 id(self)：关即删后 CPython 可能
+    # 复用地址，新弹窗同 id 则旧回执照样冒充）后，迟到的 A 回执 tag 不
+    # 匹配 B，B 的订阅吃得到自己的载荷。offscreen 序列：A 打开→回执→
+    # B 打开→emit A 的取消回执→emit B 的载荷→B 正常显示
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+
+    s = Settings(tmp_path / "s.json")
+    # _FakeWorker.result 是 Signal，直接 emit 模拟回执不经 submit
+    w = _FakeWorker()
+    ents = [_ent("fp1", "甲字体"), _ent("fp2", "乙字体")]
+    host = QWidget()
+    a = FontPickerDialog(s, w, ents, chars=set("永宇"), parent=host)
+    a_tag = next(t[0] for t in w.submits if t[0].startswith("pickreco:"))
+    assert a_tag != "pickreco"               # 序号化 tag 钉死
+    w.result.emit(a_tag, [_ent("fp1", "甲字体")])   # A 收到自身载荷
+    assert a._reco is not None
+
+    b = FontPickerDialog(s, w, ents, chars=set("永宇"), parent=host)
+    b_tag = next(t[0] for t in w.submits if t[0].startswith("pickreco:")
+                 and t[0] != a_tag)
+    assert b_tag != a_tag
+    # A 的迟到取消回执（空载荷）先到：不得吃掉 B 的订阅
+    w.result.emit(a_tag, None)
+    assert b._reco is None
+    # B 自己的回执到达：订阅仍活着，推荐区出
+    payload = [_ent("fp2", "乙字体")]
+    w.result.emit(b_tag, payload)
+    assert b._reco == payload
+    assert b.rec_title.isVisibleTo(b)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import itertools
+
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QVBoxLayout
@@ -16,6 +18,13 @@ from ass_font_substitute.gui.preview_vm import PreviewVM
 from ass_font_substitute.gui.widgets.font_filter import FontFilterBar
 from ass_font_substitute.gui.widgets.font_filter import PreviewTools
 from ass_font_substitute.gui.widgets.font_list import FontListWidget
+
+# pickreco 回执 tag 自增序号：worker.result 是单通道广播，tag 固定
+# "pickreco" 时前一弹窗已取消任务的迟到回执会冒充新弹窗的回执，
+# 吃掉其单次订阅 →「推荐」区静默永不出现（审查三轮 P1 offscreen 实锤）。
+# 不用 id(self)：WA_DeleteOnClose 关即删后 CPython 可能复用地址，新弹窗
+# 同 id 则旧回执照样冒充——自增序号全局唯一无此窗口
+_PICKRECO_SEQ = itertools.count()
 
 
 class FontPickerDialog(MessageBoxBase):
@@ -126,9 +135,10 @@ class FontPickerDialog(MessageBoxBase):
         self._reload_all()
 
         if chars:
+            self._reco_tag = f"pickreco:{next(_PICKRECO_SEQ)}"
             worker.result.connect(self._on_reco)
             self._reco_cancel = {"cancelled": False}
-            worker.submit("pickreco", _reco_job, chars,
+            worker.submit(self._reco_tag, _reco_job, chars,
                           float(settings.get("cov_threshold")), direction,
                           self._reco_cancel)
             # 关弹窗（取消/选定/ESC/宿主窗口关闭，均经 done→finished）即
@@ -150,7 +160,7 @@ class FontPickerDialog(MessageBoxBase):
             [e for e in self._reco or [] if e.fingerprint in shown]))
 
     def _on_reco(self, tag, payload):
-        if tag != "pickreco":
+        if tag != self._reco_tag:
             return
         self.worker.result.disconnect(self._on_reco)
         self._reco = payload
@@ -174,6 +184,8 @@ class FontPickerDialog(MessageBoxBase):
         self.accept()
 
     _reco = None
+    _reco_tag = None   # ctor chars 分支赋值；未提交时 _on_reco 不可达，
+                       # None 兜底比对恒 False 防 AttributeError
 
 
 def _reco_job(ctx, chars, cov_threshold, direction, cancel=None):
