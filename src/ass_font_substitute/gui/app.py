@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -16,7 +17,6 @@ from PySide6.QtGui import QFont
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
-from PySide6.QtWidgets import QMessageBox
 from qfluentwidgets import BodyLabel
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import FluentWindow
@@ -323,30 +323,21 @@ class AFSWindow(FluentWindow):
 
     def closeEvent(self, e):
         self._save_geometry()
-        lib_ok = self.library_page.shutdown()   # 先汇合在途索引线程（写库中不能退）
-        self.worker.shutdown()                  # 排空取消积压任务再放哨兵
-        worker_ok = self.worker.wait(10000)
-        if not (lib_ok and worker_ok) and not self._confirm_exit_anyway():
-            e.ignore()
-            return
+        # 合作收尾各给 2s 宽限：索引线程撤单汇合 + worker 排空取消在途
+        # 前的积压（空闲关窗瞬间过，最坏串行 ~4s 短暂无响应）。超时仍
+        # 活着直接 os._exit：全项目落盘皆崩溃安全（SQLite WAL+逐文件
+        # 事务、字幕 tmp+os.replace 原子写），硬杀不损坏数据，仅索引
+        # 在途文件进度作废（增量索引下次自动续）、偶留 .tmp 残骸；跳过
+        # Qt 清理避开 QThread destroyed 硬崩，也不再有「继续等待」归还
+        # 死 worker 的卡死分支（审查三轮 P2，用户拍板 2026-11-02）。
+        # os._exit 跳过 atexit：进程池子进程靠父进程管道断开自退，可能
+        # 晚几秒，无害。
+        lib_ok = self.library_page.shutdown()
+        self.worker.shutdown()
+        worker_ok = self.worker.wait(2000)
+        if not (lib_ok and worker_ok):
+            os._exit(0)
         super().closeEvent(e)
-
-    def _confirm_exit_anyway(self) -> bool:
-        """线程未在预算内收尾：让用户选「继续等待」（忽略本次关闭）或
-        「强制退出」。静默带活线程退出 = QThread destroyed 硬崩 + 写库
-        可能半截。worker 队列已被 shutdown 排空取消，超时只剩单个在途
-        任务（不可中断），重试关闭通常几秒内即过。"""
-        box = QMessageBox(self)
-        box.setWindowTitle(self.tr("后台任务未结束"))
-        box.setText(self.tr("后台任务仍在收尾（可能正在写盘）。\n"
-                            "强制退出可能损坏数据。建议稍等片刻再关闭窗口。"))
-        wait_btn = box.addButton(self.tr("继续等待"),
-                                 QMessageBox.ButtonRole.AcceptRole)
-        box.addButton(self.tr("强制退出"),
-                      QMessageBox.ButtonRole.DestructiveRole)
-        box.setEscapeButton(wait_btn)   # Esc/点 X=默认继续等待，非强制退出
-        box.exec()
-        return box.clickedButton() is not wait_btn
 
     # ---- 窗口位置/大小记忆 ----
 

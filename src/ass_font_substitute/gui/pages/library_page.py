@@ -738,14 +738,14 @@ class LibraryPage(ScrollArea):
 
     def shutdown(self) -> bool:
         """退出汇合：取消在途索引更新并等待线程收尾（窗口关闭时先于
-        worker.shutdown 调用，避免索引线程写库时进程直接退出）。
-        返回是否已收尾；False 时调用方须提示用户（进程带写库线程退出
-        = db 截断风险+退出崩）。cancel 只在文件间生效，单文件大字库
-        解析可超 5s。"""
+        worker.shutdown 调用，给合作退出一个机会）。返回是否已收尾；
+        False 时 app.closeEvent 走 os._exit 硬杀（SQLite WAL+事务保证
+        不损坏，2026-11-02 拍板）——本方法只管 2s 宽限内能撤则撤。cancel
+        只在文件间生效，单文件大字库解析可超 2s。"""
         w = self._index_worker
         if w is not None and w.isRunning():
             w.cancel()
-            return bool(w.wait(5000))
+            return bool(w.wait(2000))
         return True
 
     # ---- 失败清单 ----

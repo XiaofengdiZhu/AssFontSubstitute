@@ -23,24 +23,6 @@
             <source>ASS 字体替补</source>
             <translation>ASS 字型替補</translation>
         </message>
-        <message>
-            <source>后台任务未结束</source>
-            <translation>後臺任務未結束</translation>
-        </message>
-        <message>
-            <source>后台任务仍在收尾（可能正在写盘）。
-强制退出可能损坏数据。建议稍等片刻再关闭窗口。</source>
-            <translation>後臺任務仍在收尾（可能正在寫盤）。
-強制退出可能損壞資料。建議稍等片刻再關閉視窗。</translation>
-        </message>
-        <message>
-            <source>继续等待</source>
-            <translation>繼續等待</translation>
-        </message>
-        <message>
-            <source>强制退出</source>
-            <translation>強制退出</translation>
-        </message>
     </context>
     <context>
         <name>BrowsePage</name>

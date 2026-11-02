@@ -78,7 +78,8 @@ def test_core_worker_shutdown_cancels_queued(qapp, tmp_path, monkeypatch):
 
 
 def test_core_worker_shutdown_idempotent(qapp, tmp_path, monkeypatch):
-    # closeEvent「继续等待」路径二次调用：残留哨兵 None 不得炸 item[0]
+    # shutdown 幂等（closeEvent 与测试清理各自调用）：残留哨兵 None 不得
+    # 炸 item[0]
     w = _mk(qapp, tmp_path, monkeypatch)
     w.start()
     w.shutdown()

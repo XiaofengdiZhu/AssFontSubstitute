@@ -969,3 +969,61 @@ def test_initial_page_routes_by_library(qapp, tmp_path, monkeypatch):
     assert w.stackedWidget.isAnimationEnabled
     assert w.navigationInterface.isIndicatorAnimationEnabled()
     w.close()
+
+
+def test_close_event_idle_closes_normally(qapp, tmp_path, monkeypatch):
+    # 关窗收尾拍板（2026-11-02）：空闲关窗（索引线程/worker 均闲）2s 宽限
+    # 内即汇合完成，正常走 Qt 关闭链，不触发 os._exit
+    import ass_font_substitute.gui.app as app_mod
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    s = Settings(tmp_path / "s.json")
+    w = AFSWindow(s)
+    exits = []
+    monkeypatch.setattr(app_mod.os, "_exit", lambda code: exits.append(code))
+    w.close()
+    assert exits == []
+    assert not w.worker.isRunning()
+
+
+def test_close_event_busy_worker_hard_exits(qapp, tmp_path, monkeypatch):
+    # 在途任务不可中断且超 2s 宽限：closeEvent 直接 os._exit(0)——SQLite
+    # WAL+事务/字幕原子写保证硬杀不损坏；「继续等待」归还死 worker 的
+    # 卡死分支已随对话框一并删除（审查三轮 P2，拍板 2026-11-02）
+    import time as _time
+
+    import ass_font_substitute.gui.app as app_mod
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path))
+    s = Settings(tmp_path / "s.json")
+    w = AFSWindow(s)
+    w.worker.start()
+
+    class _HardExit(Exception):
+        pass
+
+    def fake_exit(code):
+        raise _HardExit(code)
+
+    started = []
+
+    def slow(ctx):
+        started.append(1)
+        _time.sleep(2.5)
+
+    w.worker.submit("slow", slow)
+    deadline = _time.time() + 5
+    while not started and _time.time() < deadline:
+        _time.sleep(0.01)   # 等任务真开跑：排队中提交会被 shutdown 排空取消
+    assert started
+    monkeypatch.setattr(app_mod.os, "_exit", fake_exit)
+    try:
+        w.close()
+    except _HardExit:
+        pass
+    else:
+        raise AssertionError("宽限超时未走 os._exit")
