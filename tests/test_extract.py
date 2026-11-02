@@ -393,6 +393,39 @@ def test_probe_misfire_falls_back_to_bisect(monkeypatch, tmp_path):
     assert "第 16 行" in r.skipped_lines[0]
 
 
+def test_probe_crlf_fast_path(monkeypatch, tmp_path):
+    # 探针剥行尾断行符的要害修：CRLF 行尾 \r\n 混进末域曾把好行全判炸。
+    # CRLF 换行 + 尾部坏行必须走快路径（2 次全量解析）
+    bad = "Dialogue: 0,xx:yy,0:00:05.00,Main,,0,0,0,,坏行不拖全文件"
+    text = "\r\n".join([*ASS.split("\n"), bad, ""])   # 尾随空串→末行带换行
+    calls = _count_full_parses(monkeypatch)
+    r = extract_usages(_write(tmp_path, text))
+    assert r.parse_error is None
+    assert len(r.skipped_lines) == 1
+    assert len(calls) == 2, f"全量解析 {len(calls)} 次，快路径失效"
+
+
+def test_probe_info_dup_key_last_wins(monkeypatch, tmp_path):
+    # Script Info 重复键采最终值（_init_from_dict 只解析每键最后一行）：
+    # 先坏后好（Timer: x → Timer: 1.0）整文件解析即合法，主路径一次过、
+    # 不进降级；若探针逐行即探，将来别处触发降级时会冤枉前一行坏键
+    text = ASS.replace("Title: t", "Timer: x\nTimer: 1.0")
+    calls = _count_full_parses(monkeypatch)
+    r = extract_usages(_write(tmp_path, text))
+    assert r.parse_error is None
+    assert r.skipped_lines == []
+    assert len(calls) == 1, "重复键先坏后好不应触发降级"
+
+    # 真降级场景：另有坏行触发降级时，探针不得冤枉被终值覆盖的坏键行
+    text += "Dialogue: 0,xx:yy,0:00:05.00,Main,,0,0,0,,坏行\n"
+    calls = _count_full_parses(monkeypatch)
+    r = extract_usages(_write(tmp_path, text, name="b.ass"))
+    assert r.parse_error is None
+    assert len(r.skipped_lines) == 1
+    assert "第 17 行" in r.skipped_lines[0]   # 快照 40 字截断，按行号钉
+    assert len(calls) == 2, f"全量解析 {len(calls)} 次，快路径失效"
+
+
 def test_undecodable_tail_still_parse_error(tmp_path):
     # 降级的前提是行文本可解：>64KB 处非法序列 decode 失败 → 保持原错误
     p = tmp_path / "big.ass"

@@ -253,7 +253,7 @@ def test_settings_concurrent_set_threadsafe(tmp_path):
     assert (tmp_path / "s.json.tmp").exists() is False
 
 
-def test_wheel_filter_blocks_only_registered(qapp):
+def test_wheel_filter_blocks_all_installed_children(qapp):
     pytest.importorskip("PySide6")
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QEvent

@@ -139,17 +139,24 @@ def _flag_culprit_lines(lines: list[str]) -> set[int]:
     （后现身的同名节沿用先前 Format，故 fmt 按节名记、不随节头重置）；
     节头前的行入 Unknown 被丢，不探。Format 生效关系 = 节内最后一条
     （from_lines 后者覆写前者），探针带上它保证非默认 Format 的域错同样
-    现形。
+    现形。Script Info 重复键采最终值（_init_from_dict 只解析每个键最后
+    一次出现的行），探针按键延迟到收尾只探终值行——逐行即探会冤枉
+    「先坏后好」的同名键行。
 
     只作预筛不终判：误报（剔除好行）与漏报（非行局部失败形态）均由
-    调用方剔除后的整文件复核解析兜底。"""
+    调用方剔除后的整文件复核解析兜底。
+    前置条件：text 已经 _SPLIT_ONLY_TABLE 归一（splitlines 独有断行符
+    已剔除），否则 keepends 行尾残留杂质会令探针与整文件口径漂移。"""
     flagged: set[int] = set()
     section: str | None = None
     fmt: dict[str, str | None] = {}   # 节名 -> 最后一条 Format 行
+    # 节名 -> {大写键: (行号, 行文本)}；收尾只探每键最后一次出现
+    info_pending: dict[str, dict[str, tuple[int, str]]] = {}
     for i, ln in enumerate(lines):
         # 探针行剥行尾断行符（from_lines 按行收 Sequence，不自行切分，
-        # 尾部 \r\n 会混进末域把好行也判炸）
-        ln = ln.rstrip("\r\n")
+        # 尾部断行符会混进末域把好行也判炸；覆盖 str.splitlines 全部
+        # 独有断行符，归一遗漏时也不与整文件口径漂移）
+        ln = ln.rstrip("\r\n\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029")
         stripped = ln.lstrip(" \t")
         if stripped[:1] == "[":
             end = stripped.find("]")
@@ -182,10 +189,15 @@ def _flag_culprit_lines(lines: list[str]) -> set[int]:
                 except Exception:
                     flagged.add(i)
         elif section == "Script Info":
+            if ln[:1] not in (";", "!"):   # 注释/消息行不进解析器，不探
+                key = ln.partition(":")[0].strip().upper()
+                info_pending.setdefault(section, {})[key] = (i, ln)
+    for pending in info_pending.values():
+        for j, iln in pending.values():
             try:
-                ScriptInfo.from_lines([ln], strict=False)
+                ScriptInfo.from_lines([iln], strict=False)
             except Exception:
-                flagged.add(i)
+                flagged.add(j)
     return flagged
 
 
@@ -205,7 +217,9 @@ def _reload_skip_bad_lines(text: str) -> tuple[Document | None, list[str], str]:
     返回 (doc, 剔除行描述, 实际参与解析的文本)——第三个返回值供提取侧
     的文本级扫描与 doc 内容保持同源（Format 行被剔除时扫原文会全量误判
     失效）。彻底失败返回 (None, [], "")。
-    行文本按原编码不可解时调用方直接走原错误，不进本函数。"""
+    行文本按原编码不可解时调用方直接走原错误，不进本函数。
+    前置条件：text 已经过 _SPLIT_ONLY_TABLE 归一（调用方 extract_usages
+    负责），探针口径依赖这一前提。"""
     lines = text.splitlines(keepends=True)
 
     def _skip_msg(i: int) -> str:

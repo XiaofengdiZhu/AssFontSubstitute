@@ -86,11 +86,13 @@ def _sample_brief(text: str) -> str:
 
 
 class _WheelFreeCard(SettingCard):
-    """滚轮事件拦截：卡片内任意子控件不响应滚轮，避免滚动设置页时
-    误改数值。此前白名单只认 slider/spin/spin_max 属性，五张带
-    ComboBox 的卡挂了过滤器永不匹配（qfw ComboBox 现不响应滚轮故无
-    实害，审查三轮）；qfw 若哪天让 ComboBox 吃滚轮，滚轮滑过设置页
-    就会误改语言/主题——改全拦，卡内无滚动子控件，无副作用。"""
+    """滚轮事件拦截：已 installEventFilter 的子控件滚轮一律吃掉，避免
+    滚动设置页时误改数值（Wheel 被消费不再冒泡给 ScrollArea，光标悬在
+    受拦控件上时页面不滚——与滑杆/数值框既有取舍一致，防误改优先）。
+    此前白名单只认 slider/spin/spin_max 属性，五张带 ComboBox 的卡挂了
+    过滤器永不匹配（qfw ComboBox 现不响应滚轮故无实害，审查三轮）；
+    qfw 若哪天让 ComboBox 吃滚轮，滚轮滑过设置页就会误改语言/主题——
+    改全拦。注意按需逐控件挂设：卡内 LineEdit 等未挂者不拦。"""
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.Wheel:
@@ -467,9 +469,6 @@ class SettingsPage(ScrollArea):
             s.setFixedWidth(
                 s.fontMetrics().horizontalAdvance(f"{hi_pct}%") + 38)
             s.installEventFilter(card)            # _WheelFreeCard 滚轮拦截
-        # _WheelFreeCard 名单按 card 属性匹配；框属性挂在 page（self.spin），
-        # 补挂到 card 拦截才生效
-        card.spin, card.spin_max = self.spin, self.spin_max
 
         def _commit():
             low_, hi_ = self.range_slider.values()
