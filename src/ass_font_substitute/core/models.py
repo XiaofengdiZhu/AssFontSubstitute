@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from dataclasses import field
 from itertools import chain
 
-# 键即 Unicode 码点的 cmap 子表：platform 0 全系、(3,0) symbol、
-# (3,1) BMP、(3,10) UCS-4
+# 键即 Unicode 码点的 cmap 子表：platform 0 全系、(3,0) symbol（键是
+# 伪码点，采集时折叠 PUA，见 from_cmap_subtables）、(3,1) BMP、(3,10) UCS-4
 CMAP_UNICODE_KEYS = frozenset({
     (0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (0, 6),
     (3, 0), (3, 1), (3, 10),
@@ -85,7 +85,15 @@ class CmapRanges:
                 continue
             for code in t.cmap:
                 if codec is None:
-                    cps.add(code)
+                    # (3,0) symbol 子表：键是 0x00-0xFF 伪码点，GDI 经 PUA
+                    # U+F000+code 取形——直取会把 256 个伪码点当 ASCII/Latin
+                    # 码点入集（total_chars 虚增、纯 symbol 字体虚盖 ASCII，
+                    # 审查三轮 P2），折叠到对应 PUA 码点。仅记账：实测主流
+                    # 字体已无 (3,0) 表
+                    if key == (3, 0):
+                        cps.add(0xF000 | code)
+                    else:
+                        cps.add(code)
                 else:
                     # 单双字节都经码页解出：cp932 单字节 0xA1-0xDF 是半角
                     # 片假名（U+FF61 起），直取会错记成 U+00A1-U+00DF 拉丁

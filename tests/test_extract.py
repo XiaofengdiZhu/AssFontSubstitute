@@ -275,6 +275,40 @@ def test_transform_fn_comment_reference_only(tmp_path):
     assert len(by["華康註解換體"].chars) == 0
 
 
+def test_transform_truncated_paren_fn_no_ghost_bucket(tmp_path):
+    # 审查三轮 P2：\\t 内嵌 \\fn 名带未配对 "(" 时 light_ass 连整个
+    # TransformTag raw 一起截，fn 名只剩半截（真名 Old(Bar)X 建成
+    # Old(Bar)）——半截名建桶即幽灵桶，幽灵键进映射、rewrite 侧
+    # lookahead ")" 命中半截键产出错名。按括号配对甄别，不配对按
+    # 无引用处理：不建桶（半截/真名都不建），文字照常归样式字体
+    line = ("Dialogue: 0,0:00:12.00,0:00:14.00,Main,,0,0,0,,"
+            "{\\t(0,1000,\\fnOld(Bar)X)}動畫")
+    r = extract_usages(_write(tmp_path, ASS + line + "\n"))
+    by = {u.norm_name: u for u in r.usages}
+    assert "old(bar" not in by
+    assert "old(bar)x" not in by
+    # 动画字体豁免后整行文字保守归样式字体，不虚高覆盖率
+    assert {"動", "畫"} <= set(by["華康主體w5"].chars)
+    # 同行合法引用不受殃及：截断前的完整 fn 照常建桶
+    line2 = ("Dialogue: 0,0:00:12.00,0:00:14.00,Main,,0,0,0,,"
+             "{\\t(0,1000,\\fn華康變換體\\fnOld(Bar)X)}動畫")
+    r2 = extract_usages(_write(tmp_path, ASS + line2 + "\n"))
+    by2 = {u.norm_name: u for u in r2.usages}
+    assert "華康變換體" in by2
+    assert "old(bar" not in by2
+
+
+def test_transform_balanced_paren_fn_bucketed(tmp_path):
+    # 配对形态对照钉子：fn raw 括号配对时照常建桶（light_ass 口径
+    # raw 后缀 "\fn" 即全名），甄别只剔不配对的截断形态
+    line = ("Dialogue: 0,0:00:12.00,0:00:14.00,Main,,0,0,0,,"
+            "{\\t(0,1000,\\fnOld(Bar))}動畫")
+    r = extract_usages(_write(tmp_path, ASS + line + "\n"))
+    by = {u.norm_name: u for u in r.usages}
+    assert "old(bar)" in by
+    assert by["old(bar)"].inline_count == 1
+
+
 def test_bad_line_degraded_not_whole_file_lost(tmp_path):
     # 审查二轮 P1：单条畸形行（缺 10 域/坏时间）曾让 Document.load 整文件
     # 报废——降级剔除坏行重载，其余行照常提取，skipped_lines 记行号

@@ -83,3 +83,17 @@ def test_from_cmap_subtables_unicode_keys_untouched():
     for pid, eid in ((0, 3), (3, 1), (3, 10)):
         t = _fake_table(pid, eid, {0x4E00: "g"})
         assert CmapRanges.from_cmap_subtables([t]).contains(0x4E00)
+
+
+def test_from_cmap_subtables_symbol_keys_folded_to_pua():
+    # 审查三轮 P2：(3,0) symbol 子表键是 0x00-0xFF 伪码点，GDI 经 PUA
+    # U+F000+code 取形——直取会把 256 个伪码点当 ASCII/Latin 码点入集
+    # （total_chars 虚增、纯 symbol 字体虚盖 ASCII），折叠到对应 PUA
+    from ass_font_substitute.core.models import CmapRanges
+
+    t = _fake_table(3, 0, {0x41: "g1", 0xF0: "g2"})
+    r = CmapRanges.from_cmap_subtables([t])
+    assert not r.contains(ord("A"))          # 不再虚盖 ASCII
+    assert r.contains(0xF000 | 0x41)         # 折叠到 PUA
+    assert r.contains(0xF000 | 0xF0)
+    assert r.total_chars() == 2

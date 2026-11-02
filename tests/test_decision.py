@@ -40,3 +40,45 @@ def test_connect_pragmas_match_store_conventions(tmp_path):
     assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1   # NORMAL
     assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
     conn.close()
+
+
+def test_legacy_db_without_version_table_keeps_data(tmp_path):
+    # 审查三轮 P2：存量库无 schema_version 表——补钉当前版本、数据保留
+    # （记忆不丢），不能误判重建
+    import sqlite3
+    db = tmp_path / "decisions.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE decisions(norm_name TEXT, direction TEXT, "
+                 "fingerprint TEXT, keep INTEGER, updated_at REAL, "
+                 "PRIMARY KEY(norm_name, direction))")
+    conn.execute("INSERT INTO decisions VALUES ('旧库字体','t2s','fp0',1,0)")
+    conn.commit()
+    conn.close()
+    assert latest_decision(db, "旧库字体", "t2s") == ("fp0", True)
+    from ass_font_substitute.core.decision.store import SCHEMA_VERSION
+    conn = sqlite3.connect(db)
+    assert conn.execute("SELECT v FROM schema_version").fetchone()[0] \
+        == SCHEMA_VERSION
+    conn.close()
+
+
+def test_schema_version_mismatch_rebuilt(tmp_path):
+    # 审查三轮 P2：未来加列/改键递增版本后，旧库版本不符备份 .bak 重建
+    # 空库（fontindex 口径）——否则 CREATE TABLE IF NOT EXISTS 对旧库
+    # 静默跳建，INSERT 列数不匹配直穿
+    import sqlite3
+
+    from ass_font_substitute.core.decision.store import DDL
+    from ass_font_substitute.core.decision.store import SCHEMA_VERSION
+    db = tmp_path / "decisions.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(DDL)
+    conn.execute("INSERT INTO schema_version VALUES (?)",
+                 (SCHEMA_VERSION + 1,))
+    conn.commit()
+    conn.close()
+    assert latest_decision(db, "x", "t2s") is None
+    assert (tmp_path / "decisions.db.bak").exists()
+    # 重建后照常读写
+    record_decision(db, "x", "t2s", "fp1")
+    assert latest_decision(db, "x", "t2s") == ("fp1", False)

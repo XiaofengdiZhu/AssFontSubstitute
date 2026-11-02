@@ -7,10 +7,16 @@ import time
 from contextlib import closing
 from pathlib import Path
 
+# schema 版本（照 fontindex 口径）：未来加列/改键时递增，旧库版本不符
+# 备份 .bak 重建——没有版本标记，CREATE TABLE IF NOT EXISTS 会对旧库
+# 静默跳建、INSERT 列数不匹配直穿（审查三轮 P2）
+SCHEMA_VERSION = 1
+
 DDL = """
 CREATE TABLE IF NOT EXISTS decisions(
   norm_name TEXT, direction TEXT, fingerprint TEXT, keep INTEGER,
   updated_at REAL, PRIMARY KEY(norm_name, direction));
+CREATE TABLE IF NOT EXISTS schema_version(v INTEGER NOT NULL);
 """
 
 
@@ -23,6 +29,15 @@ def _connect(db_path: Path) -> sqlite3.Connection:
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA busy_timeout=5000")
         conn.executescript(DDL)
+        row = conn.execute("SELECT v FROM schema_version").fetchone()
+        if row is None:
+            conn.execute("INSERT INTO schema_version VALUES (?)",
+                         (SCHEMA_VERSION,))
+            conn.commit()
+        elif row[0] != SCHEMA_VERSION:
+            conn.close()   # Windows：句柄不关，隔离 os.replace 必炸
+            _rebuild_stale(db_path)
+            return _connect(db_path)
     except sqlite3.DatabaseError:
         conn.close()   # Windows：句柄不关，隔离 os.replace 必炸
         raise
@@ -33,7 +48,17 @@ def _rebuild_corrupt(db_path: Path) -> sqlite3.Connection:
     """记忆库损坏（非空但非法）→ 备份 .corrupt 重建空库（记忆可丢：只
     影响回放默认值，不损字幕数据）。旁车一并隔离，防旧 WAL 回放污染。
     主库被占用转译 OperationalError（打不上≠损坏，别炸调用方）。"""
-    bak = db_path.parent / (db_path.name + ".corrupt")
+    return _rebuild(db_path, ".corrupt")
+
+
+def _rebuild_stale(db_path: Path) -> None:
+    """schema 版本不符 → 备份 .bak（覆盖既有）重建空库（fontindex 口径：
+    旧库列结构对不上新 DDL，INSERT 列数不匹配直穿，只能弃）。"""
+    _rebuild(db_path, ".bak")
+
+
+def _rebuild(db_path: Path, suffix: str) -> None:
+    bak = db_path.parent / (db_path.name + suffix)
     try:
         os.replace(db_path, bak)
     except OSError as e:
@@ -46,7 +71,6 @@ def _rebuild_corrupt(db_path: Path) -> sqlite3.Connection:
             except OSError:
                 with contextlib.suppress(OSError):
                     p.unlink()
-    return _connect(db_path)
 
 
 def record_decision(db_path: Path, norm_name: str, direction: str,
@@ -61,7 +85,8 @@ def record_decision(db_path: Path, norm_name: str, direction: str,
     except sqlite3.OperationalError:
         raise                                # 打不开≠损坏（目录缺失/权限）
     except sqlite3.DatabaseError:
-        conn = _rebuild_corrupt(db_path)
+        _rebuild_corrupt(db_path)
+        conn = _connect(db_path)
     with closing(conn), conn:
         conn.execute("INSERT OR REPLACE INTO decisions VALUES (?,?,?,?,?)",
                      (norm_name, direction, fingerprint, int(keep), time.time()))
@@ -76,7 +101,8 @@ def latest_decision(db_path: Path, norm_name: str,
     except sqlite3.OperationalError:
         raise                                # 打不开≠损坏（目录缺失/权限）
     except sqlite3.DatabaseError:
-        conn = _rebuild_corrupt(db_path)     # 损坏：空库视角，读侧返 None
+        _rebuild_corrupt(db_path)            # 损坏：空库视角，读侧返 None
+        conn = _connect(db_path)
     try:
         row = conn.execute(
             "SELECT fingerprint, keep FROM decisions WHERE norm_name=? AND direction=?",

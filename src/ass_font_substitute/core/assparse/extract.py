@@ -51,6 +51,20 @@ def _transform_fns(tag) -> list:
     return [x for x in mods if getattr(x, "tag_name", None) == "fn"]
 
 
+def _fn_parens_balanced(tag) -> bool:
+    """\t 内嵌 \fn 的截断甄别：名字带未配对 "(" 时 light_ass 连整个
+    TransformTag 的 raw 一起截（TransformTag.raw 不以 ")" 收尾，fn 名
+    只剩半截、尾巴掉进后随 CommentNode；配对形态 fn raw 恒配对）。
+    半截名建桶即幽灵桶——幽灵键进映射，rewrite 侧 lookahead ")"
+    命中半截键、其后残余拼在替换值后产出错名（审查三轮 P2）。
+    按括号配对甄别，不配对按无引用处理（与解析失败同口径）。"""
+    raw = getattr(tag, "_raw", None)
+    if raw is None:
+        return True
+    s = raw.raw_str
+    return s.count("(") == s.count(")")
+
+
 def _fn_name(tag: FontNameTag) -> str:
     # \fn0 / \fn 空参是还原样式字体的重置信号：value 解析为 None，与原始串写法无关，
     # 故先看 value 再做原始串恢复，避免把 "0" 误判为字体名。
@@ -422,7 +436,7 @@ def _extract(doc: Document, embedded: list[str] | None = None,
                 # 状态不被动画切换影响（正文仍归样式/原字体）
                 for it in _transform_fns(node):
                     name = _fn_name(it)
-                    if name:
+                    if name and _fn_parens_balanced(it):
                         tf_names.add(name)
                         usage = bucket(name)
                         if not is_comment:
