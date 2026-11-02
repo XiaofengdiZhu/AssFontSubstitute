@@ -150,6 +150,7 @@ class FontPickerDialog(MessageBoxBase):
         # 复用字体库预览的文字；对话框自己不发 blib（实体由调用方传入）
 
     def _on_finished(self, _result):
+        self._closed = True
         self.all_list.cancel_pending()
         self.rec_list.cancel_pending()
         if self._reco_cancel is not None:
@@ -168,6 +169,8 @@ class FontPickerDialog(MessageBoxBase):
             [e for e in self._reco or [] if e.fingerprint in shown]))
 
     def _on_reco(self, tag, payload):
+        if self._closed:
+            return
         if tag != self._reco_tag:
             return
         self.worker.result.disconnect(self._on_reco)
@@ -195,6 +198,8 @@ class FontPickerDialog(MessageBoxBase):
     _reco_tag = None   # ctor chars 分支赋值；未提交时 _on_reco 不可达，
                        # None 兜底比对恒 False 防 AttributeError
     _reco_cancel = None  # 同上：未提交推荐任务时 _on_finished 判空跳过
+    _closed = False     # finished 置位：qfw 淡出期回执仍可能派发，
+                        # _on_reco 早退防补物化/补派渲染单（gui 审查 P2）
 
 
 def _reco_job(ctx, chars, cov_threshold, direction, cancel=None):

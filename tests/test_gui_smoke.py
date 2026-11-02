@@ -870,8 +870,8 @@ def test_retry_gate_and_settled_debounce(qapp, tmp_path, monkeypatch):
     for _ in range(3):
         lp._submit_retry("J:/f", "a.ttf")
     assert len([s for s in lp.worker.submits if s[0].startswith("retry:")]) == 3
-    for i in range(3):
-        lp._on_result(f"retry:J:/f:a{i}", None)
+    for _ in range(3):
+        lp._on_result("retry:J:/f", None)    # tag=retry:{dr}（按目录聚合）
     lp.deleteLater()
     assert refreshes == [1]          # 尾触发一轮，非 3 轮
 
@@ -974,6 +974,31 @@ def test_user_cancel_consumes_auto_update(qapp, tmp_path, monkeypatch):
     page._cancel_update()
     assert page._auto_started is True
     # 迟到的 libdetail 触发：不再补发（用户的取消不被覆盖）
+    _StubIndexWorker.calls = []
+    page._auto_update_stale()
+    assert _StubIndexWorker.calls == []
+    w.close()
+
+
+def test_stop_dir_consumes_auto_update(qapp, tmp_path, monkeypatch):
+    # gui 审查 P2：行内单停同为用户显式取消——不消费时机则 libdetail
+    # 迟到到达时自动补发，把用户刚停掉的 stale 目录拉起来
+    monkeypatch.setenv("AFS_DATA_DIR", str(tmp_path / "appdata"))
+    import ass_font_substitute.gui.pages.library_page as lp_mod
+    from ass_font_substitute.gui.app import AFSWindow
+    from ass_font_substitute.gui.settings_store import Settings
+
+    d = tmp_path / "fonts"
+    d.mkdir()
+    w = AFSWindow(Settings(tmp_path / "settings.json"))
+    page = w.library_page
+    page.vm.add_dir(str(d))
+    page.vm.dirs[0].state = "stale"
+    monkeypatch.setattr(lp_mod, "IndexWorker", _StubIndexWorker)
+    _StubIndexWorker.calls = []
+    page._launch_update([str(d)])
+    page._stop_dir(str(d))
+    assert page._auto_started is True
     _StubIndexWorker.calls = []
     page._auto_update_stale()
     assert _StubIndexWorker.calls == []

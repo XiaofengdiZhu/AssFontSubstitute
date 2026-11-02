@@ -99,6 +99,28 @@ def test_picker_close_cancels_pending_plist_renders(qapp, tmp_path):
     assert all(h.cancelled for _, h in plist)
 
 
+def test_picker_closed_ignores_late_reco_receipt(qapp, tmp_path):
+    # gui 审查 P2：qfw 淡出期回执仍可能派发——finished 后 _on_reco 早退，
+    # 不补 show 推荐区、不 _reload_all 补物化补派渲染单（否则绕过刚执行
+    # 过的 cancel_pending，废渲染单照旧塞串行队列）
+    from PySide6.QtWidgets import QWidget
+
+    from ass_font_substitute.gui.settings_store import Settings
+    from ass_font_substitute.gui.widgets.font_picker import FontPickerDialog
+
+    s = Settings(tmp_path / "s.json")
+    w = _FakeWorker()
+    ents = [_ent("fp1", "甲字体")]
+    host = QWidget()
+    host.resize(1100, 750)
+    dlg = FontPickerDialog(s, w, ents, chars=set("永宇"), parent=host)
+    dlg.finished.emit(0)
+    assert dlg._closed is True
+    dlg._on_reco(dlg._reco_tag, [ents[0]])    # 迟到回执（正常应为非空载荷）
+    assert dlg._reco is None                  # 早退：未消费
+    assert not dlg.rec_title.isVisible()
+
+
 def test_double_click_accepts_and_closes(qapp, tmp_path, monkeypatch):
     # 双击=快捷接受：置 selected 并调 accept（qfw done 走淡出动画，
     # result 非同步可断，钉 accept 调用本身；真关闭链路由实机手测覆盖）

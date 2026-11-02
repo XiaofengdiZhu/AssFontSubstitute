@@ -662,9 +662,12 @@ class LibraryPage(ScrollArea):
 
     def _stop_dir(self, path: str):
         """行内「更新中」按钮：单停该目录（排队即跳、在途中断剩余文件），
-        其余目录照常跑完。"""
+        其余目录照常跑完。同为用户显式取消：一并消费启动自动开更时机，
+        否则该目录收尾后 stale 仍在，libdetail 迟到到达时自动补发会把
+        用户刚停掉的目录拉起来（gui 审查 P2-2，与 _cancel_update 同口径）。"""
         if self._index_worker is not None:
             self._index_worker.cancel_dir(path)
+            self._auto_started = True
 
     def _on_index_done(self, d, res):
         self._index_progress.pop(d, None)
@@ -802,8 +805,11 @@ class _FailuresDialog(MessageBoxBase):
         if skipped:
             lines.append(self.tr("【跳过的重复版本】"))
             # 结构化条目 (dir, rel, face, inst)，文案在 GUI 侧拼 tr——
-            # core 拼简体串曾残留繁体界面（审查三轮 P2）
-            lines.extend(f"  {d}/{rel}#{fi}i{ix} {self.tr('重复版本')}"
+            # core 拼简体串曾残留繁体界面（审查三轮 P2）。字面量必须提
+            # 出 f-string 单独过 tr：lupdate 提取不到 f-string 内嵌的
+            # tr()，繁体界面会残留简体（gui 审查 P1）
+            dup = self.tr("重复版本")
+            lines.extend(f"  {d}/{rel}#{fi}i{ix} {dup}"
                          for d, rel, fi, ix in skipped)
         text.setPlainText("\n".join(lines))
         self.viewLayout.addWidget(self.titleLabel)

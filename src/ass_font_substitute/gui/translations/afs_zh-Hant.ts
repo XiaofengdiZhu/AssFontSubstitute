@@ -1373,6 +1373,10 @@
             <translation>【跳過的重複版本】</translation>
         </message>
         <message>
+            <source>重复版本</source>
+            <translation>重複版本</translation>
+        </message>
+        <message>
             <source>重试全部</source>
             <translation>重試全部</translation>
         </message>

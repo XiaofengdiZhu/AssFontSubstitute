@@ -92,6 +92,20 @@ def test_overrides_live_and_applied():
         assert got[src] == want, src
 
 
+def test_dynamic_composed_strings_in_ts():
+    """f-string 内嵌 tr() 的源串 lupdate 提取不到（守卫盲区：fresh 与
+    已提交 .ts 两边同样看不见，恒等不报红）——动态拼接文案的字面量必须
+    提出 f-string 单独过 tr。钉已知实例防复发（gui 审查 P1 实锤）。"""
+    import xml.etree.ElementTree as ET
+
+    from scripts import gen_translations as g
+
+    got = {m.findtext("source")
+           for m in ET.parse(g.TS).getroot().iter("message")}
+    for src in ("重复版本",):
+        assert src in got, f"动态拼接源串未过 tr/未进 .ts，繁体界面残留简体：{src!r}"
+
+
 def test_widgets_render_translated_after_install(qapp, tmp_path, monkeypatch):
     """装载后构造的控件取繁体文案（tr 在构造期求值）；卸载后新建控件
     回落简体源文案。抽设置页：语言卡标题/说明 + qfw 无关的自有文案。"""
