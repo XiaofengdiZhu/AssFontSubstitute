@@ -96,7 +96,10 @@ class LibraryIndex:
     def __init__(self, dirs: list[Path]):
         self.dirs = dirs
         self._entities: list[FontEntity] = []
-        self._skipped: list[str] = []
+        # 重复版本跳过条目 (dir, rel, face_index, inst_index) 结构化数据：
+        # 展示文案由 GUI 层拼 tr（core 拼简体串曾残留繁体界面，审查三轮
+        # P2；展示串也不再被 GUI 当数据键解析）
+        self._skipped: list[tuple[str, str, int, int]] = []
         # 装载期降级离线的目录（深层损坏等）：open_db 头级探测挡不住的
         # （坏块/截断在装载 SELECT / zlib 解压层炸出）按目录剔除，不拖垮
         # 整个聚合装载（审查二轮 P1）
@@ -135,11 +138,11 @@ class LibraryIndex:
                 best[key] = item
             elif ver is not None and (cur[4] is None or ver > cur[4]):
                 self._skipped.append(
-                    f"{self.dirs[cur[0]]}/{cur[1]}#{cur[2]}i{cur[18]} 重复版本")
+                    (str(self.dirs[cur[0]]), cur[1], cur[2], cur[18]))
                 best[key] = item
             else:
                 self._skipped.append(
-                    f"{self.dirs[item[0]]}/{item[1]}#{item[2]}i{item[18]} 重复版本")
+                    (str(self.dirs[item[0]]), item[1], item[2], item[18]))
         self._files_count = len({(item[0], item[1]) for item in raw})
         self._entities = [
             FontEntity(fp, disp, aliases, ps, ver, w, wd, it,
@@ -218,7 +221,9 @@ class LibraryIndex:
                 "fonts": len(self._entities),
                 "support_sc": sc, "support_tc": tc, "skipped": len(self._skipped)}
 
-    def skipped(self) -> list[str]:
+    def skipped(self) -> list[tuple[str, str, int, int]]:
+        """重复版本跳过条目 (dir, rel, face_index, inst_index)；展示文案
+        由 GUI 层拼。"""
         return list(self._skipped)
 
     def dir_overlaps(self) -> list[str]:
