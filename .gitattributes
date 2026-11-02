@@ -1,0 +1,4 @@
+# build_portable.bat 必须按 CRLF 解析（cmd 对 LF 行尾有已知隐患）：
+# index 里存 LF 时靠本机 core.autocrlf 才碰巧正确，autocrlf=false 环境
+# 克隆即拿到 LF 版（审查三轮 P2）
+*.bat text eol=crlf
