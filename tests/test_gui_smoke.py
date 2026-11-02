@@ -1013,7 +1013,7 @@ def test_close_event_busy_worker_hard_exits(qapp, tmp_path, monkeypatch):
 
     def slow(ctx):
         started.append(1)
-        _time.sleep(2.5)
+        _time.sleep(4)
 
     w.worker.submit("slow", slow)
     deadline = _time.time() + 5
@@ -1027,3 +1027,8 @@ def test_close_event_busy_worker_hard_exits(qapp, tmp_path, monkeypatch):
         pass
     else:
         raise AssertionError("宽限超时未走 os._exit")
+    # join 在途线程：测试即返回时任务还剩数秒，QThread 无 parent 在解释
+    # 器退出时销毁 → qFatal 硬崩（单跑/-k/xdist 分片即爆 exit 127，全量
+    # 靠顺序掩护；审查四轮 P1）。2.5→4s 同步加大超宽限裕量（wait 2000ms
+    # + 检测延迟曾只剩 ~0.4s，慢机误报 AssertionError）
+    w.worker.wait(8000)
