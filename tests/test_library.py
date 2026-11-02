@@ -396,3 +396,21 @@ def test_eff_weight_compensated_at_load(tmp_path):
     assert by["重黑體 Heavy"].eff_weight == 900  # 默认行走补偿（统一规则）
     assert by["重黑體 Heavy Black"].weight == 900
     assert by["重黑體 Heavy Black"].eff_weight == 900  # 实例行不补偿
+
+
+def test_ro_uri_shapes():
+    # 审查三轮 P1 回归：UNC 路径 as_uri 产出 file://host/share/...（带
+    # authority），SQLite 一律拒绝（invalid uri authority，审查 agent 在
+    # admin share 实测）——ro_uri 对 UNC 改拼 4 斜杠 file:////host/...；
+    # 本地盘符维持 3 斜杠、中文/空格照旧 percent-encode。真 UNC 连通
+    # 依赖网络环境，此处钉死形状
+    from pathlib import Path
+
+    from ass_font_substitute.core.fontindex.library import ro_uri
+
+    assert ro_uri(Path("D:/库 目 录/fontindex.db")) == (
+        "file:///D:/%E5%BA%93%20%E7%9B%AE%20%E5%BD%95/fontindex.db")
+    unc = Path(r"//nas/share/x.db")
+    raw = unc.resolve().as_uri()
+    assert raw.startswith("file://nas/") and not raw.startswith("file:///nas/")
+    assert ro_uri(unc) == "file:////" + raw[len("file://"):]

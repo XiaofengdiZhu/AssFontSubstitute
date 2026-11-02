@@ -10,6 +10,7 @@ from ass_font_substitute.core.assparse.extract import extract_usages
 from ass_font_substitute.core.assparse.rewrite import rewrite_file
 from ass_font_substitute.core.coverage.matcher import classify_usage
 from ass_font_substitute.core.fontindex.library import LibraryIndex
+from ass_font_substitute.core.fontindex.library import ro_uri
 from ass_font_substitute.core.fontindex.store import open_db
 from ass_font_substitute.core.fontindex.store import scan_dir
 from ass_font_substitute.core.fontindex.store import update_index
@@ -47,7 +48,7 @@ def probe_dir_status(dir_path: str) -> DirStatus:
         return st
     conn = None
     try:
-        conn = sqlite3.connect(dbf.resolve().as_uri() + "?mode=ro", uri=True)
+        conn = sqlite3.connect(ro_uri(dbf) + "?mode=ro", uri=True)
         known = {r[0]: (r[1], r[2]) for r in
                  conn.execute("SELECT rel_path, size, mtime_ns FROM files")}
         bad = {r[0]: (r[1], r[2]) for r in
@@ -150,7 +151,7 @@ def read_failures(ctx) -> dict:
         if not dbf.exists():
             continue
         try:
-            conn = sqlite3.connect(dbf.resolve().as_uri() + "?mode=ro", uri=True)
+            conn = sqlite3.connect(ro_uri(dbf) + "?mode=ro", uri=True)
             rows = conn.execute("SELECT rel_path, reason FROM bad").fetchall()
             conn.close()
         except sqlite3.Error:

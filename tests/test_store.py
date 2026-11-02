@@ -664,3 +664,26 @@ def test_serial_progress_reaches_total_on_skip(tmp_path, monkeypatch):
         conn.execute("SELECT rel_path, size FROM files"))
     rows = dict(conn.execute("SELECT rel_path, size FROM files"))
     assert set(rows) == {"f0.ttf", "f2.ttf"}    # f1 被删不留行
+
+
+def test_scan_dir_skips_permission_denied_dir(tmp_path, monkeypatch):
+    # 审查三轮 P2 回归：权限锁定子目录（盘根 System Volume Information、
+    # ACL 锁定目录，实测 WinError 5）曾炸整次索引——现与 junction 守卫
+    # 同口径跳过该子树。真权限目录构造依赖账户环境，注入 scandir 异常
+    import os
+
+    from ass_font_substitute.core.fontindex.store import scan_dir
+
+    d = tmp_path / "fonts"
+    (d / "locked").mkdir(parents=True)
+    build_font(d / "a.ttf", chars="永", family="A體")
+    real_scandir = os.scandir
+
+    def fake_scandir(path):
+        if str(path).endswith("locked"):
+            raise PermissionError(5, "拒绝访问。")
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", fake_scandir)
+    out = scan_dir(d)
+    assert [p.name for p in out] == ["a.ttf"]

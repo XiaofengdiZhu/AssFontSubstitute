@@ -21,6 +21,17 @@ def normalize_name(name: str) -> str:
     return name.strip().lstrip("@").casefold()
 
 
+def ro_uri(path: Path) -> str:
+    """SQLite 只读 URI。UNC 路径 as_uri 产出带 authority 的
+    file://host/share/...，SQLite 一律拒绝（invalid uri authority，
+    审查三轮 P1）——改拼 4 斜杠 file:////host/share/...（实测可读）。
+    保留字符/中文由 as_uri 统一 percent-encode，不必手工 quote。"""
+    s = path.resolve().as_uri()
+    if s.startswith("file://") and not s.startswith("file:///"):
+        s = "file:////" + s[len("file://"):]
+    return s
+
+
 def load_name_records(dir_path: str, rel_path: str, face_index: int
                       ) -> list[tuple[int, int, int, str]] | None:
     """按需读单 face 命名卡原始记录 (nameID, platformID, langID, 文本)
@@ -31,9 +42,8 @@ def load_name_records(dir_path: str, rel_path: str, face_index: int
     （调用方走别名平铺兜底）。"""
     p = Path(dir_path) / DB_NAME
     try:
-        # as_uri 与 gui/jobs.py 只读打开同口径（手工 quote 对 UNC/保留
-        # 字符的转义规则与 as_uri 不一致，审查二轮 P2）
-        conn = sqlite3.connect(p.resolve().as_uri() + "?mode=ro",
+        # ro_uri 与 gui/jobs.py 只读打开同口径（UNC 4 斜杠，审查三轮 P1）
+        conn = sqlite3.connect(ro_uri(p) + "?mode=ro",
                                uri=True, timeout=5)
         try:
             row = conn.execute(

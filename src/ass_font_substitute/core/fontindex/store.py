@@ -213,7 +213,15 @@ def scan_dir(root: Path) -> list[Path]:
     stack = [root]
     while stack:
         d = stack.pop()
-        with os.scandir(d) as it:
+        try:
+            it = os.scandir(d)
+        except OSError:
+            # 权限锁定目录（盘根的 System Volume Information、ACL 锁定
+            # 目录等，审查三轮 P2 实测 WinError 5）跳过整个子树，与下面
+            # junction 守卫同口径：单个不可达目录不炸整次索引；文件级
+            # stat 早有 except OSError: continue 先例
+            continue
+        with it:
             for e in it:
                 if e.is_dir(follow_symlinks=False):
                     # junction（Windows reparse point）is_symlink()=False，
