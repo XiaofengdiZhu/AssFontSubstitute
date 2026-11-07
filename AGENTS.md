@@ -68,4 +68,5 @@ scripts\build_portable.bat                        # 打包（cmd 下跑，需 VS
 ## 依赖备注
 
 - `light_ass`：modifier 非标准 list；`ParsedLine` 索引不是惰性初始化；`\t(...)` 内嵌 `\fn` 需下钻一层。动 `assparse/` 前读现有实现与 `tests/test_extract.py`、`tests/test_rewrite*.py`。
-- 许可证 GPL-3.0（受 QFluentWidgets 约束）。
+- 许可证：整体 GPL-3.0-or-later（受 QFluentWidgets 约束）；`core/` 例外为 MIT（`core/LICENSE`），供他人抄源码。
+  方向单向：core 可被 gui 使用，GPL 代码（gui、GPL 参考项目）不得流入 core；core 新增依赖须为宽松协议。

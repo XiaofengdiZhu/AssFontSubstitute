@@ -76,4 +76,6 @@ scripts\build_portable.bat
 
 ## 许可证
 
-本项目基于 [GPL-3.0](LICENSE.md) 发布——因界面使用 [QFluentWidgets](https://github.com/zhiyiYo/PyQt-Fluent-Widgets)（GPL-3.0）而有此要求。
+本项目整体基于 [GPL-3.0-or-later](LICENSE.md) 发布——因界面使用 [QFluentWidgets](https://github.com/zhiyiYo/PyQt-Fluent-Widgets)（GPL-3.0）而有此要求。
+
+例外：纯逻辑层 [`src/ass_font_substitute/core/`](src/ass_font_substitute/core/)（ASS 解析改写、字体索引、覆盖率匹配、相似度搜索等，不依赖 Qt）另以 [MIT](src/ass_font_substitute/core/LICENSE) 授权，欢迎直接取用源码。该目录的依赖均为宽松协议（fontTools、light_ass、numpy、freetype-py、OpenCC）；单独分发时请留意 freetype-py 附带的 FreeType 库按 FreeType License 需在文档中注明。

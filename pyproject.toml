@@ -7,7 +7,8 @@ authors = [
     { name = "销锋镝铸", email = "523084467@qq.com" }
 ]
 requires-python = ">=3.12"
-license = { file = "LICENSE.md" }
+license = "GPL-3.0-or-later AND MIT"
+license-files = ["LICENSE.md", "src/ass_font_substitute/core/LICENSE"]
 dependencies = [
     "fonttools>=4.53",
     "freetype-py>=2.4",
